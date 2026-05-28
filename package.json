@@ -1,0 +1,21 @@
+{
+  "name": "daily-pattern",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Automated daily generative-art screensaver videos rendered headlessly and uploaded to YouTube.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "render": "node src/render.js",
+    "render:test": "node src/render.js --duration=10",
+    "upload": "node src/upload.js",
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "googleapis": "^144.0.0",
+    "puppeteer": "^23.6.0"
+  }
+}

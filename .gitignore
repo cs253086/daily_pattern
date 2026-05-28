@@ -1,0 +1,11 @@
+node_modules/
+*.mp4
+*.jpg
+*.jpeg
+*.png
+frames/
+output/
+.env
+.env.local
+*.log
+.DS_Store
