@@ -153,9 +153,12 @@ your secrets are in place but before committing to a full 1-hour public upload.
   YouTube currently favors vertical/square video for the Shorts feed. If you want
   guaranteed Shorts placement, we can add a vertical (1080×1920) crop/pad pass to
   `render.js`.
-- **Render budget.** 1 hour at 24fps = 86,400 frames. Each frame is one Puppeteer
-  round-trip. Verify a full-length render completes inside the job timeout before
-  relying on the daily cron; drop `fps` (15 is fine for slow ambient content) or
-  `duration` if needed.
+- **Render budget.** 1 hour at 24fps = 86,400 frames, one Puppeteer round-trip
+  each. Measured throughput for the Bloom engine at 1080p is ~18–20 captured
+  fps, so a full 1-hour render takes roughly **60–80 min at 24fps** (~50 min at
+  15fps) — well inside the 330-minute job timeout and the 6-hour hard limit. The
+  per-frame JPEG read is the bottleneck; if you add a heavier engine, re-check
+  with a timed `dry_run` and drop `fps`/`duration` if needed (15fps is fine for
+  slow ambient content).
 - **Public-repo minutes are unlimited**; private repos get 2,000 min/month. Keep
   the repo public for the free unlimited tier.
