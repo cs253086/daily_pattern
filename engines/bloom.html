@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Additive Bloom — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Headless, deterministic port of screensaver.html ("Additive Bloom") that
+// implements the engine contract used by src/render.js:
+//
+//   URL params : seed, palette, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+//
+// The visual algorithm (parametric curves, polygon stamps, additive 'lighter'
+// blending, accumulate-then-fade cycle) is preserved from the interactive
+// version. Differences required for deterministic headless capture:
+//   * Math.random replaced by a seeded Mulberry32 PRNG (same seed => same video).
+//   * No requestAnimationFrame; frames render only when advanceFrame() is called.
+//   * Canvas is sized to the width/height params (devicePixelRatio is ignored).
+//   * No UI / input handling.
+//   * Motion is expressed in per-SECOND rates and subdivided per frame, so the
+//     wall-clock pacing is identical at any fps (15 looks the same speed as 30,
+//     just with fewer captured frames).
+(() => {
+  const params = new URLSearchParams(location.search);
+  const numParam = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+  const intParam = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+
+  const W = intParam('width', 1920);
+  const H = intParam('height', 1080);
+  const FPS = Math.max(1, intParam('fps', 24));
+  const DURATION = Math.max(1, numParam('duration', 3600)); // seconds
+  const SEED = intParam('seed', 1);
+  const SPEED = numParam('speed', 1);
+  const DENSITY = numParam('density', 1);
+  const CYCLE_SEC = numParam('cycleSec', 120);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // ---- Seeded PRNG (Mulberry32) --------------------------------------------
+  let rngState = (SEED >>> 0) || 1;
+  function rng() {
+    rngState |= 0; rngState = (rngState + 0x6D2B79F5) | 0;
+    let t = Math.imul(rngState ^ (rngState >>> 15), 1 | rngState);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+
+  // ---- Palettes (HSL triples) ----------------------------------------------
+  const paletteNames = ['neon', 'ember', 'ocean', 'forest', 'aurora', 'mono', 'sunset'];
+  const palettes = {
+    neon:    [[285, 85, 60], [180, 90, 58], [325, 85, 62], [220, 85, 62]],
+    ember:   [[18, 92, 56],  [355, 85, 56], [42, 95, 60],  [330, 70, 50]],
+    ocean:   [[200, 85, 55], [220, 80, 60], [170, 75, 55], [240, 60, 60]],
+    forest:  [[110, 65, 50], [150, 70, 50], [70, 80, 55],  [40, 75, 55]],
+    aurora:  [[155, 80, 55], [195, 85, 60], [275, 75, 60], [115, 70, 55]],
+    mono:    [[0, 0, 90],    [0, 0, 70],    [0, 0, 50],    [0, 0, 80]],
+    sunset:  [[15, 90, 60],  [340, 80, 60], [285, 70, 55], [45, 90, 60]]
+  };
+
+  // palette param accepts a name ("neon") or an index (0..6). Default: derived
+  // from the seed so each day's seed picks a palette deterministically.
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw !== null && raw !== '') {
+      if (palettes[raw]) return raw;
+      const idx = parseInt(raw, 10);
+      if (Number.isFinite(idx)) return paletteNames[((idx % 7) + 7) % 7];
+    }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PALETTE = resolvePalette();
+
+  const minDim = Math.min(W, H);
+
+  // ---- Agents ---------------------------------------------------------------
+  // Rates below are per SECOND; advanceFrame() applies dt = 1/FPS each frame.
+  function makeAgents() {
+    const n = randInt(5, 8);
+    const types = ['lissajous', 'rose', 'spiro', 'orbit', 'lissajous', 'rose'];
+    const agents = [];
+    const sharedSides = randInt(3, 9); // family resemblance
+    for (let i = 0; i < n; i++) {
+      const type = types[randInt(0, types.length - 1)];
+      agents.push({
+        type,
+        a: randInt(1, 7),
+        b: randInt(1, 7),
+        k: randInt(2, 7),
+        phase: rng() * Math.PI * 2,
+        sides: rng() < 0.6 ? sharedSides : randInt(3, 9),
+        rot: rng() * Math.PI * 2,
+        rotRate: rand(-0.35, 0.35),                 // rad / second
+        stampSize: rand(0.006, 0.018) * minDim,     // resolution-aware
+        pathScale: rand(0.18, 0.36),
+        driftRate: rand(-0.02, 0.02),               // pathScale units / second
+        tRate: rand(0.3, 0.72),                     // t units / second
+        hueShift: i * 25 + rand(-10, 10),
+        t: rng() * Math.PI * 2,
+        colorIdx: i % 4
+      });
+    }
+    return agents;
+  }
+
+  function path(agent) {
+    const t = agent.t;
+    const s = minDim * agent.pathScale * (1 + Math.sin(t * 0.07) * 0.08);
+    let x, y;
+    switch (agent.type) {
+      case 'lissajous':
+        x = Math.sin(agent.a * t + agent.phase) * s;
+        y = Math.sin(agent.b * t) * s;
+        break;
+      case 'rose': {
+        const r = Math.cos(agent.k * t) * s;
+        x = r * Math.cos(t);
+        y = r * Math.sin(t);
+        break;
+      }
+      case 'spiro': {
+        const R = s, rr = s * 0.32;
+        const ratio = (R - rr) / rr;
+        x = (R - rr) * Math.cos(t) + rr * Math.cos(ratio * t + agent.phase);
+        y = (R - rr) * Math.sin(t) - rr * Math.sin(ratio * t + agent.phase);
+        break;
+      }
+      case 'orbit':
+        x = Math.cos(agent.a * t + agent.phase) * s;
+        y = Math.sin(agent.b * t + agent.phase) * s * 0.75;
+        break;
+    }
+    return [W / 2 + x, H / 2 + y];
+  }
+
+  function drawPolygon(x, y, size, sides, rot, hsl, alpha) {
+    ctx.beginPath();
+    for (let i = 0; i <= sides; i++) {
+      const a = rot + (i / sides) * Math.PI * 2;
+      const px = x + Math.cos(a) * size;
+      const py = y + Math.sin(a) * size;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.strokeStyle = `hsla(${hsl[0]}, ${hsl[1]}%, ${hsl[2]}%, ${alpha})`;
+    ctx.lineWidth = Math.max(1, minDim / 1080);
+    ctx.stroke();
+  }
+
+  function fullFade(amount) {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = `rgba(0, 0, 0, ${amount})`;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'lighter';
+  }
+
+  // ---- Timing ---------------------------------------------------------------
+  const dt = 1 / FPS;                                   // seconds per frame
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  // Keep stamp spacing along each curve constant regardless of fps: aim for a
+  // fixed number of stamps per second, then split across this frame.
+  const STAMPS_PER_SEC = 130;
+  const subSteps = Math.max(1, Math.round((STAMPS_PER_SEC * DENSITY) / FPS));
+
+  let agents = makeAgents();
+  let cycleFrame = 0;
+
+  // Initialise to black and signal readiness.
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = 'lighter';
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    const progress = cycleFrame / cycleFrames;
+
+    // Fade out toward the end of a cycle.
+    if (progress > 0.88) {
+      const fade = (progress - 0.88) / 0.12;
+      fullFade(0.015 + fade * fade * 0.08);
+    }
+
+    // Restart the cycle: hard clear and regenerate agents.
+    if (cycleFrame >= cycleFrames) {
+      cycleFrame = 0;
+      fullFade(1);
+      agents = makeAgents();
+    }
+
+    const palette = palettes[PALETTE];
+    ctx.globalCompositeOperation = 'lighter';
+
+    for (const agent of agents) {
+      for (let step = 0; step < subSteps; step++) {
+        // Total per-frame advance is rate * dt, subdivided across subSteps so
+        // the additive trail stays continuous at any fps/density.
+        agent.t += (agent.tRate * SPEED * dt) / subSteps;
+        agent.rot += (agent.rotRate * SPEED * dt) / subSteps;
+        agent.pathScale += (agent.driftRate * SPEED * dt) / subSteps;
+        if (agent.pathScale < 0.12) agent.driftRate = Math.abs(agent.driftRate);
+        if (agent.pathScale > 0.4)  agent.driftRate = -Math.abs(agent.driftRate);
+
+        const [x, y] = path(agent);
+        const base = palette[agent.colorIdx % palette.length];
+        const huePulse = Math.sin(agent.t * 0.25) * 18;
+        const sizePulse = 1 + Math.sin(agent.t * 0.4 + agent.phase) * 0.25;
+
+        drawPolygon(
+          x, y,
+          agent.stampSize * sizePulse,
+          agent.sides,
+          agent.rot,
+          [base[0] + huePulse + agent.hueShift * 0.2, base[1], base[2]],
+          0.085
+        );
+      }
+    }
+  }
+
+  window.advanceFrame = function () {
+    renderFrame();
+    window.currentFrame++;
+  };
+  window.advanceFrames = function (n) {
+    for (let i = 0; i < n; i++) window.advanceFrame();
+  };
+
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
