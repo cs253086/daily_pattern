@@ -1,0 +1,120 @@
+// Templated metadata generation for the long video and the Short.
+// Deterministic: the same seed produces the same title/description so a run is
+// reproducible. No network calls — purely local string templating.
+
+const MOODS = [
+  'Hypnotic', 'Ambient', 'Mesmerizing', 'Calming', 'Dreamy',
+  'Meditative', 'Soothing', 'Ethereal', 'Tranquil', 'Cosmic',
+];
+
+const SUBJECTS = [
+  'Generative Art', 'Generative Patterns', 'Flowing Light',
+  'Abstract Motion', 'Living Geometry', 'Particle Bloom',
+];
+
+const USE_CASES = [
+  'for Focus & Study', 'for Sleep & Relaxation', 'for Deep Work',
+  'for Meditation', 'to Unwind', 'for Calm & Concentration',
+];
+
+const BASE_TAGS = [
+  'generative art', 'screensaver', 'ambient', 'relaxing', 'study music background',
+  'sleep', 'meditation', 'abstract', 'visuals', 'satisfying', 'procedural art',
+  'creative coding', 'background video', 'chill', 'focus',
+];
+
+// Small deterministic hash so we can pick template variants from a seed.
+function hashSeed(seed) {
+  let h = 2166136261 >>> 0;
+  const s = String(seed);
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h >>> 0;
+}
+
+function pick(arr, n) {
+  return arr[n % arr.length];
+}
+
+function formatDate(d = new Date()) {
+  return d.toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+}
+
+// Build metadata for both outputs.
+//   info: { seed, date?, durationSec?, engineName?, palette? }
+export function buildMetadata(info = {}) {
+  const seed = info.seed ?? '0';
+  const date = info.date ?? formatDate();
+  const h = hashSeed(seed);
+
+  const mood = pick(MOODS, h);
+  const subject = pick(SUBJECTS, h >> 3);
+  const useCase = pick(USE_CASES, h >> 6);
+
+  const longTitle = clampTitle(`${mood} ${subject} ${useCase} • 1 Hour Screensaver [${date}]`);
+
+  const description = [
+    `${mood.toLowerCase()} ${subject.toLowerCase()} — a one-hour generative screensaver, freshly rendered on ${date}.`,
+    '',
+    'Every day a new pattern is generated and rendered automatically. Same seed, same video — fully deterministic generative art.',
+    '',
+    'Perfect as a background for studying, working, relaxing, meditating, or falling asleep.',
+    '',
+    `Seed: ${seed}`,
+    info.engineName ? `Engine: ${info.engineName}` : '',
+    '',
+    '#generativeart #screensaver #ambient #relaxing #studywithme',
+  ].filter((line) => line !== undefined).join('\n');
+
+  const tags = dedupe([
+    ...BASE_TAGS,
+    mood.toLowerCase(),
+    subject.toLowerCase(),
+    'generative screensaver',
+    '1 hour',
+  ]).slice(0, 30);
+
+  // YouTube Shorts: keep it short, lead with the hook, include #Shorts.
+  const shortTitle = clampTitle(`${mood} ${subject} #Shorts`);
+  const shortDescription = [
+    `A 30-second cut of today's ${subject.toLowerCase()}.`,
+    'New generative art every day — full 1-hour version on the channel.',
+    '',
+    `Seed: ${seed}`,
+    '#Shorts #generativeart #satisfying #ambient #relaxing',
+  ].join('\n');
+
+  const shortTags = dedupe(['shorts', ...tags]).slice(0, 30);
+
+  return {
+    date,
+    seed,
+    long: {
+      title: longTitle,
+      description,
+      tags,
+      categoryId: '24', // Entertainment
+    },
+    short: {
+      title: shortTitle,
+      description: shortDescription,
+      tags: shortTags,
+      categoryId: '24',
+    },
+  };
+}
+
+// YouTube titles must be <= 100 characters.
+function clampTitle(t) {
+  return t.length <= 100 ? t : t.slice(0, 99).trimEnd() + '…';
+}
+
+function dedupe(arr) {
+  return [...new Set(arr)];
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  console.log(JSON.stringify(buildMetadata({ seed: process.argv[2] || '20260528' }), null, 2));
+}
