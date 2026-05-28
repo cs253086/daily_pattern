@@ -1,0 +1,82 @@
+name: Daily Screensaver
+
+on:
+  schedule:
+    # 09:00 UTC every day. GitHub cron can be delayed under load; this is fine
+    # for a daily upload. Adjust as you like (https://crontab.guru).
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Render duration in seconds'
+        required: false
+        default: '3600'
+      dry_run:
+        description: 'Render only, do not upload (true/false)'
+        required: false
+        default: 'false'
+      seed:
+        description: 'Override seed (blank = derive from date)'
+        required: false
+        default: ''
+
+# Never run two daily renders at once.
+concurrency:
+  group: daily-screensaver
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  render-and-upload:
+    runs-on: ubuntu-latest
+    # Stay well under the 6-hour hard limit on a free runner.
+    timeout-minutes: 330
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Ensure ffmpeg is available
+        run: |
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y ffmpeg
+          fi
+          ffmpeg -version | head -1
+
+      - name: Cache Puppeteer Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/puppeteer
+          key: puppeteer-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Render and upload
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          YT_PRIVACY: ${{ secrets.YT_PRIVACY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DURATION: ${{ github.event.inputs.duration || '3600' }}
+          SEED: ${{ github.event.inputs.seed || '' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '' }}
+        run: node src/index.js
+
+      - name: Upload render artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-debug
+          path: |
+            output/*.mp4
+          if-no-files-found: ignore
+          retention-days: 3
