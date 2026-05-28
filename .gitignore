@@ -9,3 +9,6 @@ output/
 .env.local
 *.log
 .DS_Store
+
+# AI-generated engines are produced per-run on the ephemeral runner
+engines/auto/*.html

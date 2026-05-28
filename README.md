@@ -14,19 +14,37 @@ video** and a **30-second Short** cut from it.
 ## Status
 
 - **Phase 1 (done):** end-to-end render → encode → upload with the Bloom engine.
-- **Phase 2 (planned):** `src/generate.js` + `src/validate.js` — Gemini writes a
-  fresh engine each day; falls back to Bloom if it fails the quality gate.
-- **Phase 3 (planned):** prompt tuning after real uploads.
+- **Phase 2 (done):** `src/generate.js` + `src/validate.js` — Gemini writes a
+  fresh engine each day; it passes through a quality gate and falls back to Bloom
+  if generation or validation fails.
+- **Phase 3 (planned):** prompt tuning after a week of real uploads.
 
 ## How it works
 
 ```
-src/index.js      orchestrator: select engine → render → metadata → upload
+src/index.js      orchestrator: choose engine → render → metadata → upload
+src/generate.js   Phase 2: asks Gemini to write today's engine HTML
+src/validate.js   Phase 2: quality gate (renders test frames, checks the image)
 src/render.js     Puppeteer + ffmpeg: engine HTML → output/long.mp4 + output/short.mp4
 src/metadata.js   deterministic templated titles / descriptions / tags
 src/upload.js     YouTube Data API v3 resumable upload
-engines/bloom.html  the fallback engine (a.k.a. screensaver.html)
+engines/bloom.html  the fallback engine (headless port of screensaver.html)
+engines/auto/       per-day Gemini-generated engines (git-ignored, ephemeral)
 ```
+
+### Daily engine selection
+
+`index.js` chooses the engine like this:
+
+1. an explicit `--engine=path` always wins;
+2. else, if `GEMINI_API_KEY` is set (and generation isn't disabled), it asks
+   Gemini to write `engines/auto/YYYY-MM-DD.html`, then runs it through
+   `validate.js`. If the engine loads, honours the contract, and renders a
+   non-blank / non-blown-out / actually-moving image, it's used;
+3. otherwise (no key, generation error, or a failed quality gate) it falls back
+   to the **Bloom** engine. The pipeline therefore always produces a video.
+
+Disable generation for a run with `--no-generate` or `GENERATE=0`.
 
 ### Engine contract
 
@@ -79,6 +97,7 @@ CLI flags take priority over env vars, which take priority over defaults.
 | `--shortStart=` | `SHORT_START` | `2100` | Short cut start (sec, 35:00) |
 | `--shortDuration=` | `SHORT_DURATION` | `30` | Short length (sec) |
 | `--no-upload` | `DRY_RUN=1` | off | Render only, skip upload |
+| `--no-generate` | `GENERATE=0` | off | Skip Gemini generation, use Bloom |
 
 ## One-time YouTube OAuth setup
 
@@ -125,6 +144,11 @@ This is the **only** manual step. You need three secrets:
    - Optional: `YT_PRIVACY` (`public` | `unlisted` | `private`, default
      `public`). Set it to `unlisted` for the first few runs if you want to eyeball
      the uploads before they go public.
+   - Optional (Phase 2): `GEMINI_API_KEY` — get a free key at
+     <https://aistudio.google.com/apikey>. With it set, each day's engine is
+     written by Gemini and falls back to Bloom on any failure. Without it, the
+     pipeline always uses Bloom. Override the model with `GEMINI_MODEL` (default
+     `gemini-2.0-flash`).
 
 ### Local `.env` (optional)
 
@@ -135,6 +159,7 @@ YT_CLIENT_ID=...
 YT_CLIENT_SECRET=...
 YT_REFRESH_TOKEN=...
 YT_PRIVACY=unlisted
+GEMINI_API_KEY=...        # optional; omit to always use Bloom
 ```
 
 ## Running in CI

@@ -117,6 +117,8 @@ function spawnFfmpegPipe(cfg, outPath) {
   const args = [
     '-y',
     '-f', 'image2pipe',
+    '-vcodec', 'mjpeg', // declare the piped input as a stream of JPEGs so ffmpeg
+                        // doesn't rely on probing (which fails for small frames)
     '-framerate', String(cfg.fps),
     '-i', 'pipe:0',
     '-c:v', 'libx264',
@@ -134,6 +136,7 @@ function spawnFfmpegPipe(cfg, outPath) {
   const done = new Promise((resolve, reject) => {
     proc.on('error', reject);
     proc.on('close', (code) => {
+      if (process.env.DEBUG_FFMPEG) console.error(`\n[ffmpeg] closed code=${code}\n${stderr.slice(-3000)}`);
       if (code === 0) resolve();
       else reject(new Error(`ffmpeg (encode) exited ${code}\n${stderr.slice(-4000)}`));
     });

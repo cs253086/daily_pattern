@@ -17,6 +17,8 @@ import 'dotenv/config';
 import { render, resolveConfig } from './render.js';
 import { buildMetadata } from './metadata.js';
 import { uploadAll } from './upload.js';
+import { generateEngine } from './generate.js';
+import { validateEngine } from './validate.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -34,34 +36,63 @@ function parseArgs(argv) {
 
 const BLOOM = path.join(repoRoot, 'engines', 'bloom.html');
 
-// Pick which engine to render. Phase 2 hook: a generated engine path can be
-// passed via --engine; if it is missing we fall back to Bloom.
-function selectEngine(cli) {
-  const requested = cli.engine
-    ? (path.isAbsolute(cli.engine) ? cli.engine : path.resolve(repoRoot, cli.engine))
-    : BLOOM;
+function bloomOr(reason) {
+  if (!existsSync(BLOOM)) throw new Error(`Bloom fallback missing at ${BLOOM}`);
+  if (reason) console.warn(`[index] ${reason} — falling back to Bloom.`);
+  return { engine: BLOOM, source: 'bloom' };
+}
 
-  if (existsSync(requested)) return { engine: requested, fellBack: false };
-
-  if (requested !== BLOOM && existsSync(BLOOM)) {
-    console.warn(`[index] requested engine not found (${requested}); falling back to Bloom.`);
-    return { engine: BLOOM, fellBack: true };
+// Decide which engine to render:
+//   1. explicit --engine wins (with Bloom fallback if the path is missing);
+//   2. otherwise, if GEMINI_API_KEY is set and generation isn't disabled, ask
+//      Gemini for today's engine and run it through the quality gate — on any
+//      failure, fall back to Bloom;
+//   3. otherwise, Bloom.
+async function chooseEngine(cli) {
+  if (cli.engine) {
+    const requested = path.isAbsolute(cli.engine) ? cli.engine : path.resolve(repoRoot, cli.engine);
+    if (existsSync(requested)) return { engine: requested, source: 'explicit' };
+    return bloomOr(`requested engine not found (${requested})`);
   }
-  throw new Error(`Engine not found: ${requested}${existsSync(BLOOM) ? '' : ' (and Bloom fallback is missing too)'}`);
+
+  const generateEnabled = !!process.env.GEMINI_API_KEY
+    && cli['no-generate'] !== true
+    && process.env.GENERATE !== '0';
+
+  if (!generateEnabled) {
+    return bloomOr(process.env.GEMINI_API_KEY ? null : 'no GEMINI_API_KEY');
+  }
+
+  try {
+    const seed = cli.seed ?? (process.env.SEED || undefined);
+    const gen = await generateEngine(seed ? { seed } : {});
+    console.log('[index] validating generated engine…');
+    // Validate at the real render seed when known, so the gate reflects the
+    // image we'll actually upload.
+    const result = await validateEngine(gen.path, seed ? { seed: Number(seed) } : {});
+    if (result.ok) {
+      console.log(`[index] generated engine passed the quality gate (peakStd=${result.stats.peakStd.toFixed(1)}, motion=${result.stats.motion.toFixed(1)}).`);
+      return { engine: gen.path, source: 'gemini' };
+    }
+    return bloomOr(`generated engine failed validation: ${result.reasons.join('; ')}`);
+  } catch (e) {
+    return bloomOr(`generation error: ${e.message}`);
+  }
 }
 
 async function main() {
   const cli = parseArgs(process.argv.slice(2));
   const dryRun = cli['no-upload'] === true || process.env.DRY_RUN === '1';
 
-  const { engine } = selectEngine(cli);
+  console.log(`[index] === daily run ${new Date().toISOString()} ===`);
+
+  const { engine, source } = await chooseEngine(cli);
   const engineName = path.basename(engine, '.html');
 
   // Resolve config once so render + metadata agree on seed/duration.
   const cfg = resolveConfig({ ...cli, engine });
 
-  console.log(`[index] === daily run ${new Date().toISOString()} ===`);
-  console.log(`[index] engine=${engineName} seed=${cfg.seed} duration=${cfg.duration}s upload=${!dryRun}`);
+  console.log(`[index] engine=${engineName} (${source}) seed=${cfg.seed} duration=${cfg.duration}s upload=${!dryRun}`);
 
   const renderResult = await render({ ...cli, engine });
 
