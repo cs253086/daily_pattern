@@ -82,8 +82,28 @@ export async function uploadVideo(auth, opts) {
   return res.data;
 }
 
-// Upload the long video then the short, using a metadata object.
-export async function uploadAll({ longFile, shortFile, metadata, env = process.env }) {
+// Attach a custom thumbnail to an uploaded video. Requires the channel to be
+// verified for custom thumbnails (otherwise YouTube returns 403 — non-fatal,
+// we just log and continue).
+export async function setThumbnail(auth, videoId, file) {
+  const youtube = google.youtube({ version: 'v3', auth });
+  try {
+    await youtube.thumbnails.set({
+      videoId,
+      media: { mimeType: 'image/jpeg', body: createReadStream(file) },
+    });
+    console.log(`[upload] thumbnail set on ${videoId}`);
+    return true;
+  } catch (e) {
+    const reason = (e.errors && e.errors[0] && e.errors[0].reason) || e.code || e.message;
+    console.warn(`[upload] thumbnail set FAILED for ${videoId}: ${reason} (continuing)`);
+    return false;
+  }
+}
+
+// Upload the long video then the short, using a metadata object. Optionally
+// attach a custom thumbnail to the long video (Shorts ignore custom thumbs).
+export async function uploadAll({ longFile, shortFile, thumbnailFile, metadata, env = process.env }) {
   const auth = getOAuthClient(env);
   const results = {};
 
@@ -91,6 +111,10 @@ export async function uploadAll({ longFile, shortFile, metadata, env = process.e
     file: longFile,
     ...metadata.long,
   });
+
+  if (thumbnailFile) {
+    await setThumbnail(auth, results.long.id, thumbnailFile);
+  }
 
   if (shortFile) {
     results.short = await uploadVideo(auth, {

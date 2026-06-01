@@ -11,6 +11,7 @@
 
 import path from 'node:path';
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import 'dotenv/config';
 
@@ -63,18 +64,34 @@ async function chooseEngine(cli) {
     return bloomOr(process.env.GEMINI_API_KEY ? null : 'no GEMINI_API_KEY');
   }
 
+  const seed = cli.seed ?? (process.env.SEED || undefined);
+  const validateOpts = seed ? { seed: Number(seed) } : {};
+  const genOpts = seed ? { seed } : {};
+
   try {
-    const seed = cli.seed ?? (process.env.SEED || undefined);
-    const gen = await generateEngine(seed ? { seed } : {});
+    const gen = await generateEngine(genOpts);
     console.log('[index] validating generated engine…');
-    // Validate at the real render seed when known, so the gate reflects the
-    // image we'll actually upload.
-    const result = await validateEngine(gen.path, seed ? { seed: Number(seed) } : {});
+    let result = await validateEngine(gen.path, validateOpts);
     if (result.ok) {
       console.log(`[index] generated engine passed the quality gate (peakStd=${result.stats.peakStd.toFixed(1)}, motion=${result.stats.motion.toFixed(1)}).`);
       return { engine: gen.path, source: 'gemini' };
     }
-    return bloomOr(`generated engine failed validation: ${result.reasons.join('; ')}`);
+
+    // One repair attempt: hand the validator's reasons + the previous file
+    // back to Gemini and ask for a fix.
+    console.warn(`[index] first attempt failed: ${result.reasons.join('; ')}`);
+    console.log('[index] asking Gemini to repair…');
+    const previousHtml = await readFile(gen.path, 'utf8');
+    const gen2 = await generateEngine({
+      ...genOpts,
+      repair: { previousHtml, reasons: result.reasons },
+    });
+    result = await validateEngine(gen2.path, validateOpts);
+    if (result.ok) {
+      console.log(`[index] repaired engine passed the quality gate (peakStd=${result.stats.peakStd.toFixed(1)}, motion=${result.stats.motion.toFixed(1)}).`);
+      return { engine: gen2.path, source: 'gemini-repaired' };
+    }
+    return bloomOr(`generated engine failed validation after repair: ${result.reasons.join('; ')}`);
   } catch (e) {
     return bloomOr(`generation error: ${e.message}`);
   }
@@ -108,12 +125,14 @@ async function main() {
     console.log('[index] DRY RUN — skipping upload. Outputs:');
     console.log(`        long : ${renderResult.long}`);
     console.log(`        short: ${renderResult.short}`);
+    console.log(`        thumb: ${renderResult.thumbnail}`);
     return;
   }
 
   const uploaded = await uploadAll({
     longFile: renderResult.long,
     shortFile: renderResult.short,
+    thumbnailFile: renderResult.thumbnail,
     metadata,
   });
 

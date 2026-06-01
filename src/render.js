@@ -69,6 +69,17 @@ export function resolveConfig(cli = {}) {
     // short cut: a 30s clip taken from a dense section (default 35:00)
     shortStart: pick(cli, 'shortStart', 'SHORT_START', 2100, num), // seconds
     shortDuration: pick(cli, 'shortDuration', 'SHORT_DURATION', 30, num),
+    // short aspect ratio: 'fill' = scale-and-crop to vertical 9:16 (best for
+    // centered generative art); 'pad' = letterbox the source inside 9:16;
+    // 'none' = keep the source aspect (no crop). YouTube Shorts strongly
+    // prefer 9:16, so default is 'fill'.
+    shortFit: pick(cli, 'shortFit', 'SHORT_FIT', 'fill'),
+    shortWidth: pick(cli, 'shortWidth', 'SHORT_WIDTH', 1080, num),
+    shortHeight: pick(cli, 'shortHeight', 'SHORT_HEIGHT', 1920, num),
+
+    // thumbnail: extract a single JPEG from the long video for YouTube upload.
+    // Default to 65% of duration — past the build-up, before fade-out.
+    thumbnailFraction: pick(cli, 'thumbnailFraction', 'THUMB_FRACTION', 0.65, num),
 
     outDir: pick(cli, 'outDir', 'OUT_DIR', path.join(repoRoot, 'output')),
     readyTimeoutMs: pick(cli, 'readyTimeout', 'READY_TIMEOUT_MS', 60000, num),
@@ -76,6 +87,7 @@ export function resolveConfig(cli = {}) {
 
   cfg.longPath = path.join(cfg.outDir, pick(cli, 'longName', 'LONG_NAME', 'long.mp4'));
   cfg.shortPath = path.join(cfg.outDir, pick(cli, 'shortName', 'SHORT_NAME', 'short.mp4'));
+  cfg.thumbnailPath = path.join(cfg.outDir, pick(cli, 'thumbName', 'THUMB_NAME', 'thumbnail.jpg'));
   return cfg;
 }
 
@@ -153,18 +165,41 @@ function writeChunk(stream, buf) {
   });
 }
 
+// Build the -vf filter for the Short based on shortFit. Returns null for 'none'.
+function shortFilter(cfg) {
+  const w = cfg.shortWidth, h = cfg.shortHeight;
+  switch (cfg.shortFit) {
+    case 'none':
+      return null;
+    case 'pad':
+      // Fit the source inside w x h preserving aspect, then pad with black.
+      // Even dimensions are required for yuv420p, hence trunc(...) * 2.
+      return `scale=w='if(gt(a,${w}/${h}),${w},-2)':h='if(gt(a,${w}/${h}),-2,${h})',`
+           + `scale='trunc(iw/2)*2':'trunc(ih/2)*2',`
+           + `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
+    case 'fill':
+    default:
+      // Scale up so the source covers w x h, then center-crop.
+      return `scale=w='if(gt(a,${w}/${h}),-2,${w})':h='if(gt(a,${w}/${h}),${h},-2)',`
+           + `crop=${w}:${h},setsar=1`;
+  }
+}
+
 // Cut a clip from the long video, re-encoding so the in/out points are exact
-// (stream copy would snap to keyframes). Clamps to the available duration.
+// (stream copy would snap to keyframes). Clamps to the available duration and
+// applies the configured aspect transform (default: fill to 1080x1920).
 async function cutShort(cfg) {
   const total = cfg.duration;
   const dur = Math.min(cfg.shortDuration, total);
   const start = Math.max(0, Math.min(cfg.shortStart, total - dur));
+  const vf = shortFilter(cfg);
 
   const args = [
     '-y',
     '-ss', String(start),
     '-i', cfg.longPath,
     '-t', String(dur),
+    ...(vf ? ['-vf', vf] : []),
     '-c:v', 'libx264',
     '-preset', cfg.preset,
     '-crf', String(cfg.crf),
@@ -174,7 +209,22 @@ async function cutShort(cfg) {
     cfg.shortPath,
   ];
   await runFfmpeg(args, 'short-cut');
-  return { start, dur };
+  return { start, dur, fit: cfg.shortFit, vf };
+}
+
+// Extract a single JPEG thumbnail from the long video at a configurable point.
+async function extractThumbnail(cfg) {
+  const t = Math.max(0, Math.min(cfg.duration - 0.1, cfg.duration * cfg.thumbnailFraction));
+  const args = [
+    '-y',
+    '-ss', String(t),
+    '-i', cfg.longPath,
+    '-frames:v', '1',
+    '-q:v', '2',           // high-quality JPEG
+    cfg.thumbnailPath,
+  ];
+  await runFfmpeg(args, 'thumbnail');
+  return { at: t };
 }
 
 function runFfmpeg(args, label) {
@@ -282,11 +332,15 @@ export async function render(cli = {}) {
     console.log(`[render] wrote ${cfg.longPath}`);
 
     const shortInfo = await cutShort(cfg);
-    console.log(`[render] wrote ${cfg.shortPath} (start ${shortInfo.start}s, ${shortInfo.dur}s)`);
+    console.log(`[render] wrote ${cfg.shortPath} (start ${shortInfo.start}s, ${shortInfo.dur}s, fit=${shortInfo.fit})`);
+
+    const thumbInfo = await extractThumbnail(cfg);
+    console.log(`[render] wrote ${cfg.thumbnailPath} (frame at ${thumbInfo.at.toFixed(1)}s)`);
 
     return {
       long: cfg.longPath,
       short: cfg.shortPath,
+      thumbnail: cfg.thumbnailPath,
       seed: cfg.seed,
       width: cfg.width,
       height: cfg.height,

@@ -71,11 +71,25 @@ jobs:
           DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '' }}
         run: node src/index.js
 
+      # Keep the day's Gemini-generated engine (and the thumbnail) for Phase 3
+      # prompt tuning. Runs on success and failure. The mp4s are >> the 500MB
+      # artifact-step limit for a full hour, so we skip them on success.
+      - name: Save generated engine + thumbnail
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-${{ github.run_id }}
+          path: |
+            engines/auto/*.html
+            output/thumbnail.jpg
+          if-no-files-found: ignore
+          retention-days: 30
+
       - name: Upload render artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: render-debug
+          name: render-debug-${{ github.run_id }}
           path: |
             output/*.mp4
           if-no-files-found: ignore

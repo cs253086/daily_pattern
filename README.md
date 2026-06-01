@@ -46,6 +46,25 @@ engines/auto/       per-day Gemini-generated engines (git-ignored, ephemeral)
 
 Disable generation for a run with `--no-generate` or `GENERATE=0`.
 
+**Self-repair.** If a generated engine fails the quality gate, the validator's
+reasons plus the previous file are sent back to Gemini once for a corrected
+version before the pipeline falls back to Bloom.
+
+### Outputs per run
+
+- `output/long.mp4` — the 1-hour main video (source aspect, e.g. 1920×1080).
+- `output/short.mp4` — a 30s cut, by default cropped to **1080×1920 vertical**
+  for the YouTube Shorts feed (`--shortFit=pad` for letterbox, `=none` to keep
+  the source aspect).
+- `output/thumbnail.jpg` — a frame extracted from the long video and attached
+  to the long upload via the YouTube thumbnails API. (Custom thumbnails
+  require a verified YouTube channel; if the API rejects the upload, the
+  pipeline logs a warning and continues without it.)
+
+In CI the day's generated engine and thumbnail are uploaded as the
+`engine-<run_id>` artifact (30-day retention) so you can review what Gemini
+produced — useful for Phase 3 prompt tuning.
+
 ### Engine contract
 
 Every engine is a standalone HTML file that:
@@ -96,6 +115,9 @@ CLI flags take priority over env vars, which take priority over defaults.
 | `--preset=` | `PRESET` | `medium` | x264 speed/size preset |
 | `--shortStart=` | `SHORT_START` | `2100` | Short cut start (sec, 35:00) |
 | `--shortDuration=` | `SHORT_DURATION` | `30` | Short length (sec) |
+| `--shortFit=` | `SHORT_FIT` | `fill` | `fill` = 9:16 scale+crop, `pad` = letterbox, `none` = keep source |
+| `--shortWidth=` / `--shortHeight=` | `SHORT_WIDTH` / `SHORT_HEIGHT` | `1080` / `1920` | Short output resolution |
+| `--thumbnailFraction=` | `THUMB_FRACTION` | `0.65` | Where to grab the thumbnail (0–1 of duration) |
 | `--no-upload` | `DRY_RUN=1` | off | Render only, skip upload |
 | `--no-generate` | `GENERATE=0` | off | Skip Gemini generation, use Bloom |
 

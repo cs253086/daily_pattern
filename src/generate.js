@@ -40,6 +40,26 @@ function todayUTC() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Wrap the base prompt with the previous (failed) attempt and the validator's
+// reasons so Gemini can produce a corrected file in one more shot.
+export function buildRepairPrompt({ seed, date, themeHint, previousHtml, reasons }) {
+  const base = buildPrompt({ seed, date, themeHint });
+  const trimmed = previousHtml.length > 18000
+    ? previousHtml.slice(0, 9000) + '\n\n<!-- ...truncated... -->\n\n' + previousHtml.slice(-6000)
+    : previousHtml;
+  return base + `
+
+=== REPAIR CONTEXT ===
+Your previous attempt FAILED the quality gate for these reasons:
+${reasons.map((r, i) => `  ${i + 1}. ${r}`).join('\n')}
+
+Below is your previous attempt verbatim. Produce a new COMPLETE HTML file that fixes the listed problems while still satisfying every requirement above. Output only the corrected file.
+
+--- PREVIOUS ATTEMPT BEGIN ---
+${trimmed}
+--- PREVIOUS ATTEMPT END ---`;
+}
+
 export function buildPrompt({ seed, date, themeHint }) {
   return `You are generating ONE self-contained HTML file: a generative-art "screensaver" engine.
 It will be rendered HEADLESSLY, frame by frame, into a long ambient video. There is no human watching it run live.
@@ -128,8 +148,10 @@ export async function generateEngine(opts = {}) {
   const outDir = opts.outDir || path.join(repoRoot, 'engines', 'auto');
   const themeHint = opts.themeHint || THEME_HINTS[hashStr(String(date)) % THEME_HINTS.length];
 
-  const prompt = buildPrompt({ seed, date, themeHint });
-  console.log(`[generate] model=${model} date=${date} theme="${themeHint}"`);
+  const prompt = opts.repair
+    ? buildRepairPrompt({ seed, date, themeHint, previousHtml: opts.repair.previousHtml, reasons: opts.repair.reasons })
+    : buildPrompt({ seed, date, themeHint });
+  console.log(`[generate] model=${model} date=${date} theme="${themeHint}"${opts.repair ? ' (repair)' : ''}`);
 
   const raw = await callGemini({ apiKey, model, prompt });
   const html = extractHtml(raw);
