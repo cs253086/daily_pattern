@@ -135,7 +135,14 @@ async function callGemini({ apiKey, model, prompt }) {
     generationConfig: {
       temperature: 1.0,
       topP: 0.95,
-      maxOutputTokens: 8192,
+      // 2.5-series engine HTML can run 8-15K tokens; raise the budget so we
+      // don't truncate. Free-tier per-request caps are well above this.
+      maxOutputTokens: 32768,
+      // Gemini 2.5 models burn output tokens on internal "thinking" by
+      // default, which often consumed enough budget to truncate the HTML.
+      // Disable thinking so the full budget goes to actual generation.
+      // (Harmlessly ignored by models that don't support thinking.)
+      thinkingConfig: { thinkingBudget: 0 },
     },
   };
 
@@ -183,12 +190,18 @@ export async function generateEngine(opts = {}) {
 
   const raw = await callGemini({ apiKey, model, prompt });
   const html = extractHtml(raw);
-
-  if (!/<canvas/i.test(html) || !/advanceFrame/.test(html)) {
-    throw new Error('Generated HTML is missing required <canvas> or advanceFrame — rejecting before write.');
-  }
+  console.log(`[generate] response: ${raw.length} chars -> HTML ${html.length} chars`);
 
   await mkdir(outDir, { recursive: true });
+
+  if (!/<canvas/i.test(html) || !/advanceFrame/.test(html)) {
+    // Save the raw output so we can see what Gemini actually produced (most
+    // common cause: MAX_TOKENS truncation before the script block closes).
+    const debugPath = path.join(outDir, `${date}.raw.txt`);
+    await writeFile(debugPath, raw, 'utf8');
+    throw new Error(`Generated HTML is missing required <canvas> or advanceFrame — rejecting before write. Raw saved to ${debugPath}`);
+  }
+
   const outPath = path.join(outDir, `${date}.html`);
   await writeFile(outPath, html, 'utf8');
   console.log(`[generate] wrote ${outPath} (${html.length} bytes)`);

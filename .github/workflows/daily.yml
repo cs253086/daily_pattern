@@ -82,6 +82,7 @@ jobs:
           name: engine-${{ github.run_id }}
           path: |
             engines/auto/*.html
+            engines/auto/*.raw.txt
             output/thumbnail.jpg
           if-no-files-found: ignore
           retention-days: 30
