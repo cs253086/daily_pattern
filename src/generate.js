@@ -135,7 +135,13 @@ function extractHtml(text) {
   return t.trim();
 }
 
-async function callGemini({ apiKey, model, prompt }) {
+// Retry transient errors (503 service unavailable, 500 internal, 429 rate
+// limit, and network failures) with exponential backoff. 429s on the free
+// tier are usually short bursts; 503 "high demand" recovers in seconds.
+const RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function callGemini({ apiKey, model, prompt, maxAttempts = 3 }) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const body = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -153,30 +159,52 @@ async function callGemini({ apiKey, model, prompt }) {
     },
   };
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  let lastErr;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      // Network failure — retry.
+      lastErr = new Error(`Gemini fetch failed: ${e.message}`);
+      if (attempt < maxAttempts) {
+        const wait = 2000 * Math.pow(3, attempt - 1);
+        console.warn(`[generate] attempt ${attempt} network error; retrying in ${wait}ms`);
+        await sleep(wait);
+        continue;
+      }
+      throw lastErr;
+    }
 
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`Gemini API ${res.status} ${res.statusText}: ${errText.slice(0, 500)}`);
-  }
+    if (RETRY_STATUSES.has(res.status) && attempt < maxAttempts) {
+      const wait = 2000 * Math.pow(3, attempt - 1); // 2s, 6s, 18s
+      console.warn(`[generate] attempt ${attempt} got ${res.status}; retrying in ${wait}ms`);
+      await sleep(wait);
+      continue;
+    }
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`Gemini API ${res.status} ${res.statusText}: ${errText.slice(0, 500)}`);
+    }
 
-  const data = await res.json();
-  const cand = data.candidates && data.candidates[0];
-  if (!cand) {
-    throw new Error(`Gemini returned no candidates: ${JSON.stringify(data).slice(0, 500)}`);
+    const data = await res.json();
+    const cand = data.candidates && data.candidates[0];
+    if (!cand) {
+      throw new Error(`Gemini returned no candidates: ${JSON.stringify(data).slice(0, 500)}`);
+    }
+    if (cand.finishReason && cand.finishReason !== 'STOP') {
+      console.warn(`[generate] Gemini finishReason=${cand.finishReason} (output may be incomplete)`);
+    }
+    const parts = (cand.content && cand.content.parts) || [];
+    const text = parts.map((p) => p.text || '').join('');
+    if (!text.trim()) throw new Error('Gemini returned empty text.');
+    return text;
   }
-  if (cand.finishReason && cand.finishReason !== 'STOP') {
-    // MAX_TOKENS / SAFETY etc. — the HTML is likely truncated/blocked.
-    console.warn(`[generate] Gemini finishReason=${cand.finishReason} (output may be incomplete)`);
-  }
-  const parts = (cand.content && cand.content.parts) || [];
-  const text = parts.map((p) => p.text || '').join('');
-  if (!text.trim()) throw new Error('Gemini returned empty text.');
-  return text;
+  throw lastErr;
 }
 
 // Generate today's engine. Returns { path, model, themeHint } or throws.
