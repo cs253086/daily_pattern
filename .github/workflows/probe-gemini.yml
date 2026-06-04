@@ -1,0 +1,25 @@
+name: Probe Gemini Models
+
+# Runs scripts/probe-gemini.js with the configured GEMINI_API_KEY to discover
+# which models the key can actually use on the free tier. Output appears in the
+# job log. Manual trigger only.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Probe
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: node scripts/probe-gemini.js

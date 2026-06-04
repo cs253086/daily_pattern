@@ -14,8 +14,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 
 // Aesthetic nudges so each day leans toward a different look. Picked
-// deterministically from the date so a given day is reproducible.
+// deterministically from the date so a given day is reproducible. Mix of
+// original directions and abstract reinterpretations of iconic
+// Windows / macOS / XScreenSaver classics.
 const THEME_HINTS = [
+  // Original generative directions
   'flowing plasma fields with soft additive glow',
   'interweaving Lissajous ribbons',
   'orbiting light particles leaving trails',
@@ -28,6 +31,23 @@ const THEME_HINTS = [
   'rotating mandala with radial symmetry',
   'electric filament arcs branching',
   'concentric pulsing rings with phase offsets',
+  // Classic screensaver homages (abstract reinterpretations, no logos/text)
+  'classic 3D Pipes growing and branching through space',
+  'Windows Mystify-style bouncing polyline trails',
+  'starfield warp simulation flying through space',
+  'Lorenz / strange attractor traces being slowly drawn',
+  'metaballs gently merging and splitting',
+  'munching-squares-style evolving XOR pattern in glowing colors',
+  'plasma field with rolling sinusoidal interference',
+  'abstract Matrix-style cascading light columns (glyph-like shapes, NO actual letters)',
+  'wireframe geometric tunnel flythrough',
+  'kaleidoscope of recursive fractal subdivisions',
+  'After Dark style geometric shapes bouncing and leaving rainbow trails',
+  'demoscene-style feedback tunnel with chroma shifts',
+  'particle flock / boids forming and dissolving constellations',
+  'electric arc lightning branching across the screen and decaying',
+  'flow field where thousands of fine lines follow noise currents',
+  'rotating 3D wireframe polytope with edge glow (Stars/Polyhedra style)',
 ];
 
 function hashStr(s) {
@@ -79,11 +99,19 @@ Output ONLY the raw HTML document. Start with <!DOCTYPE html>. No markdown, no c
    - advanceFrames(n): calls advanceFrame() n times.
 6. Time-based motion: all motion must be expressed per-second and multiplied by dt = 1/fps per frame, so playback looks identically paced at any fps.
 7. Self-contained: pure JavaScript + Canvas2D (or WebGL). NO external resources, NO network/fetch, NO imports, NO fonts, NO images.
-8. Visual rules: NO text/letters/numbers drawn on the canvas. Use additive blending ('lighter' or equivalent). Slow, hypnotic, smoothly looping/evolving motion suitable as an ambient background. Rich but NOT a white-out — avoid the whole canvas saturating to solid white; keep deep blacks and luminous structure. Black background.
+8. Visual rules: NO text/letters/numbers drawn on the canvas. Use additive blending ('lighter' or equivalent). Slow, hypnotic, smoothly looping/evolving motion suitable as an ambient background. Black background.
+
+=== VISUAL RICHNESS (REQUIRED — this is what makes it watchable) ===
+- The frame must look DENSE and LAYERED at any moment past the first few seconds. Multiple independent visual layers/agents on screen at once (typically 30–200 contributing elements depending on style), composed so the eye finds new detail when it focuses.
+- Use a coherent multi-color PALETTE derived from the seed (3–6 related hues), not a single hue. Modulate hue/saturation/brightness over time so colors gently shift across the cycle.
+- Vary scale: include both small fine detail AND large-scale structure in the same frame so there's foreground and background. Avoid a single dominant blob.
+- Bloom but don't blow out: the brightest regions should be near-white (pleasingly luminous), but most of the canvas should still read as deep color against black. If the whole image goes solid white the run is wasted.
+- Slow regeneration: every ~30–120 seconds, gracefully evolve to a new variation (new color emphasis, new motion family, new density). Either fade-and-rebuild or smoothly cross-fade — never a hard cut.
+- Loopability: the motion should feel like it could play forever without becoming monotonous.
 
 === CREATIVE DIRECTION FOR TODAY (${date}) ===
 Seed: ${seed}. Lean into this aesthetic: ${themeHint}.
-Make it genuinely distinct from a generic particle demo. Derive structure, color, and counts from the seeded PRNG so the seed produces real variety.
+Make it genuinely distinct from a generic particle demo. Derive STRUCTURE, COLOR PALETTE, COUNTS, and MOTION RATES from the seeded PRNG so the seed produces real variety — two different seeds should look noticeably different, not just recolored.
 
 Remember: output the complete HTML file only, beginning with <!DOCTYPE html>.`;
 }
