@@ -78,6 +78,13 @@ export async function uploadVideo(auth, opts) {
   process.stdout.write('\n');
 
   const id = res.data.id;
+  // The insert response reports the destination channel — log it so it's clear
+  // which channel a token actually uploads to (the upload-only scope can't
+  // query this any other way).
+  const snip = res.data.snippet || {};
+  if (snip.channelTitle || snip.channelId) {
+    console.log(`[upload] channel: ${snip.channelTitle || '(unknown title)'} [${snip.channelId || '?'}]`);
+  }
   console.log(`[upload] done: https://youtu.be/${id}`);
   return res.data;
 }
