@@ -73,7 +73,7 @@ async function chooseEngine(cli) {
     console.log('[index] validating generated engine…');
     let result = await validateEngine(gen.path, validateOpts);
     if (result.ok) {
-      console.log(`[index] generated engine passed the quality gate (peakStd=${result.stats.peakStd.toFixed(1)}, motion=${result.stats.motion.toFixed(1)}).`);
+      console.log(`[index] generated engine passed (peakStd=${result.stats.peakStd.toFixed(1)}, motion=${result.stats.motion.toFixed(1)}, ${result.stats.avgMsPerFrame}ms/frame, ~${result.stats.projectedHourRenderMin}min for 1h).`);
       return { engine: gen.path, source: 'gemini' };
     }
 
@@ -88,7 +88,7 @@ async function chooseEngine(cli) {
     });
     result = await validateEngine(gen2.path, validateOpts);
     if (result.ok) {
-      console.log(`[index] repaired engine passed the quality gate (peakStd=${result.stats.peakStd.toFixed(1)}, motion=${result.stats.motion.toFixed(1)}).`);
+      console.log(`[index] repaired engine passed (peakStd=${result.stats.peakStd.toFixed(1)}, motion=${result.stats.motion.toFixed(1)}, ${result.stats.avgMsPerFrame}ms/frame, ~${result.stats.projectedHourRenderMin}min for 1h).`);
       return { engine: gen2.path, source: 'gemini-repaired' };
     }
     return bloomOr(`generated engine failed validation after repair: ${result.reasons.join('; ')}`);

@@ -1,11 +1,14 @@
-// Phase 2 quality gate. Loads an engine headlessly at a small test resolution,
-// confirms it honours the contract (READY / TOTAL_FRAMES / advanceFrame), then
-// samples several frames and checks the image is:
-//   * not stuck black, not blown out to white,
-//   * spatially structured (not a flat fill),
-//   * actually animating (frames differ over time).
-// Returns { ok, reasons, stats } — never throws for engine problems; only
-// throws on internal failures (e.g. browser launch).
+// Phase 2 quality gate. Two phases:
+//   1. VISUAL — load at a small test resolution, sample frames at evenly
+//      spaced points across a representative timeline, and check that the
+//      image is not stuck black, not blown out, spatially structured, and
+//      actually animating.
+//   2. SPEED — load at the planned render resolution and measure per-frame
+//      wall time, rejecting engines that would not finish a 1-hour render
+//      inside the CI job timeout.
+//
+// Each phase runs its own browser. Returns { ok, reasons, stats }; never
+// throws for engine problems (only on internal failures like browser launch).
 
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -13,23 +16,36 @@ import { pathToFileURL } from 'node:url';
 import puppeteer from 'puppeteer';
 
 const DEFAULTS = {
-  width: 320,
-  height: 180,
-  fps: 12,
-  duration: 24,
+  // Visual phase config — small canvas, longer virtual timeline so
+  // accumulation-style engines (like Bloom) have time to develop.
+  visualWidth: 480,
+  visualHeight: 270,
+  visualFps: 24,
+  visualDuration: 60,
+  visualCycleSec: 30,
   seed: 12345,
-  cycleSec: 8,
   readyTimeoutMs: 30000,
-  // Thresholds on a 0..255 luma scale.
-  minPeakMean: 1.5,   // at least one sample must be brighter than near-black
-  maxPeakMean: 252,   // ... but not essentially solid white
-  minPeakStd: 5,      // spatial structure (std-dev of luma) on the best frame
-  minMotion: 1.0,     // mean abs luma diff between consecutive samples
+  minPeakMean: 1.5,
+  maxPeakMean: 252,
+  minPeakStd: 5,
+  minMotion: 1.0,
+
+  // Speed phase config — real render resolution.
+  speedWidth: 1920,
+  speedHeight: 1080,
+  speedFps: 24,
+  speedDuration: 60,
+  speedFrames: 40,                 // how many frames to measure
+  maxAvgMsPerFrame: 100,           // budget: 100ms × 86,400 frames ≈ 144 min for 1h
+  maxSingleFrameMs: 2000,          // any single frame this slow = catastrophic
+  maxTotalSpeedTestMs: 45000,      // total wall-time cap on the speed test
 };
 
-// Computed in-page: draw the engine canvas downscaled and return luma stats +
-// a small luma array (for temporal diffing across samples). Passed to
-// page.evaluate as a real function so the selector arg is forwarded correctly.
+const PUPPETEER_ARGS = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+  '--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--hide-scrollbars'];
+
+// In-page: downscale the engine canvas to 64xH and return luma stats + a small
+// luma array (for temporal diffing across samples).
 function frameStats(selector) {
   const c = document.querySelector(selector);
   if (!c) return null;
@@ -59,67 +75,68 @@ function meanAbsDiff(a, b) {
   return s / a.length;
 }
 
-export async function validateEngine(enginePath, opts = {}) {
-  const cfg = { ...DEFAULTS, ...opts };
-  const reasons = [];
-
-  if (!existsSync(enginePath)) {
-    return { ok: false, reasons: [`engine file not found: ${enginePath}`], stats: null };
-  }
-
+function buildEngineUrl(enginePath, { seed, width, height, fps, duration, cycleSec }) {
   const url = pathToFileURL(enginePath);
   const p = url.searchParams;
-  p.set('seed', String(cfg.seed));
-  p.set('width', String(cfg.width));
-  p.set('height', String(cfg.height));
-  p.set('fps', String(cfg.fps));
-  p.set('duration', String(cfg.duration));
-  p.set('cycleSec', String(cfg.cycleSec));
+  p.set('seed', String(seed));
+  p.set('width', String(width));
+  p.set('height', String(height));
+  p.set('fps', String(fps));
+  p.set('duration', String(duration));
+  p.set('cycleSec', String(cycleSec));
+  return url.href;
+}
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-      '--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--hide-scrollbars'],
-  });
+async function setupPage(browser, width, height) {
+  const page = await browser.newPage();
+  await page.setViewport({ width, height, deviceScaleFactor: 1 });
+  const pageErrors = [];
+  page.on('pageerror', (e) => pageErrors.push(String(e)));
+  page.on('console', (m) => { if (m.type() === 'error') pageErrors.push(m.text()); });
+  return { page, pageErrors };
+}
 
+async function loadAndReady(page, url, readyTimeoutMs) {
   try {
-    const page = await browser.newPage();
-    await page.setViewport({ width: cfg.width, height: cfg.height, deviceScaleFactor: 1 });
+    await page.goto(url, { waitUntil: 'load', timeout: readyTimeoutMs });
+  } catch (e) { return { ok: false, reason: `page failed to load: ${e.message}` }; }
+  try {
+    await page.waitForFunction('window.READY === true', { timeout: readyTimeoutMs });
+  } catch { return { ok: false, reason: 'window.READY never became true' }; }
+  const api = await page.evaluate(() => ({
+    total: window.TOTAL_FRAMES,
+    hasAdvance: typeof window.advanceFrame === 'function',
+    hasAdvanceN: typeof window.advanceFrames === 'function',
+    hasCanvas: !!document.querySelector('canvas'),
+  }));
+  if (!api.hasCanvas) return { ok: false, reason: 'no <canvas> element' };
+  if (!api.hasAdvance) return { ok: false, reason: 'window.advanceFrame is not a function' };
+  if (!Number.isFinite(api.total) || api.total <= 0) return { ok: false, reason: `invalid TOTAL_FRAMES: ${api.total}` };
+  return { ok: true, api };
+}
 
-    const pageErrors = [];
-    page.on('pageerror', (e) => pageErrors.push(String(e)));
-    page.on('console', (m) => { if (m.type() === 'error') pageErrors.push(m.text()); });
+// ---- Visual phase -----------------------------------------------------------
 
-    try {
-      await page.goto(url.href, { waitUntil: 'load', timeout: cfg.readyTimeoutMs });
-    } catch (e) {
-      return done(browser, { ok: false, reasons: [`page failed to load: ${e.message}`], stats: null });
-    }
-
-    // Contract: READY must become true.
-    try {
-      await page.waitForFunction('window.READY === true', { timeout: cfg.readyTimeoutMs });
-    } catch {
-      reasons.push('window.READY never became true');
+async function runVisual(enginePath, cfg) {
+  const reasons = [];
+  const url = buildEngineUrl(enginePath, {
+    seed: cfg.seed, width: cfg.visualWidth, height: cfg.visualHeight,
+    fps: cfg.visualFps, duration: cfg.visualDuration, cycleSec: cfg.visualCycleSec,
+  });
+  const browser = await puppeteer.launch({ headless: true, args: PUPPETEER_ARGS });
+  try {
+    const { page, pageErrors } = await setupPage(browser, cfg.visualWidth, cfg.visualHeight);
+    const ready = await loadAndReady(page, url, cfg.readyTimeoutMs);
+    if (!ready.ok) {
+      reasons.push(ready.reason);
       if (pageErrors.length) reasons.push(`page errors: ${pageErrors.slice(0, 3).join(' | ')}`);
-      return done(browser, { ok: false, reasons, stats: null });
+      return { ok: false, reasons, stats: null };
     }
 
-    // Contract: required API present.
-    const api = await page.evaluate(() => ({
-      total: window.TOTAL_FRAMES,
-      hasAdvance: typeof window.advanceFrame === 'function',
-      hasAdvanceN: typeof window.advanceFrames === 'function',
-      hasCanvas: !!document.querySelector('canvas'),
-    }));
-    if (!api.hasCanvas) reasons.push('no <canvas> element');
-    if (!api.hasAdvance) reasons.push('window.advanceFrame is not a function');
-    if (!Number.isFinite(api.total) || api.total <= 0) reasons.push(`invalid TOTAL_FRAMES: ${api.total}`);
-    if (reasons.length) return done(browser, { ok: false, reasons, stats: null });
-
-    const total = api.total;
-    const sampleFractions = [0.08, 0.35, 0.6, 0.9];
-    const targets = sampleFractions.map((f) => Math.max(1, Math.min(total, Math.round(total * f))));
+    // Sample at later fractions so accumulation-style engines have time to bloom.
+    const total = ready.api.total;
+    const fractions = [0.15, 0.4, 0.7, 0.95];
+    const targets = fractions.map((f) => Math.max(1, Math.min(total, Math.round(total * f))));
 
     const samples = [];
     let cur = 0;
@@ -134,12 +151,10 @@ export async function validateEngine(enginePath, opts = {}) {
       samples.push(stat);
     }
 
-    if (pageErrors.length) {
-      reasons.push(`page errors during render: ${pageErrors.slice(0, 3).join(' | ')}`);
-    }
+    if (pageErrors.length) reasons.push(`page errors during render: ${pageErrors.slice(0, 3).join(' | ')}`);
     if (samples.length < 2) {
       reasons.push('not enough samples captured');
-      return done(browser, { ok: false, reasons, stats: { samples: samples.map(strip) } });
+      return { ok: false, reasons, stats: null };
     }
 
     const means = samples.map((s) => s.mean);
@@ -156,17 +171,99 @@ export async function validateEngine(enginePath, opts = {}) {
     if (peakStd < cfg.minPeakStd) reasons.push(`image lacks spatial structure (peak std ${peakStd.toFixed(2)})`);
     if (motion < cfg.minMotion) reasons.push(`little/no motion between frames (max diff ${motion.toFixed(2)})`);
 
-    const stats = { peakMean, peakStd, motion, total, means, stds };
-    return done(browser, { ok: reasons.length === 0, reasons, stats });
+    return {
+      ok: reasons.length === 0,
+      reasons,
+      stats: { peakMean, peakStd, motion, total },
+    };
   } finally {
     if (browser.connected) await browser.close().catch(() => {});
   }
 }
 
-function strip(s) { return { mean: s.mean, std: s.std }; }
-async function done(browser, result) {
-  await browser.close().catch(() => {});
-  return result;
+// ---- Speed phase ------------------------------------------------------------
+
+async function runSpeed(enginePath, cfg) {
+  const reasons = [];
+  const url = buildEngineUrl(enginePath, {
+    seed: cfg.seed, width: cfg.speedWidth, height: cfg.speedHeight,
+    fps: cfg.speedFps, duration: cfg.speedDuration, cycleSec: cfg.visualCycleSec,
+  });
+  const browser = await puppeteer.launch({ headless: true, args: PUPPETEER_ARGS });
+  try {
+    const { page, pageErrors } = await setupPage(browser, cfg.speedWidth, cfg.speedHeight);
+    const ready = await loadAndReady(page, url, cfg.readyTimeoutMs);
+    if (!ready.ok) {
+      reasons.push(ready.reason);
+      if (pageErrors.length) reasons.push(`page errors: ${pageErrors.slice(0, 3).join(' | ')}`);
+      return { ok: false, reasons, stats: null };
+    }
+
+    const N = Math.min(cfg.speedFrames, ready.api.total);
+    const t0 = Date.now();
+    let worstFrameMs = 0;
+
+    for (let i = 1; i <= N; i++) {
+      const fs = Date.now();
+      await page.evaluate(() => window.advanceFrame());
+      const ms = Date.now() - fs;
+      if (ms > worstFrameMs) worstFrameMs = ms;
+
+      if (ms > cfg.maxSingleFrameMs) {
+        reasons.push(`single frame too slow (${ms}ms > ${cfg.maxSingleFrameMs}ms) at ${cfg.speedWidth}x${cfg.speedHeight} — engine would never finish`);
+        return { ok: false, reasons, stats: { worstFrameMs: ms, framesMeasured: i } };
+      }
+      if (Date.now() - t0 > cfg.maxTotalSpeedTestMs) {
+        const avg = (Date.now() - t0) / i;
+        reasons.push(`speed test exceeded ${cfg.maxTotalSpeedTestMs}ms after ${i} frames (avg ${avg.toFixed(0)}ms/frame)`);
+        return { ok: false, reasons, stats: { avgMsPerFrame: Number(avg.toFixed(1)), framesMeasured: i, worstFrameMs } };
+      }
+    }
+
+    const totalMs = Date.now() - t0;
+    const avgMsPerFrame = totalMs / N;
+    const projectedHourRenderMin = (avgMsPerFrame * 3600 * cfg.speedFps) / 60000;
+
+    if (pageErrors.length) reasons.push(`page errors during speed test: ${pageErrors.slice(0, 3).join(' | ')}`);
+    if (avgMsPerFrame > cfg.maxAvgMsPerFrame) {
+      reasons.push(
+        `too slow: ${avgMsPerFrame.toFixed(0)}ms/frame avg at ${cfg.speedWidth}x${cfg.speedHeight} `
+        + `(>${cfg.maxAvgMsPerFrame}ms budget) — a 1h render would take ~${projectedHourRenderMin.toFixed(0)}min`,
+      );
+    }
+    return {
+      ok: reasons.length === 0,
+      reasons,
+      stats: {
+        avgMsPerFrame: Number(avgMsPerFrame.toFixed(1)),
+        worstFrameMs,
+        projectedHourRenderMin: Number(projectedHourRenderMin.toFixed(1)),
+        framesMeasured: N,
+      },
+    };
+  } finally {
+    if (browser.connected) await browser.close().catch(() => {});
+  }
+}
+
+// ---- Public API -------------------------------------------------------------
+
+export async function validateEngine(enginePath, opts = {}) {
+  const cfg = { ...DEFAULTS, ...opts };
+
+  if (!existsSync(enginePath)) {
+    return { ok: false, reasons: [`engine file not found: ${enginePath}`], stats: null };
+  }
+
+  const visual = await runVisual(enginePath, cfg);
+  if (!visual.ok) return { ok: false, reasons: visual.reasons, stats: visual.stats };
+
+  const speed = await runSpeed(enginePath, cfg);
+  return {
+    ok: speed.ok,
+    reasons: speed.reasons,
+    stats: { ...(visual.stats || {}), ...(speed.stats || {}) },
+  };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {

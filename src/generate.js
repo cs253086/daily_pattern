@@ -109,6 +109,13 @@ Output ONLY the raw HTML document. Start with <!DOCTYPE html>. No markdown, no c
 - Slow regeneration: every ~30–120 seconds, gracefully evolve to a new variation (new color emphasis, new motion family, new density). Either fade-and-rebuild or smoothly cross-fade — never a hard cut.
 - Loopability: the motion should feel like it could play forever without becoming monotonous.
 
+=== PERFORMANCE BUDGET (HARD — the engine WILL be rejected if too slow) ===
+- Each advanceFrame() call must complete in well under 100ms at 1920x1080 on software-rendered headless Chromium (no GPU). A 1-hour video is 86,400 frames; the renderer has only ~3 hours of CI budget.
+- AVOID per-frame operations that scan every pixel: NO getImageData/putImageData, NO full-canvas CanvasFilter passes (ctx.filter='blur(...)' over the whole canvas), NO per-pixel for-loops, NO offscreen full-canvas compositing per frame.
+- Prefer cheap vector drawing: a few hundred strokes/fills per frame, additive blending for the bloom feel, accumulating onto the canvas across frames (don't clear it every frame — use a subtle dark-alpha rect fade like 'rgba(0,0,0,0.02)' for trails).
+- If you use particles, cap at a few thousand TOTAL and update/draw them in a single pass with simple math (sin/cos, vector add). NOT a flock with O(n^2) interactions per frame.
+- WebGL is allowed if it's faster, but software rendering means most simple Canvas2D approaches will be faster than overengineered WebGL.
+
 === CREATIVE DIRECTION FOR TODAY (${date}) ===
 Seed: ${seed}. Lean into this aesthetic: ${themeHint}.
 Make it genuinely distinct from a generic particle demo. Derive STRUCTURE, COLOR PALETTE, COUNTS, and MOTION RATES from the seeded PRNG so the seed produces real variety — two different seeds should look noticeably different, not just recolored.
