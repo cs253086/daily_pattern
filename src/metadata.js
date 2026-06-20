@@ -53,10 +53,14 @@ export function buildMetadata(info = {}) {
   const subject = pick(SUBJECTS, h >> 3);
   const useCase = pick(USE_CASES, h >> 6);
 
-  const longTitle = clampTitle(`${mood} ${subject} ${useCase} • 1 Hour Screensaver [${date}]`);
+  // Describe the actual render length so titles/descriptions stay honest when
+  // the duration changes (e.g. 14-min uploads on an unverified channel vs the
+  // full 1-hour once the channel is verified). Falls back to "1 Hour".
+  const durLabel = durationLabel(info.durationSec);
+  const longTitle = clampTitle(`${mood} ${subject} ${useCase} • ${durLabel.title} Screensaver [${date}]`);
 
   const description = [
-    `${mood.toLowerCase()} ${subject.toLowerCase()} — a one-hour generative screensaver, freshly rendered on ${date}.`,
+    `${mood.toLowerCase()} ${subject.toLowerCase()} — a ${durLabel.phrase} generative screensaver, freshly rendered on ${date}.`,
     '',
     'Every day a new pattern is generated and rendered automatically. Same seed, same video — fully deterministic generative art.',
     '',
@@ -73,14 +77,14 @@ export function buildMetadata(info = {}) {
     mood.toLowerCase(),
     subject.toLowerCase(),
     'generative screensaver',
-    '1 hour',
+    durLabel.tag,
   ]).slice(0, 30);
 
   // YouTube Shorts: keep it short, lead with the hook, include #Shorts.
   const shortTitle = clampTitle(`${mood} ${subject} #Shorts`);
   const shortDescription = [
     `A 30-second cut of today's ${subject.toLowerCase()}.`,
-    'New generative art every day — full 1-hour version on the channel.',
+    `New generative art every day — full ${durLabel.phrase} version on the channel.`,
     '',
     `Seed: ${seed}`,
     '#Shorts #generativeart #satisfying #ambient #relaxing',
@@ -104,6 +108,22 @@ export function buildMetadata(info = {}) {
       categoryId: '24',
     },
   };
+}
+
+// Human-readable length labels derived from the render duration (seconds).
+//   { title: "14 Minute", phrase: "14-minute", tag: "14 minutes" }
+function durationLabel(durationSec) {
+  const s = Number(durationSec);
+  if (!Number.isFinite(s) || s <= 0) {
+    return { title: '1 Hour', phrase: 'one-hour', tag: '1 hour' };
+  }
+  if (s % 3600 === 0) {
+    const h = s / 3600;
+    const word = h === 1 ? 'One Hour' : `${h} Hour`;
+    return { title: word, phrase: h === 1 ? 'one-hour' : `${h}-hour`, tag: `${h} hour` };
+  }
+  const mins = Math.round(s / 60);
+  return { title: `${mins} Minute`, phrase: `${mins}-minute`, tag: `${mins} minutes` };
 }
 
 // YouTube titles must be <= 100 characters.

@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       duration:
-        description: 'Render duration in seconds'
+        description: 'Render duration in seconds (840=14min, safe for unverified channels; 3600=1h needs a verified channel)'
         required: false
-        default: '3600'
+        default: '840'
       dry_run:
         description: 'Render only, do not upload (true/false)'
         required: false
@@ -67,7 +67,10 @@ jobs:
           YT_PRIVACY: ${{ secrets.YT_PRIVACY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
-          DURATION: ${{ github.event.inputs.duration || '3600' }}
+          # Default 840s (14 min) stays under YouTube's 15-min upload cap for
+          # UNVERIFIED channels. After verifying the channel (youtube.com/verify),
+          # set a repository variable RENDER_DURATION=3600 to go back to 1 hour.
+          DURATION: ${{ github.event.inputs.duration || vars.RENDER_DURATION || '840' }}
           SEED: ${{ github.event.inputs.seed || '' }}
           DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '' }}
         run: node src/index.js

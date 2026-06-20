@@ -184,6 +184,21 @@ YT_PRIVACY=unlisted
 GEMINI_API_KEY=...        # optional; omit to always use Bloom
 ```
 
+### Video length & channel verification
+
+YouTube limits **unverified** channels to uploads of **15 minutes or less**.
+Until the channel is verified, the daily render defaults to **14 minutes**
+(`DURATION=840`) so the long video actually processes. Titles/descriptions are
+generated from the real length, so they say "14 Minute" not "1 Hour".
+
+To go back to full 1-hour videos:
+
+1. Sign in to the upload channel and verify it at <https://youtube.com/verify>
+   (phone code, ~1 min). This also unlocks custom thumbnails.
+2. Add a repository **variable** (not secret) `RENDER_DURATION=3600`
+   (Settings → Secrets and variables → Actions → Variables tab). The daily cron
+   reads it; manual runs can still override via the `duration` input.
+
 ## Running in CI
 
 `.github/workflows/daily.yml` runs daily at 09:00 UTC. You can also trigger it
