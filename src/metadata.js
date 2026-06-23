@@ -35,7 +35,10 @@ function hashSeed(seed) {
 }
 
 function pick(arr, n) {
-  return arr[n % arr.length];
+  // Robust to negative `n` (JS `>>` is signed, so hashes with the high bit set
+  // can give negative indices). Use unsigned modulo into the array length.
+  const i = Math.abs(n | 0) % arr.length;
+  return arr[i];
 }
 
 function formatDate(d = new Date()) {
@@ -50,8 +53,8 @@ export function buildMetadata(info = {}) {
   const h = hashSeed(seed);
 
   const mood = pick(MOODS, h);
-  const subject = pick(SUBJECTS, h >> 3);
-  const useCase = pick(USE_CASES, h >> 6);
+  const subject = pick(SUBJECTS, h >>> 3);
+  const useCase = pick(USE_CASES, h >>> 6);
 
   // Describe the actual render length so titles/descriptions stay honest when
   // the duration changes (e.g. 14-min uploads on an unverified channel vs the

@@ -76,10 +76,13 @@ jobs:
         run: node src/index.js
 
       # Keep the day's Gemini-generated engine (and the thumbnail) for Phase 3
-      # prompt tuning. Runs on success and failure. The mp4s are >> the 500MB
-      # artifact-step limit for a full hour, so we skip them on success.
+      # prompt tuning. Runs on success and failure. continue-on-error is set
+      # so a hit-storage-quota error here doesn't mark a successful upload run
+      # as failed. Retention dropped to 7 days to stay under the private repo's
+      # 500MB cap month over month.
       - name: Save generated engine + thumbnail
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: engine-${{ github.run_id }}
@@ -88,14 +91,15 @@ jobs:
             engines/auto/*.raw.txt
             output/thumbnail.jpg
           if-no-files-found: ignore
-          retention-days: 30
+          retention-days: 7
 
       - name: Upload render artifacts on failure
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: render-debug-${{ github.run_id }}
           path: |
             output/*.mp4
           if-no-files-found: ignore
-          retention-days: 3
+          retention-days: 2
