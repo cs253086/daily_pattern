@@ -58,6 +58,8 @@ export function resolveConfig(cli = {}) {
     speed: pick(cli, 'speed', 'SPEED', '', (v) => String(v)),
     density: pick(cli, 'density', 'DENSITY', '', (v) => String(v)),
     cycleSec: pick(cli, 'cycleSec', 'CYCLE_SEC', '', (v) => String(v)),
+    // optional image-of-the-day palette: "h,s,l;h,s,l;..." recolours the engine
+    colors: pick(cli, 'colors', 'COLORS', '', (v) => String(v)),
 
     canvasSelector: pick(cli, 'canvas', 'CANVAS_SELECTOR', 'canvas'),
     jpegQuality: pick(cli, 'jpegQuality', 'JPEG_QUALITY', 0.92, num),
@@ -116,6 +118,7 @@ function buildEngineUrl(cfg) {
   if (cfg.speed !== '') p.set('speed', cfg.speed);
   if (cfg.density !== '') p.set('density', cfg.density);
   if (cfg.cycleSec !== '') p.set('cycleSec', cfg.cycleSec);
+  if (cfg.colors !== '') p.set('colors', cfg.colors);
   return url.href;
 }
 

@@ -66,7 +66,15 @@
     if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
     return paletteNames[SEED % paletteNames.length];
   }
-  const PAL = palettes[resolvePalette()];
+  // A "colors" URL param (h,s,l;h,s,l;...) overrides the built-in palette —
+  // used to recolour the engine from the image-of-the-day palette.
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
 
   const cx = W / 2, cy = H / 2;
   const R = Math.min(W, H) * 0.52;   // seeds roam a large radius; symmetry fills frame

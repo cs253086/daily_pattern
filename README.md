@@ -42,13 +42,25 @@ engines/auto/       per-day Gemini-generated engines (git-ignored, ephemeral)
    `validate.js`. If the engine loads, honours the contract, and renders a
    non-blank / non-blown-out / actually-moving image, it's used;
 3. otherwise (no key, generation error, or a failed quality gate) it falls back
-   to the **Bloom** engine. The pipeline therefore always produces a video.
+   to a **curated engine** — Bloom plus everything in `engines/manual/`
+   (currently `flowfield`, `fluid`, `kaleidoscope`) — picked deterministically
+   by date so ungenerated days still rotate through different looks. The
+   pipeline therefore always produces an attractive video.
 
 Disable generation for a run with `--no-generate` or `GENERATE=0`.
 
 **Self-repair.** If a generated engine fails the quality gate, the validator's
 reasons plus the previous file are sent back to Gemini once for a corrected
-version before the pipeline falls back to Bloom.
+version before the pipeline falls back to the curated pool.
+
+**Image-of-the-day palette.** For curated (non-AI) engines, the pipeline pulls
+that date's NASA Astronomy Picture of the Day (public-domain, one per date),
+extracts a colour palette, and recolours the engine to match — a fresh colour
+mood daily, credited in the description. Fully optional and non-fatal: if APOD
+is a video that day, the network is unavailable, or extraction yields nothing,
+the engine just uses its own seed-derived palette. Set the optional
+`NASA_API_KEY` secret to avoid DEMO_KEY rate limits; disable with repo variable
+`IMAGE_PALETTE=0`.
 
 ### Outputs per run
 

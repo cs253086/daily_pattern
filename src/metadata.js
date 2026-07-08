@@ -62,10 +62,19 @@ export function buildMetadata(info = {}) {
   const durLabel = durationLabel(info.durationSec);
   const longTitle = clampTitle(`${mood} ${subject} ${useCase} • ${durLabel.title} Screensaver [${date}]`);
 
+  // Optional credit when the day's colours were drawn from an image (e.g. NASA
+  // APOD). info.imageCredit = { source, title, imageUrl }.
+  const ic = info.imageCredit;
+  const creditLine = ic && ic.title
+    ? `Today's colour palette is inspired by ${ic.source}: "${ic.title}".`
+    : undefined;
+
   const description = [
     `${mood.toLowerCase()} ${subject.toLowerCase()} — a ${durLabel.phrase} generative screensaver, freshly rendered on ${date}.`,
     '',
     'Every day a new pattern is generated and rendered automatically. Same seed, same video — fully deterministic generative art.',
+    creditLine ? '' : undefined,
+    creditLine,
     '',
     'Perfect as a background for studying, working, relaxing, meditating, or falling asleep.',
     '',
@@ -125,7 +134,7 @@ function durationLabel(durationSec) {
     const word = h === 1 ? 'One Hour' : `${h} Hour`;
     return { title: word, phrase: h === 1 ? 'one-hour' : `${h}-hour`, tag: `${h} hour` };
   }
-  const mins = Math.round(s / 60);
+  const mins = Math.max(1, Math.round(s / 60));
   return { title: `${mins} Minute`, phrase: `${mins}-minute`, tag: `${mins} minutes` };
 }
 

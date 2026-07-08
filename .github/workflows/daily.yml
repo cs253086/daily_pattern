@@ -67,6 +67,11 @@ jobs:
           YT_PRIVACY: ${{ secrets.YT_PRIVACY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+          # Optional: NASA API key for the "image of the day" palette (curated
+          # engines get recoloured from that day's Astronomy Picture of the Day).
+          # Blank falls back to DEMO_KEY. Set IMAGE_PALETTE=0 to disable entirely.
+          NASA_API_KEY: ${{ secrets.NASA_API_KEY }}
+          IMAGE_PALETTE: ${{ vars.IMAGE_PALETTE }}
           # Default 3600s (1 hour). REQUIRES a verified YouTube channel —
           # unverified channels reject uploads >15 min ("Processing abandoned:
           # Video is too long"). Override via repo variable RENDER_DURATION

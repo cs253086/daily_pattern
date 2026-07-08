@@ -20,6 +20,7 @@ import { buildMetadata } from './metadata.js';
 import { uploadAll } from './upload.js';
 import { generateEngine } from './generate.js';
 import { validateEngine } from './validate.js';
+import { dailyImagePalette, encodeColors } from './palette.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -138,11 +139,37 @@ async function main() {
 
   console.log(`[index] engine=${engineName} (${source}) seed=${cfg.seed} duration=${cfg.duration}s upload=${!dryRun}`);
 
-  const renderResult = await render({ ...cli, engine });
+  // Optional "image of the day" palette (NASA APOD). Only for curated engines —
+  // Gemini engines generate their own colours. Enabled when IMAGE_PALETTE!=0
+  // and not an AI engine. Any failure is non-fatal (engine uses its own palette).
+  const renderCli = { ...cli, engine };
+  let imageCredit = null;
+  const wantImagePalette = process.env.IMAGE_PALETTE !== '0'
+    && cli['no-image'] !== true
+    && !source.startsWith('gemini')
+    && !cli.colors && !process.env.COLORS;
+  if (wantImagePalette) {
+    try {
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const pal = await dailyImagePalette({ date: dateStr });
+      if (pal && pal.colors) {
+        renderCli.colors = encodeColors(pal.colors);
+        imageCredit = pal;
+        console.log(`[index] recolouring ${engineName} from ${pal.source}: "${pal.title}" (${pal.colors.length} colours)`);
+      } else {
+        console.log('[index] no image palette today; using engine default palette.');
+      }
+    } catch (e) {
+      console.warn(`[index] image palette skipped: ${e.message}`);
+    }
+  }
+
+  const renderResult = await render(renderCli);
 
   const metadata = buildMetadata({
     seed: cfg.seed,
     durationSec: cfg.duration,
+    imageCredit,
     engineName,
   });
   console.log(`[index] long title : ${metadata.long.title}`);

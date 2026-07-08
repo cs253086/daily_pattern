@@ -82,6 +82,16 @@
   }
   const PALETTE = resolvePalette();
 
+  // A "colors" URL param (h,s,l;h,s,l;...) overrides the built-in palette —
+  // used to recolour Bloom from the image-of-the-day palette.
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  const CUSTOM_PAL = parseColors();
+
   const minDim = Math.min(W, H);
 
   // ---- Agents ---------------------------------------------------------------
@@ -202,7 +212,7 @@
       agents = makeAgents();
     }
 
-    const palette = palettes[PALETTE];
+    const palette = CUSTOM_PAL || palettes[PALETTE];
     ctx.globalCompositeOperation = 'lighter';
 
     for (const agent of agents) {
