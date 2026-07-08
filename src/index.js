@@ -10,7 +10,7 @@
 //   (all other render flags pass through — see src/render.js)
 
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import 'dotenv/config';
@@ -36,11 +36,30 @@ function parseArgs(argv) {
 }
 
 const BLOOM = path.join(repoRoot, 'engines', 'bloom.html');
+const MANUAL_DIR = path.join(repoRoot, 'engines', 'manual');
 
-function bloomOr(reason) {
-  if (!existsSync(BLOOM)) throw new Error(`Bloom fallback missing at ${BLOOM}`);
-  if (reason) console.warn(`[index] ${reason} — falling back to Bloom.`);
-  return { engine: BLOOM, source: 'bloom' };
+// The curated pool: Bloom plus every hand-crafted engine in engines/manual/.
+// All are known-attractive, additive, and within render budget.
+function curatedPool() {
+  const pool = [];
+  if (existsSync(BLOOM)) pool.push(BLOOM);
+  if (existsSync(MANUAL_DIR)) {
+    for (const f of readdirSync(MANUAL_DIR).filter((f) => f.endsWith('.html')).sort()) {
+      pool.push(path.join(MANUAL_DIR, f));
+    }
+  }
+  return pool;
+}
+
+// Deterministic daily fallback: rotate through the curated pool by seed so a
+// non-generated day still varies day to day instead of always being Bloom.
+function curatedOr(reason, seed) {
+  const pool = curatedPool();
+  if (pool.length === 0) throw new Error(`No curated engines found (need engines/bloom.html or engines/manual/*.html)`);
+  const n = Number(String(seed).replace(/\D/g, '')) || 0;
+  const engine = pool[n % pool.length];
+  if (reason) console.warn(`[index] ${reason} — using curated engine ${path.basename(engine)}.`);
+  return { engine, source: `curated:${path.basename(engine, '.html')}` };
 }
 
 // Decide which engine to render:
@@ -50,10 +69,12 @@ function bloomOr(reason) {
 //      failure, fall back to Bloom;
 //   3. otherwise, Bloom.
 async function chooseEngine(cli) {
+  const seed = cli.seed ?? (process.env.SEED || defaultSeedStr());
+
   if (cli.engine) {
     const requested = path.isAbsolute(cli.engine) ? cli.engine : path.resolve(repoRoot, cli.engine);
     if (existsSync(requested)) return { engine: requested, source: 'explicit' };
-    return bloomOr(`requested engine not found (${requested})`);
+    return curatedOr(`requested engine not found (${requested})`, seed);
   }
 
   const generateEnabled = !!process.env.GEMINI_API_KEY
@@ -61,12 +82,11 @@ async function chooseEngine(cli) {
     && process.env.GENERATE !== '0';
 
   if (!generateEnabled) {
-    return bloomOr(process.env.GEMINI_API_KEY ? null : 'no GEMINI_API_KEY');
+    return curatedOr(process.env.GEMINI_API_KEY ? null : 'no GEMINI_API_KEY', seed);
   }
 
-  const seed = cli.seed ?? (process.env.SEED || undefined);
-  const validateOpts = seed ? { seed: Number(seed) } : {};
-  const genOpts = seed ? { seed } : {};
+  const validateOpts = { seed: Number(String(seed).replace(/\D/g, '')) || 1 };
+  const genOpts = { seed };
 
   try {
     const gen = await generateEngine(genOpts);
@@ -91,10 +111,17 @@ async function chooseEngine(cli) {
       console.log(`[index] repaired engine passed (peakStd=${result.stats.peakStd.toFixed(1)}, motion=${result.stats.motion.toFixed(1)}, ${result.stats.avgMsPerFrame}ms/frame, ~${result.stats.projectedHourRenderMin}min for 1h).`);
       return { engine: gen2.path, source: 'gemini-repaired' };
     }
-    return bloomOr(`generated engine failed validation after repair: ${result.reasons.join('; ')}`);
+    return curatedOr(`generated engine failed validation after repair: ${result.reasons.join('; ')}`, seed);
   } catch (e) {
-    return bloomOr(`generation error: ${e.message}`);
+    return curatedOr(`generation error: ${e.message}`, seed);
   }
+}
+
+// Match render.js's default per-day seed (YYYYMMDD, UTC) so the curated
+// rotation and the render agree when no seed is supplied.
+function defaultSeedStr() {
+  const d = new Date();
+  return String(d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate());
 }
 
 async function main() {
