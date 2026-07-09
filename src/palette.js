@@ -19,6 +19,18 @@ import puppeteer from 'puppeteer';
 
 function todayUTC() { return new Date().toISOString().slice(0, 10); }
 
+// fetch with a hard timeout so an unattended cron can't hang on a slow/dead
+// image host. Aborts and rejects after `ms`.
+async function fetchWithTimeout(url, { ms = 10000, ...opts } = {}) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: ctl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Load image bytes (from a data:/file:/http(s) URL or local path) in Node and
 // return a data: URL. Doing the fetch in Node — not in the page — sidesteps
 // CORS / canvas-tainting entirely, so getImageData works on any source.
@@ -30,7 +42,7 @@ async function toDataUrl(src) {
     const buf = await readFile(p);
     return `data:${mimeFor(p)};base64,${buf.toString('base64')}`;
   }
-  const res = await fetch(src);
+  const res = await fetchWithTimeout(src, { ms: 15000 });
   if (!res.ok) throw new Error(`image fetch ${res.status}`);
   const ct = res.headers.get('content-type') || mimeFor(src);
   const buf = Buffer.from(await res.arrayBuffer());
@@ -43,7 +55,7 @@ async function fetchApod({ date, apiKey }) {
   const url = `https://api.nasa.gov/planetary/apod?api_key=${encodeURIComponent(key)}&date=${date}`;
   let res;
   try {
-    res = await fetch(url, { headers: { accept: 'application/json' } });
+    res = await fetchWithTimeout(url, { ms: 10000, headers: { accept: 'application/json' } });
   } catch (e) {
     console.warn(`[palette] APOD fetch failed: ${e.message}`);
     return null;
