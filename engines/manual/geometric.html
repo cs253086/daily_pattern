@@ -51,14 +51,16 @@
   const randInt = (a, b) => Math.floor(rand(a, b + 1));
 
   const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  // Wide hue spread per palette (~50-90deg apart) so shapes visibly differ in
+  // colour at any instant, not just shades of one hue.
   const palettes = {
-    aurora: [[155, 90, 60], [185, 88, 62], [275, 80, 64], [110, 82, 58]],
-    ember:  [[16, 96, 60], [355, 92, 60], [40, 96, 62], [325, 80, 56]],
-    ocean:  [[195, 94, 62], [215, 90, 64], [170, 86, 58], [250, 72, 64]],
-    neon:   [[292, 96, 66], [182, 98, 62], [325, 95, 66], [140, 92, 60]],
-    sunset: [[18, 96, 64], [340, 90, 64], [285, 80, 60], [46, 96, 64]],
-    ice:    [[195, 82, 72], [210, 76, 76], [235, 66, 74], [175, 72, 70]],
-    gold:   [[42, 96, 64], [30, 96, 60], [50, 92, 66], [15, 94, 58]],
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 75, 72], [205, 72, 74], [225, 68, 76], [250, 62, 74], [270, 58, 72]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
   };
   function parseColors() {
     const raw = params.get('colors');
@@ -141,7 +143,8 @@
     for (let k = 0; k < spokes; k++) {
       const a = g + (k / spokes) * Math.PI * 2;
       const base = PAL[k % PAL.length];
-      ctx.strokeStyle = `hsla(${(base[0] + hue0 * 0.05) % 360}, ${base[1]}%, ${base[2]}%, 0.10)`;
+      const spokeHue = ((base[0] + hue0 * 0.05 + clk * 4) % 360 + 360) % 360;
+      ctx.strokeStyle = `hsla(${spokeHue}, ${base[1]}%, ${base[2]}%, 0.10)`;
       ctx.lineWidth = lwThin;
       ctx.beginPath(); ctx.moveTo(cx, cy);
       ctx.lineTo(cx + Math.cos(a) * minDim * 0.5, cy + Math.sin(a) * minDim * 0.5);
@@ -154,7 +157,8 @@
       const r = rg.r * (0.96 + 0.04 * Math.sin(clk * 0.6 * rg.pulseR));
       const rot = rg.rot + g + clk * rg.rotRate;
       const base = PAL[rg.colorIdx];
-      const hue = ((base[0] + hue0 * 0.05 + Math.sin(clk * 0.2) * 12) % 360 + 360) % 360;
+      // Continuous slow hue drift (dynamic colouring) layered on the wobble.
+      const hue = ((base[0] + hue0 * 0.05 + clk * 4 + Math.sin(clk * 0.2) * 12) % 360 + 360) % 360;
       poly(r, rg.sides, rot, `hsla(${hue}, ${base[1]}%, ${Math.min(80, base[2] + 14)}%, 0.9)`, lwThin * 2.2);
       poly(r, rg.sides, rot, `hsla(${hue}, ${base[1]}%, ${base[2]}%, 0.22)`, lwThin * 6.0);
     }
