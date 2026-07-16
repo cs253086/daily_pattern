@@ -7,9 +7,12 @@ const MOODS = [
   'Meditative', 'Soothing', 'Ethereal', 'Tranquil', 'Cosmic',
 ];
 
+// Kept engine-agnostic (titles are picked from the seed hash independently of
+// which engine actually renders), but biased toward the channel's geometric
+// house style now that the curated pool is geometric-first.
 const SUBJECTS = [
-  'Generative Art', 'Generative Patterns', 'Flowing Light',
-  'Abstract Motion', 'Living Geometry', 'Particle Bloom',
+  'Geometric Patterns', 'Sacred Geometry', 'Generative Geometry',
+  'Op-Art Motion', 'Kaleidoscope Patterns', 'Living Geometry',
 ];
 
 const USE_CASES = [

@@ -78,7 +78,8 @@
 
   let cols, rows, cell, sides, hue0, waveK, spinRate;
   function config() {
-    const target = Math.round(rand(9, 15) * Math.max(0.6, Math.min(1.6, DENSITY)));
+    // Fewer, bigger cells -> bold, clearly readable shapes instead of a fine mesh.
+    const target = Math.round(rand(4, 7) * Math.max(0.6, Math.min(1.6, DENSITY)));
     cols = target;
     cell = W / cols;
     rows = Math.ceil(H / cell) + 1;
@@ -108,8 +109,9 @@
     ctx.fillRect(0, 0, W, H);
 
     ctx.globalCompositeOperation = 'lighter';
-    const lwBright = Math.max(1, Math.min(W, H) / 1080 * 1.4);
-    const lwSoft = lwBright * 3.2;
+    // Thicker strokes to match the bigger cells -> bold, clearly readable edges.
+    const lwBright = Math.max(1.5, Math.min(W, H) / 1080 * 3.2);
+    const lwSoft = lwBright * 3.0;
     const maxR = cell * 0.46;
 
     for (let gy = 0; gy < rows; gy++) {

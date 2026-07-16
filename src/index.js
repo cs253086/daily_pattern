@@ -39,11 +39,11 @@ function parseArgs(argv) {
 const BLOOM = path.join(repoRoot, 'engines', 'bloom.html');
 const MANUAL_DIR = path.join(repoRoot, 'engines', 'manual');
 
-// The curated pool: Bloom plus every hand-crafted engine in engines/manual/.
-// All are known-attractive, additive, and within render budget.
+// The curated pool: every hand-crafted GEOMETRIC engine in engines/manual/.
+// Bloom is kept on disk as a last-resort emergency fallback (see curatedOr)
+// but excluded from the normal rotation — it's organic, not the house style.
 function curatedPool() {
   const pool = [];
-  if (existsSync(BLOOM)) pool.push(BLOOM);
   if (existsSync(MANUAL_DIR)) {
     for (const f of readdirSync(MANUAL_DIR).filter((f) => f.endsWith('.html')).sort()) {
       pool.push(path.join(MANUAL_DIR, f));
@@ -53,10 +53,15 @@ function curatedPool() {
 }
 
 // Deterministic daily fallback: rotate through the curated pool by seed so a
-// non-generated day still varies day to day instead of always being Bloom.
+// non-generated day still varies day to day. Falls back to Bloom only if the
+// manual pool is somehow empty (should never happen in normal operation).
 function curatedOr(reason, seed) {
   const pool = curatedPool();
-  if (pool.length === 0) throw new Error(`No curated engines found (need engines/bloom.html or engines/manual/*.html)`);
+  if (pool.length === 0) {
+    if (!existsSync(BLOOM)) throw new Error(`No curated engines found (need engines/manual/*.html or engines/bloom.html)`);
+    if (reason) console.warn(`[index] ${reason} — engines/manual/ is empty, using emergency Bloom fallback.`);
+    return { engine: BLOOM, source: 'curated:bloom' };
+  }
   const n = Number(String(seed).replace(/\D/g, '')) || 0;
   const engine = pool[n % pool.length];
   if (reason) console.warn(`[index] ${reason} — using curated engine ${path.basename(engine)}.`);

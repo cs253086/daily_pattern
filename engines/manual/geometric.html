@@ -84,7 +84,9 @@
     sides = randInt(3, 8);                 // shared polygon order (triangle..octagon)
     hue0 = rng() * 360;
     spin = rand(-0.25, 0.25);              // global slow rotation (rad/s)
-    const n = randInt(7, 12);
+    // Fewer, bigger nested shapes -> each polygon reads clearly instead of a
+    // dense fine web of overlapping rings.
+    const n = randInt(4, 6);
     rings = [];
     for (let i = 0; i < n; i++) {
       const t = (i + 1) / n;
@@ -153,8 +155,8 @@
       const rot = rg.rot + g + clk * rg.rotRate;
       const base = PAL[rg.colorIdx];
       const hue = ((base[0] + hue0 * 0.05 + Math.sin(clk * 0.2) * 12) % 360 + 360) % 360;
-      poly(r, rg.sides, rot, `hsla(${hue}, ${base[1]}%, ${Math.min(80, base[2] + 14)}%, 0.9)`, lwThin * 1.4);
-      poly(r, rg.sides, rot, `hsla(${hue}, ${base[1]}%, ${base[2]}%, 0.22)`, lwThin * 4.5);
+      poly(r, rg.sides, rot, `hsla(${hue}, ${base[1]}%, ${Math.min(80, base[2] + 14)}%, 0.9)`, lwThin * 2.2);
+      poly(r, rg.sides, rot, `hsla(${hue}, ${base[1]}%, ${base[2]}%, 0.22)`, lwThin * 6.0);
     }
 
     if (cycleFrame >= cycleFrames) { cycleFrame = 0; config(); }
