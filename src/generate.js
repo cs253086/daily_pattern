@@ -14,40 +14,33 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 
 // Aesthetic nudges so each day leans toward a different look. Picked
-// deterministically from the date so a given day is reproducible. Mix of
-// original directions and abstract reinterpretations of iconic
-// Windows / macOS / XScreenSaver classics.
+// deterministically from the date so a given day is reproducible. The channel
+// aims for a GEOMETRIC aesthetic — crisp shapes, straight edges, symmetry,
+// lattices, tessellations — so the list is geometry-forward (a few organic
+// options remain for variety).
 const THEME_HINTS = [
-  // Original generative directions
-  'flowing plasma fields with soft additive glow',
-  'interweaving Lissajous ribbons',
-  'orbiting light particles leaving trails',
-  'recursive geometric tessellation that slowly rotates',
-  'fluid noise contour lines drifting',
-  'spirograph lacework building up over time',
-  'wave-interference ripple patterns',
+  // Geometric core (crisp edges, defined shapes, symmetry)
+  'concentric rotating regular polygons nesting into a hypnotic vortex',
+  'recursive geometric tessellation of triangles and hexagons slowly rotating',
+  'sacred-geometry lattice: overlapping circles and polygons (flower-of-life style)',
+  'wireframe geometric tunnel flythrough with crisp glowing edges',
+  'rotating 3D wireframe polytope with luminous edges (Stars/Polyhedra style)',
+  'op-art grid of squares that rotate and scale in waves',
+  'isometric cube lattice shifting and rippling',
+  'Truchet tiles forming maze-like geometric paths',
+  'nested rotating star polygons (pentagrams / octagrams) with neon edges',
+  'radial mandala built from straight-line geometry and mirrored wedges',
+  'concentric polygon rings pulsing with phase offsets',
+  'Penrose-style aperiodic tiling slowly recolouring',
+  'spirograph / hypotrocloid line-art in clean glowing strokes',
+  'grid of rotating triangles forming moiré interference',
+  'geometric kaleidoscope of mirrored straight-edged shards',
+  'orbiting polygons tracing crisp geometric spirograph paths',
+  // A few organic options for variety
   'blooming fractal petals opening and closing',
-  'drifting aurora bands',
-  'rotating mandala with radial symmetry',
-  'electric filament arcs branching',
-  'concentric pulsing rings with phase offsets',
-  // Classic screensaver homages (abstract reinterpretations, no logos/text)
-  'classic 3D Pipes growing and branching through space',
-  'Windows Mystify-style bouncing polyline trails',
-  'starfield warp simulation flying through space',
-  'Lorenz / strange attractor traces being slowly drawn',
+  'flowing plasma fields with soft additive glow',
   'metaballs gently merging and splitting',
-  'munching-squares-style evolving XOR pattern in glowing colors',
-  'plasma field with rolling sinusoidal interference',
-  'abstract Matrix-style cascading light columns (glyph-like shapes, NO actual letters)',
-  'wireframe geometric tunnel flythrough',
-  'kaleidoscope of recursive fractal subdivisions',
-  'After Dark style geometric shapes bouncing and leaving rainbow trails',
-  'demoscene-style feedback tunnel with chroma shifts',
-  'particle flock / boids forming and dissolving constellations',
-  'electric arc lightning branching across the screen and decaying',
   'flow field where thousands of fine lines follow noise currents',
-  'rotating 3D wireframe polytope with edge glow (Stars/Polyhedra style)',
 ];
 
 function hashStr(s) {
@@ -118,6 +111,7 @@ Output ONLY the raw HTML document. Start with <!DOCTYPE html>. No markdown, no c
 
 === CREATIVE DIRECTION FOR TODAY (${date}) ===
 Seed: ${seed}. Lean into this aesthetic: ${themeHint}.
+HOUSE STYLE: favour a GEOMETRIC look — crisp straight edges, defined shapes, polygons, lattices, tessellations, and radial/mirror symmetry — over soft organic blobs. Luminous glowing EDGES on black, not fuzzy clouds. (If the theme above is organic, still keep clean structure and symmetry.)
 Make it genuinely distinct from a generic particle demo. Derive STRUCTURE, COLOR PALETTE, COUNTS, and MOTION RATES from the seeded PRNG so the seed produces real variety — two different seeds should look noticeably different, not just recolored.
 
 Remember: output the complete HTML file only, beginning with <!DOCTYPE html>.`;

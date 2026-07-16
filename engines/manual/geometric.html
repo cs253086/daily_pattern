@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Geometric — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated engine with a GEOMETRIC aesthetic: concentric regular polygons and a
+// radial lattice rotate at different rates, drawn as crisp glowing edges (thin
+// additive strokes on black) — sacred-geometry / op-art feel rather than soft
+// organic bloom. Clean straight lines and defined shapes, still luminous.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF, canvas sized to width/height, per-second
+// rotation rates, cheap vector strokes. Redraws each frame (no accumulation):
+// the "glow" is from additive overlap of the layered edges + a light bloom pass.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 60);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[155, 90, 60], [185, 88, 62], [275, 80, 64], [110, 82, 58]],
+    ember:  [[16, 96, 60], [355, 92, 60], [40, 96, 62], [325, 80, 56]],
+    ocean:  [[195, 94, 62], [215, 90, 64], [170, 86, 58], [250, 72, 64]],
+    neon:   [[292, 96, 66], [182, 98, 62], [325, 95, 66], [140, 92, 60]],
+    sunset: [[18, 96, 64], [340, 90, 64], [285, 80, 60], [46, 96, 64]],
+    ice:    [[195, 82, 72], [210, 76, 76], [235, 66, 74], [175, 72, 70]],
+    gold:   [[42, 96, 64], [30, 96, 60], [50, 92, 66], [15, 94, 58]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  const cx = W / 2, cy = H / 2;
+  const minDim = Math.min(W, H);
+  const dt = 1 / FPS;
+
+  // A "ring" is a regular polygon at some radius, rotating at its own rate.
+  let rings, sides, hue0, spin;
+  function config() {
+    sides = randInt(3, 8);                 // shared polygon order (triangle..octagon)
+    hue0 = rng() * 360;
+    spin = rand(-0.25, 0.25);              // global slow rotation (rad/s)
+    const n = randInt(7, 12);
+    rings = [];
+    for (let i = 0; i < n; i++) {
+      const t = (i + 1) / n;
+      rings.push({
+        r: t * minDim * 0.46,
+        rot: rng() * Math.PI * 2,
+        rotRate: rand(-0.5, 0.5) * (1 - t * 0.5),   // inner spins faster
+        sides: (rng() < 0.7) ? sides : randInt(3, 8),
+        colorIdx: i % PAL.length,
+        pulseR: rand(0.5, 1.4),
+      });
+    }
+  }
+
+  function poly(r, n, rot, style, lw) {
+    ctx.strokeStyle = style; ctx.lineWidth = lw;
+    ctx.beginPath();
+    for (let i = 0; i <= n; i++) {
+      const a = rot + (i / n) * Math.PI * 2;
+      const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  config();
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt * SPEED;
+
+    // Crisp geometry: clear each frame (no smear), redraw the whole figure.
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    const g = clk * spin;                   // global spin
+    ctx.globalCompositeOperation = 'lighter';
+
+    // Radial lattice: crisp spokes from centre.
+    const spokes = sides * 2;
+    const lwThin = Math.max(1, minDim / 1080);
+    for (let k = 0; k < spokes; k++) {
+      const a = g + (k / spokes) * Math.PI * 2;
+      const base = PAL[k % PAL.length];
+      ctx.strokeStyle = `hsla(${(base[0] + hue0 * 0.05) % 360}, ${base[1]}%, ${base[2]}%, 0.10)`;
+      ctx.lineWidth = lwThin;
+      ctx.beginPath(); ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(a) * minDim * 0.5, cy + Math.sin(a) * minDim * 0.5);
+      ctx.stroke();
+    }
+
+    // Concentric rotating polygons — the crisp geometric core. Draw each twice
+    // (bright thin + soft wider) so edges read luminous without going blobby.
+    for (const rg of rings) {
+      const r = rg.r * (0.96 + 0.04 * Math.sin(clk * 0.6 * rg.pulseR));
+      const rot = rg.rot + g + clk * rg.rotRate;
+      const base = PAL[rg.colorIdx];
+      const hue = ((base[0] + hue0 * 0.05 + Math.sin(clk * 0.2) * 12) % 360 + 360) % 360;
+      poly(r, rg.sides, rot, `hsla(${hue}, ${base[1]}%, ${Math.min(80, base[2] + 14)}%, 0.9)`, lwThin * 1.4);
+      poly(r, rg.sides, rot, `hsla(${hue}, ${base[1]}%, ${base[2]}%, 0.22)`, lwThin * 4.5);
+    }
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; config(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
