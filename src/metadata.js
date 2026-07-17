@@ -59,11 +59,10 @@ export function buildMetadata(info = {}) {
   const subject = pick(SUBJECTS, h >>> 3);
   const useCase = pick(USE_CASES, h >>> 6);
 
-  // Describe the actual render length so titles/descriptions stay honest when
-  // the duration changes (e.g. 14-min uploads on an unverified channel vs the
-  // full 1-hour once the channel is verified). Falls back to "1 Hour".
+  // Describe the actual render length for the description (kept out of the
+  // title, which is intentionally just a few words: mood + subject).
   const durLabel = durationLabel(info.durationSec);
-  const longTitle = clampTitle(`${mood} ${subject} ${useCase} • ${durLabel.title} Screensaver [${date}]`);
+  const longTitle = clampTitle(`${mood} ${subject}`);
 
   // Optional credit when the day's colours were drawn from an image (e.g. NASA
   // APOD). info.imageCredit = { source, title, imageUrl }.
@@ -73,7 +72,7 @@ export function buildMetadata(info = {}) {
     : undefined;
 
   const description = [
-    `${mood.toLowerCase()} ${subject.toLowerCase()} — a ${durLabel.phrase} generative screensaver, freshly rendered on ${date}.`,
+    `${mood.toLowerCase()} ${subject.toLowerCase()} ${useCase.toLowerCase()} — a ${durLabel.phrase} generative screensaver, freshly rendered on ${date}.`,
     '',
     'Every day a new pattern is generated and rendered automatically. Same seed, same video — fully deterministic generative art.',
     creditLine ? '' : undefined,
