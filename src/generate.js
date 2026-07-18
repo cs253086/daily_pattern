@@ -95,10 +95,11 @@ Output ONLY the raw HTML document. Start with <!DOCTYPE html>. No markdown, no c
 8. Visual rules: NO text/letters/numbers drawn on the canvas. Use additive blending ('lighter' or equivalent). Slow, hypnotic, smoothly looping/evolving motion suitable as an ambient background. Black background.
 
 === VISUAL RICHNESS (REQUIRED — this is what makes it watchable) ===
-- The frame must look DENSE and LAYERED at any moment past the first few seconds. Multiple independent visual layers/agents on screen at once (typically 30–200 contributing elements depending on style), composed so the eye finds new detail when it focuses.
-- Use a coherent multi-color PALETTE derived from the seed (3–6 related hues), not a single hue. Modulate hue/saturation/brightness over time so colors gently shift across the cycle.
+- VIVID AND CLEAR is the top priority. Colors must read as punchy and saturated (HSL saturation roughly 70-95%), never pale, muddy, or pastel-washed. Shapes must be bold and legible at a glance — prefer FEWER, BIGGER, CLEARER elements over many small/thin/cluttered ones. A viewer should be able to tell what's on screen instantly, not squint at a fine haze.
+- The frame must look DENSE and LAYERED at any moment past the first few seconds, but density must not come at the cost of clarity — layer a few clearly-readable big shapes/structures, not hundreds of tiny indistinct ones.
+- Use a coherent multi-color PALETTE derived from the seed (3–6 related hues spread at least 40-60 degrees apart in hue so they read as genuinely different colors, not shades of one hue), not a single hue. Modulate hue/saturation/brightness over time so colors gently shift across the cycle.
 - Vary scale: include both small fine detail AND large-scale structure in the same frame so there's foreground and background. Avoid a single dominant blob.
-- Bloom but don't blow out: the brightest regions should be near-white (pleasingly luminous), but most of the canvas should still read as deep color against black. If the whole image goes solid white the run is wasted.
+- Bloom but don't blow out AND don't wash out dim: the brightest regions (where many strokes overlap, e.g. a shared center) should be near-white, but most of the canvas should read as deep, SATURATED color against black — not white haze, and not pale/dim either. If the whole image goes solid white OR everything looks grey/washed-out, the run is wasted. If your engine ACCUMULATES light across frames (fades instead of clearing each frame), be extra careful: many overlapping semi-transparent strokes of DIFFERENT hues will sum toward white over time even if each one alone looks fine — keep per-stroke alpha low-to-moderate (~0.10-0.15) and test mentally at both the start AND ~30 seconds into a cycle, not just the first frame.
 - Slow regeneration: every ~30–120 seconds, gracefully evolve to a new variation (new color emphasis, new motion family, new density). Either fade-and-rebuild or smoothly cross-fade — never a hard cut.
 - Loopability: the motion should feel like it could play forever without becoming monotonous.
 
@@ -111,7 +112,7 @@ Output ONLY the raw HTML document. Start with <!DOCTYPE html>. No markdown, no c
 
 === CREATIVE DIRECTION FOR TODAY (${date}) ===
 Seed: ${seed}. Lean into this aesthetic: ${themeHint}.
-HOUSE STYLE: favour a GEOMETRIC look — crisp straight edges, defined shapes, polygons, lattices, tessellations, and radial/mirror symmetry — over soft organic blobs. Luminous glowing EDGES on black, not fuzzy clouds. (If the theme above is organic, still keep clean structure and symmetry.)
+HOUSE STYLE: favour a GEOMETRIC look — crisp straight edges, defined shapes, polygons, lattices, tessellations, and radial/mirror symmetry — over soft organic blobs. Luminous glowing EDGES on black, not fuzzy clouds. (If the theme above is organic, still keep clean structure and symmetry.) Above all: VIVID AND CLEAR, always — saturated colors, bold legible shapes. This is a standing channel requirement, not optional flavor.
 Make it genuinely distinct from a generic particle demo. Derive STRUCTURE, COLOR PALETTE, COUNTS, and MOTION RATES from the seeded PRNG so the seed produces real variety — two different seeds should look noticeably different, not just recolored.
 
 Remember: output the complete HTML file only, beginning with <!DOCTYPE html>.`;
