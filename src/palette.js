@@ -121,11 +121,13 @@ function quantise(data, count) {
   if (entries.length === 0) return [];
   entries.sort((a, b) => b.n - a.n);
   entries = entries.slice(0, count);
-  // Nudge toward luminous screensaver tones: keep hue, floor saturation/lightness.
+  // Nudge toward luminous, punchy screensaver tones: keep hue, floor
+  // saturation/lightness higher so real-world (often muted) photo colours
+  // don't read as dim once recoloured onto the engines.
   return entries.map((e) => [
     Math.round(e.h),
-    Math.round(Math.min(95, Math.max(60, e.s))),
-    Math.round(Math.min(66, Math.max(50, e.l))),
+    Math.round(Math.min(96, Math.max(72, e.s))),
+    Math.round(Math.min(70, Math.max(54, e.l))),
   ]);
 }
 

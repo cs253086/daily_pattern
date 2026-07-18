@@ -132,7 +132,7 @@
         const px = cx + (mx * x) * ca - y * sa;
         const py = cy + (mx * x) * sa + y * ca;
         const g = ctx.createRadialGradient(px, py, 0, px, py, stampR);
-        g.addColorStop(0, `hsla(${hue}, ${s}%, ${Math.min(68, l + 4)}%, ${a})`);
+        g.addColorStop(0, `hsla(${hue}, ${s}%, ${Math.min(74, l + 8)}%, ${a})`);
         g.addColorStop(1, `hsla(${hue}, ${s}%, ${l}%, 0)`);
         ctx.fillStyle = g;
         ctx.beginPath(); ctx.arc(px, py, stampR, 0, Math.PI * 2); ctx.fill();
@@ -164,7 +164,7 @@
         // white. Use a slow BOUNDED oscillation instead — still visibly
         // dynamic (colour mood shifts back and forth) without desaturating.
         const hue = ((base[0] + Math.sin(clk * 0.15) * 20 + hue0 * 0.04 + Math.sin(clk * 0.035) * 35) % 360 + 360) % 360;
-        stamp(x, y, hue, base[1], base[2], 0.09);
+        stamp(x, y, hue, base[1], base[2], 0.12);
         sd.prev = [x, y];
       }
     }
