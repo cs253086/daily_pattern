@@ -20,10 +20,18 @@ const USE_CASES = [
   'for Meditation', 'to Unwind', 'for Calm & Concentration',
 ];
 
+// Broad + LSI (related-term) tags so YouTube's matching has more to work
+// with than the same handful of words repeated. Deliberately avoids any
+// "music"/audio-implying terms — the videos are fully silent by design (no
+// audio track at all), so claiming otherwise would mislead searchers.
 const BASE_TAGS = [
-  'generative art', 'screensaver', 'ambient', 'relaxing', 'study music background',
+  'generative art', 'screensaver', 'ambient', 'relaxing', 'study background',
   'sleep', 'meditation', 'abstract', 'visuals', 'satisfying', 'procedural art',
-  'creative coding', 'background video', 'chill', 'focus',
+  'creative coding', 'background video', 'chill', 'focus', 'geometric art',
+  'sacred geometry', 'kaleidoscope', 'hypnotic visuals', 'stress relief',
+  'deep sleep', 'work from home', 'no talking', 'silent video', 'seamless loop',
+  'trippy visuals', 'psychedelic art', 'desktop wallpaper', 'tv screensaver',
+  'ai generated art', 'looping background', 'calming visuals',
 ];
 
 // Small deterministic hash so we can pick template variants from a seed.
@@ -71,40 +79,48 @@ export function buildMetadata(info = {}) {
     ? `Today's colour palette is inspired by ${ic.source}: "${ic.title}".`
     : undefined;
 
+  // Description structure follows current YouTube SEO guidance: a hook in the
+  // first ~150 chars (shown in search results / above the "Show more" fold,
+  // so it needs the value proposition + primary keywords up front, not just
+  // a mood label), then a longer keyword-rich body (200-500 words performs
+  // best), a subscribe CTA (genuinely relevant for a daily-upload channel),
+  // then transparency/debug info and hashtags last.
+  const hook = `${mood} ${subject} — ${durLabel.phrase} of hypnotic geometric visuals, silent & looping, perfect ${useCase.toLowerCase()}, deep sleep, or focus.`;
+
   const description = [
-    `${mood.toLowerCase()} ${subject.toLowerCase()} ${useCase.toLowerCase()} — a ${durLabel.phrase} generative screensaver, freshly rendered on ${date}.`,
+    hook,
     '',
-    'Every day a new pattern is generated and rendered automatically. Same seed, same video — fully deterministic generative art.',
+    `A brand-new pattern is generated and rendered automatically every single day — this one is from ${date}. Same seed always reproduces the exact same video, so nothing here is stock footage or reused: today's geometry, colour palette, and motion are unique to this date. Expect crisp rotating polygons, kaleidoscopic symmetry, and vivid, saturated colour that slowly evolves across the full runtime — no two days ever look the same.`,
+    '',
+    "This video is completely silent — no music, no talking, no sound effects — so you can pair it with your own playlist, a podcast, white noise, or just enjoy it on mute. Works great as animated wallpaper, a TV or desktop screensaver, or an ambient backdrop while working, studying, coding, reading, journaling, meditating, doing yoga, or winding down before sleep.",
     creditLine ? '' : undefined,
     creditLine,
     '',
-    'Perfect as a background for studying, working, relaxing, meditating, or falling asleep.',
+    'This channel runs on a fully automated pipeline: a generative-art engine writes and renders new geometry every day, with no manual editing and no stock assets — just code, colour, and motion.',
+    '',
+    'New hypnotic geometric pattern uploaded daily — subscribe so you never miss tomorrow\'s.',
     '',
     `Seed: ${seed}`,
     info.engineName ? `Engine: ${info.engineName}` : '',
     '',
-    '#generativeart #screensaver #ambient #relaxing #studywithme',
+    '#generativeart #screensaver #ambient #relaxing #hypnotic',
   ].filter((line) => line !== undefined).join('\n');
 
-  const tags = dedupe([
-    ...BASE_TAGS,
-    mood.toLowerCase(),
-    subject.toLowerCase(),
-    'generative screensaver',
-    durLabel.tag,
-  ]).slice(0, 30);
+  const tags = buildTags([mood, subject, 'generative screensaver', durLabel.tag]);
 
-  // YouTube Shorts: keep it short, lead with the hook, include #Shorts.
+  // YouTube Shorts: keep the title short, lead the description with the same
+  // hook style (short-form viewers decide in the first line too), include
+  // #Shorts (required for reliable Shorts-shelf placement).
   const shortTitle = clampTitle(`${mood} ${subject} #Shorts`);
   const shortDescription = [
-    `A 30-second cut of today's ${subject.toLowerCase()}.`,
-    `New generative art every day — full ${durLabel.phrase} version on the channel.`,
+    `A 30-second taste of today's ${subject.toLowerCase()} — silent, seamless, and hypnotic.`,
+    `New AI-and-code generated pattern every day. Full ${durLabel.phrase} version is on the channel — subscribe for tomorrow's.`,
     '',
     `Seed: ${seed}`,
-    '#Shorts #generativeart #satisfying #ambient #relaxing',
+    '#Shorts #generativeart #satisfying #ambient #hypnotic',
   ].join('\n');
 
-  const shortTags = dedupe(['shorts', ...tags]).slice(0, 30);
+  const shortTags = buildTags(['shorts', mood, subject, 'generative screensaver', durLabel.tag]);
 
   return {
     date,
@@ -147,6 +163,25 @@ function clampTitle(t) {
 
 function dedupe(arr) {
   return [...new Set(arr)];
+}
+
+// YouTube's real tags-field limit is ~500 characters total (comma-separated),
+// not a fixed item count. Build from priority extras first, then fill from
+// BASE_TAGS, stopping before the budget is exceeded.
+function buildTags(priorityExtras, charBudget = 480) {
+  const seen = new Set();
+  const out = [];
+  let total = 0;
+  for (const raw of [...priorityExtras, ...BASE_TAGS]) {
+    const t = String(raw).toLowerCase();
+    if (seen.has(t)) continue;
+    const added = t.length + (out.length > 0 ? 2 : 0); // ", " separator
+    if (total + added > charBudget) continue;
+    seen.add(t);
+    out.push(t);
+    total += added;
+  }
+  return out;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
