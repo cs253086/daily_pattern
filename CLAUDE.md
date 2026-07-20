@@ -24,9 +24,24 @@ them:
    overlapping strokes/hues sum together, especially if you add continuous
    hue drift. Engines that *clear and redraw* each frame (e.g. `geometric.html`,
    `grid.html`) don't have this problem and can safely use unbounded hue
-   drift for dynamic color. When tuning brightness/alpha on an accumulating
-   engine, test at multiple points across the cycle, not just frame 1 — a
-   look that's fine early can wash out after 20-30s of accumulation.
+   drift for dynamic color.
+   - **Test the FULL cycle length, not an arbitrary early fraction.** A real
+     production bug shipped because testing stopped at ~30-37s of a 70s
+     (`cycleSec`) kaleidoscope cycle and looked fine — but by ~50-70s it had
+     washed to a solid white disc. Always render at fractions of the
+     *actual* `cycleFrames = cycleSec * fps` (e.g. 25/50/75/95/105%), not a
+     fixed frame count guessed to be "probably enough."
+   - **Near-zero motion is the classic root cause on an accumulating
+     engine**, not just "fade too slow." If any per-element motion
+     parameter (angular drift, radial frequency, speed, etc.) is drawn from
+     a range that includes ~0 (e.g. `rand(-0.5, 0.5)`), that element can
+     sit nearly still for a whole cycle, re-stamping the *same* small
+     region every frame until it alone saturates to white — even while the
+     rest of the canvas looks fine. Fix at the source: give every motion
+     parameter a guaranteed minimum magnitude (e.g.
+     `(rng()<0.5?-1:1) * rand(0.18, 0.5)` instead of `rand(-0.5, 0.5)`), not
+     just a faster fade — a stronger fade masks the symptom but a stuck
+     element will still out-accumulate any reasonable decay rate.
 4. **Titles are a few words** (mood + subject, e.g. "Calming Geometric
    Patterns") — not long tagged strings. Duration/use-case context belongs in
    the description, not the title (see `src/metadata.js`).

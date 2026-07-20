@@ -92,7 +92,14 @@
     for (let i = 0; i < n; i++) {
       seeds.push({
         ar: rand(0.25, 0.95) * R, arv: rand(0.2, 0.5),  // radius osc
-        aa: rng() * Math.PI * 2, aav: rand(-0.5, 0.5),   // angle drift (rad/s)
+        // Angle drift (rad/s). MUST have a meaningful minimum magnitude: a
+        // seed whose angle barely changes keeps re-stamping the same ring
+        // for the whole cycle, and with additive blending that ring
+        // saturates to solid white while the rest of the canvas stays dark
+        // (this was a real production bug -- confirmed the "washed to a
+        // white disc" failure was a slow-drifting seed baking one ring
+        // white over a full ~70s cycle, not a fade-rate problem).
+        aa: rng() * Math.PI * 2, aav: (rng() < 0.5 ? -1 : 1) * rand(0.18, 0.5),
         fr: rand(0.05, 0.22),                             // radial freq
         phase: rng() * Math.PI * 2,
         colorIdx: randInt(0, PAL.length - 1),
@@ -145,7 +152,7 @@
     const progress = cycleFrame / cycleFrames;
 
     ctx.globalCompositeOperation = 'source-over';
-    const fade = progress > 0.9 ? 0.03 + (progress - 0.9) * 0.9 : 0.03;
+    const fade = progress > 0.9 ? 0.045 + (progress - 0.9) * 0.9 : 0.045;
     ctx.fillStyle = `rgba(0,0,0,${fade})`;
     ctx.fillRect(0, 0, W, H);
 
