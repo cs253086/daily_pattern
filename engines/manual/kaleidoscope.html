@@ -34,7 +34,7 @@
   const SEED = intP('seed', 1);
   const SPEED = fltP('speed', 1);
   const DENSITY = fltP('density', 1);
-  const CYCLE_SEC = fltP('cycleSec', 70);
+  const CYCLE_SEC = fltP('cycleSec', 50);
 
   const canvas = document.getElementById('c');
   canvas.width = W; canvas.height = H;
@@ -99,8 +99,13 @@
         // (this was a real production bug -- confirmed the "washed to a
         // white disc" failure was a slow-drifting seed baking one ring
         // white over a full ~70s cycle, not a fade-rate problem).
-        aa: rng() * Math.PI * 2, aav: (rng() < 0.5 ? -1 : 1) * rand(0.18, 0.5),
-        fr: rand(0.05, 0.22),                             // radial freq
+        aa: rng() * Math.PI * 2, aav: (rng() < 0.5 ? -1 : 1) * rand(0.35, 0.9),
+        // Radial "breathing" frequency. Was rand(0.05, 0.22) -- a full
+        // inhale/exhale cycle took 28-125s, so the pattern barely seemed to
+        // move on that axis. Raised so it breathes visibly within a few
+        // seconds instead of tens of seconds; also helps the anti-whiteout
+        // fix above (faster sweep = less time re-visiting the same pixels).
+        fr: rand(0.15, 0.45),
         phase: rng() * Math.PI * 2,
         colorIdx: randInt(0, PAL.length - 1),
         prev: null,

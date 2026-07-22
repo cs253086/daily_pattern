@@ -34,7 +34,7 @@
   const SEED = intP('seed', 1);
   const SPEED = fltP('speed', 1);
   const DENSITY = fltP('density', 1);
-  const CYCLE_SEC = fltP('cycleSec', 60);
+  const CYCLE_SEC = fltP('cycleSec', 45);
 
   const canvas = document.getElementById('c');
   canvas.width = W; canvas.height = H;
@@ -85,7 +85,11 @@
   function config() {
     sides = randInt(3, 8);                 // shared polygon order (triangle..octagon)
     hue0 = rng() * 360;
-    spin = rand(-0.25, 0.25);              // global slow rotation (rad/s)
+    // Guaranteed minimum magnitude (not rand(-0.25,0.25), which can land
+    // near zero and look nearly static) so the whole piece always has
+    // visible, lively motion -- a full rotation now takes ~4-9s instead of
+    // being able to sit almost still for tens of seconds.
+    spin = (rng() < 0.5 ? -1 : 1) * rand(0.7, 1.5);   // global rotation (rad/s)
     // Fewer, bigger nested shapes -> each polygon reads clearly instead of a
     // dense fine web of overlapping rings.
     const n = randInt(4, 6);
@@ -95,10 +99,12 @@
       rings.push({
         r: t * minDim * 0.46,
         rot: rng() * Math.PI * 2,
-        rotRate: rand(-0.5, 0.5) * (1 - t * 0.5),   // inner spins faster
+        // Same guaranteed-minimum-magnitude fix; inner rings still spin
+        // somewhat faster (the (1 - t*0.4) taper), but never near-zero.
+        rotRate: (rng() < 0.5 ? -1 : 1) * rand(0.6, 1.3) * (1 - t * 0.4),
         sides: (rng() < 0.7) ? sides : randInt(3, 8),
         colorIdx: i % PAL.length,
-        pulseR: rand(0.5, 1.4),
+        pulseR: rand(0.9, 2.0),
       });
     }
   }

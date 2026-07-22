@@ -70,6 +70,39 @@ them:
 4. **Titles are a few words** (mood + subject, e.g. "Calming Geometric
    Patterns") — not long tagged strings. Duration/use-case context belongs in
    the description, not the title (see `src/metadata.js`).
+5. **Lively pace, not glacial.** A real complaint: motion was technically
+   present but too slow to read as exciting (e.g. a full rotation taking
+   30-100+ seconds is imperceptible moment-to-moment). Any rotation/
+   oscillation/pulse rate should complete a cycle in roughly 4-15 seconds
+   (rad/s roughly 0.4-1.5), and — same principle as the whiteout fix above —
+   every motion-rate parameter needs a guaranteed minimum magnitude with a
+   random sign (never a plain symmetric range like `rand(-0.3, 0.3)`, which
+   can park an element near-motionless). When a "make it more exciting/
+   dynamic" request comes in, the concrete fix is: audit every per-element
+   rotation/oscillation-rate constant across the curated engines, and shorten
+   `cycleSec` defaults for more frequent full-pattern regeneration. After
+   changing kaleidoscope's motion rates, re-verified the whiteout fix still
+   held at the (new) full cycle length — don't assume changing speed
+   parameters is safe without re-running the full-cycle test from item 3.
+
+## Editing engine/prompt template literals — a gotcha to know about
+
+`src/generate.js`'s `buildPrompt`/`buildRepairPrompt` are giant backtick
+template literals. A literal backtick typed into the prose (e.g. writing
+`` `code` `` for emphasis) silently terminates the template literal at that
+point — `node --check` will NOT catch this, because the remainder often
+happens to re-parse as syntactically valid JS (the "leftover" text after the
+stray backtick can become a bare expression statement, and a second stray
+backtick opens a new template literal that swallows the rest of the file).
+This shipped **twice** in one session — both times `node --check` passed
+while the actual prompt was truncated/broken at runtime (a `ReferenceError`
+the second time, since the "leftover" text happened to look like a function
+call). **Always verify by actually calling `buildPrompt(...)` /
+`buildRepairPrompt(...)` and checking the real output** (length, that it
+contains expected section headers, that it ends where expected) — a passing
+`node --check` is not sufficient proof the prompt text is intact. When writing
+prose inside these template literals, avoid literal backticks entirely;
+describe code in plain words instead of backtick-quoting it.
 
 ## Engine contract (all engines, curated + AI-generated)
 
