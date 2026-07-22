@@ -42,6 +42,31 @@ them:
      `(rng()<0.5?-1:1) * rand(0.18, 0.5)` instead of `rand(-0.5, 0.5)`), not
      just a faster fade — a stronger fade masks the symptom but a stuck
      element will still out-accumulate any reasonable decay rate.
+   - **This bug class isn't limited to hand-written engines.** A
+     Gemini-generated engine ("metaballs gently merging and splitting")
+     passed `validate.js` and still washed out to solid white partway
+     through a real 1-hour render. Root cause: `validate.js`'s visual-phase
+     test only simulated 60 virtual seconds (vs. the real 3600s render)
+     *and* forced a short `cycleSec=30` override that doesn't match
+     production (production never sets `cycleSec` — it lets each engine use
+     its own default, or have no reset at all). An engine with no reset
+     mechanism looked fine in that short, artificially-cycled test window
+     and then accumulated unbounded for the full hour. Fixed in `validate.js`:
+     (1) stopped forcing `cycleSec` in validation so it tests the exact
+     config production will use, (2) extended the visual-phase test window
+     to 300 virtual seconds with 8 samples spread across it, and (3) added a
+     "never observed a reset" check — if mean brightness rises
+     monotonically with no dip across the *entire* sampled window
+     (`maxUnresetRise`, currently 40 luma levels), the engine is rejected
+     even if it hasn't crossed the white-out threshold *within the test
+     window*, because that trend reliably predicts it will over a much
+     longer real render. `generate.js`'s prompt now also states a hard,
+     numeric requirement (full reset at least every `cycleSec` — or ~90s if
+     `cycleSec` isn't used — via a real opaque clear, not just a fade) so
+     new Gemini engines are less likely to omit a reset in the first place.
+     Moral: a validator that tests a *different, shorter/easier*
+     configuration than what ships is worse than no validator — always
+     validate the literal parameters production will use.
 4. **Titles are a few words** (mood + subject, e.g. "Calming Geometric
    Patterns") — not long tagged strings. Duration/use-case context belongs in
    the description, not the title (see `src/metadata.js`).

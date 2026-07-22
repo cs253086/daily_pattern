@@ -18,17 +18,30 @@ import puppeteer from 'puppeteer';
 const DEFAULTS = {
   // Visual phase config — small canvas, longer virtual timeline so
   // accumulation-style engines (like Bloom) have time to develop.
+  // 300s (5 simulated minutes) is long enough to span 2+ cycles for any
+  // engine following the prompt's own "regenerate every 30-120s" guidance,
+  // and long enough for the monotonic-growth check below to catch an engine
+  // that never resets at all (a real production failure: a Gemini engine
+  // accumulated for the full 3600s render with no reset and washed to white
+  // partway through, while a 60s validation test never ran long enough to
+  // reveal the trend). cycleSec is intentionally NOT forced — see
+  // buildEngineUrl.
   visualWidth: 480,
   visualHeight: 270,
   visualFps: 24,
-  visualDuration: 60,
-  visualCycleSec: 30,
+  visualDuration: 300,
   seed: 12345,
   readyTimeoutMs: 30000,
   minPeakMean: 1.5,
   maxPeakMean: 252,
   minPeakStd: 5,
   minMotion: 1.0,
+  // If mean brightness rises monotonically (no dip anywhere) across the
+  // whole sampled timeline by more than this many luma levels (0-255 scale),
+  // treat it as "still accumulating, never observed a reset" — a strong
+  // predictor of eventual whiteout over a much longer real render, even if
+  // the absolute brightness hasn't crossed maxPeakMean within the test window.
+  maxUnresetRise: 40,
 
   // Speed phase config — real render resolution.
   speedWidth: 1920,
@@ -83,7 +96,17 @@ function buildEngineUrl(enginePath, { seed, width, height, fps, duration, cycleS
   p.set('height', String(height));
   p.set('fps', String(fps));
   p.set('duration', String(duration));
-  p.set('cycleSec', String(cycleSec));
+  // Deliberately do NOT force a cycleSec here unless explicitly given.
+  // Production (render.js/index.js) never sets cycleSec either — it lets
+  // each engine use its own internal default. If validation forced a short
+  // cycleSec (e.g. 30s) it could hide a real production failure: an engine
+  // whose actual default cycle is much longer (or that never resets at all)
+  // would look fine under a forced-short cycle but still saturate to white
+  // over a full 1-hour render. Testing with the engine's real default keeps
+  // validation honest about what will actually ship.
+  if (cycleSec !== undefined && cycleSec !== null && cycleSec !== '') {
+    p.set('cycleSec', String(cycleSec));
+  }
   return url.href;
 }
 
@@ -121,7 +144,7 @@ async function runVisual(enginePath, cfg) {
   const reasons = [];
   const url = buildEngineUrl(enginePath, {
     seed: cfg.seed, width: cfg.visualWidth, height: cfg.visualHeight,
-    fps: cfg.visualFps, duration: cfg.visualDuration, cycleSec: cfg.visualCycleSec,
+    fps: cfg.visualFps, duration: cfg.visualDuration,
   });
   const browser = await puppeteer.launch({ headless: true, args: PUPPETEER_ARGS });
   try {
@@ -133,9 +156,11 @@ async function runVisual(enginePath, cfg) {
       return { ok: false, reasons, stats: null };
     }
 
-    // Sample at later fractions so accumulation-style engines have time to bloom.
+    // Sample at later fractions so accumulation-style engines have time to
+    // bloom, with enough points spread across the whole window to detect a
+    // "still rising, never reset" trend (see maxUnresetRise check below).
     const total = ready.api.total;
-    const fractions = [0.15, 0.4, 0.7, 0.95];
+    const fractions = [0.08, 0.2, 0.35, 0.5, 0.65, 0.8, 0.9, 0.98];
     const targets = fractions.map((f) => Math.max(1, Math.min(total, Math.round(total * f))));
 
     const samples = [];
@@ -171,10 +196,27 @@ async function runVisual(enginePath, cfg) {
     if (peakStd < cfg.minPeakStd) reasons.push(`image lacks spatial structure (peak std ${peakStd.toFixed(2)})`);
     if (motion < cfg.minMotion) reasons.push(`little/no motion between frames (max diff ${motion.toFixed(2)})`);
 
+    // "Never reset" detector: if mean brightness rose across the ENTIRE
+    // sampled window with no dip anywhere (small noise tolerance aside), the
+    // engine likely has no periodic reset/fade-to-black mechanism at all.
+    // Even if it hasn't crossed maxPeakMean within this test window, that
+    // trend predicts it WILL saturate to white given the ~15x longer real
+    // production render (this is exactly how a real Gemini-generated engine
+    // slipped through: it looked fine in a short test but had no reset, so
+    // it kept accumulating for the full 1-hour render and washed out).
+    const monotonicNoDip = means.every((m, i) => i === 0 || m >= means[i - 1] - 2);
+    const totalRise = means[means.length - 1] - means[0];
+    if (monotonicNoDip && totalRise > cfg.maxUnresetRise) {
+      reasons.push(
+        `brightness rose ${totalRise.toFixed(1)} luma levels with no dip across the whole test window `
+        + `(never observed a reset/fade-to-black) — likely to accumulate to solid white over a full-length render`,
+      );
+    }
+
     return {
       ok: reasons.length === 0,
       reasons,
-      stats: { peakMean, peakStd, motion, total },
+      stats: { peakMean, peakStd, motion, total, totalRise: Number(totalRise.toFixed(1)), monotonicNoDip },
     };
   } finally {
     if (browser.connected) await browser.close().catch(() => {});
@@ -187,7 +229,7 @@ async function runSpeed(enginePath, cfg) {
   const reasons = [];
   const url = buildEngineUrl(enginePath, {
     seed: cfg.seed, width: cfg.speedWidth, height: cfg.speedHeight,
-    fps: cfg.speedFps, duration: cfg.speedDuration, cycleSec: cfg.visualCycleSec,
+    fps: cfg.speedFps, duration: cfg.speedDuration,
   });
   const browser = await puppeteer.launch({ headless: true, args: PUPPETEER_ARGS });
   try {
