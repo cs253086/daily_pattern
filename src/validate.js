@@ -36,12 +36,33 @@ const DEFAULTS = {
   maxPeakMean: 252,
   minPeakStd: 5,
   minMotion: 1.0,
-  // If mean brightness rises monotonically (no dip anywhere) across the
-  // whole sampled timeline by more than this many luma levels (0-255 scale),
-  // treat it as "still accumulating, never observed a reset" — a strong
-  // predictor of eventual whiteout over a much longer real render, even if
-  // the absolute brightness hasn't crossed maxPeakMean within the test window.
-  maxUnresetRise: 40,
+  // The visual test window (visualDuration) is much shorter than a real
+  // render. Fit a straight line through the sampled mean-brightness trend
+  // and extrapolate it across a full production render; if the projected
+  // rise is too large, reject even if no single sample looks blown out.
+  // This catches "partial reset" engines too -- ones whose fade/clear isn't
+  // strong enough to fully undo each cycle's accumulation, so brightness
+  // dips periodically (defeating a strict "never dips" check) but still
+  // climbs on net every cycle, washing to white by the end of a full hour
+  // even though a short test window with a few dips looks fine. This is
+  // exactly how a real production engine slipped through: it had periodic
+  // fades that dipped brightness locally, so it wasn't flagged by a
+  // no-dip-allowed rule, but the fades were too weak relative to the
+  // accumulation rate and it was visibly mostly-white by ~56 of 60 minutes.
+  productionDurationSec: 3600,
+  maxProjectedRise: 50,
+  // Short-interval ("is this actually moving right now") motion check.
+  // The widely-spaced fraction samples above are tens of seconds apart --
+  // fine for detecting long-term whiteout drift, but useless for catching
+  // "technically animating but far too slow to read as exciting" (a real
+  // complaint: full rotations taking 30-100+s are imperceptible moment to
+  // moment). Sample a short burst of frames close together instead and
+  // require the change to be a meaningful fraction of the frame's own
+  // structure (peakStd), not a fixed pixel value, so it adapts to each
+  // engine's contrast rather than needing a magic universal constant.
+  fastMotionWindowSec: 1.5,
+  minFastMotionAbs: 1.0,
+  minFastMotionStdFrac: 0.12,
 
   // Speed phase config — real render resolution.
   speedWidth: 1920,
@@ -86,6 +107,17 @@ function meanAbsDiff(a, b) {
   let s = 0;
   for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]);
   return s / a.length;
+}
+
+// Least-squares slope of y over x (luma per second, here).
+function linRegSlope(xs, ys) {
+  const n = xs.length;
+  if (n < 2) return 0;
+  const mx = xs.reduce((a, b) => a + b, 0) / n;
+  const my = ys.reduce((a, b) => a + b, 0) / n;
+  let num = 0, den = 0;
+  for (let i = 0; i < n; i++) { num += (xs[i] - mx) * (ys[i] - my); den += (xs[i] - mx) ** 2; }
+  return den === 0 ? 0 : num / den;
 }
 
 function buildEngineUrl(enginePath, { seed, width, height, fps, duration, cycleSec }) {
@@ -196,27 +228,66 @@ async function runVisual(enginePath, cfg) {
     if (peakStd < cfg.minPeakStd) reasons.push(`image lacks spatial structure (peak std ${peakStd.toFixed(2)})`);
     if (motion < cfg.minMotion) reasons.push(`little/no motion between frames (max diff ${motion.toFixed(2)})`);
 
-    // "Never reset" detector: if mean brightness rose across the ENTIRE
-    // sampled window with no dip anywhere (small noise tolerance aside), the
-    // engine likely has no periodic reset/fade-to-black mechanism at all.
-    // Even if it hasn't crossed maxPeakMean within this test window, that
-    // trend predicts it WILL saturate to white given the ~15x longer real
-    // production render (this is exactly how a real Gemini-generated engine
-    // slipped through: it looked fine in a short test but had no reset, so
-    // it kept accumulating for the full 1-hour render and washed out).
-    const monotonicNoDip = means.every((m, i) => i === 0 || m >= means[i - 1] - 2);
-    const totalRise = means[means.length - 1] - means[0];
-    if (monotonicNoDip && totalRise > cfg.maxUnresetRise) {
+    // Trend-based "will this whiteout over a full render" detector. Fit a
+    // straight line through the sampled means (vs. their real-world sample
+    // time within visualDuration) and extrapolate across a full production
+    // render. Using a fitted trend instead of a strict "never dips" rule
+    // catches partial-reset engines too: a fade/clear that's too weak to
+    // fully undo a cycle's accumulation still produces small periodic dips
+    // (which would satisfy a naive no-dip check) while the brightness climbs
+    // on net every cycle -- exactly how a real engine slipped through
+    // validation and was still visibly mostly-white by ~56 of 60 minutes in
+    // production.
+    const times = fractions.slice(0, samples.length).map((f) => f * cfg.visualDuration);
+    const slopePerSec = linRegSlope(times, means);
+    const projectedRise = slopePerSec * cfg.productionDurationSec;
+    if (projectedRise > cfg.maxProjectedRise) {
       reasons.push(
-        `brightness rose ${totalRise.toFixed(1)} luma levels with no dip across the whole test window `
-        + `(never observed a reset/fade-to-black) — likely to accumulate to solid white over a full-length render`,
+        `brightness trend extrapolates to a ${projectedRise.toFixed(1)} luma-level rise over a full `
+        + `${cfg.productionDurationSec}s render (fit from an ${cfg.visualDuration}s test window, `
+        + `slope ${slopePerSec.toFixed(3)} luma/s) — net upward drift even allowing for partial dips `
+        + `along the way, which predicts whiteout over the full render length`,
+      );
+    }
+
+    // Short-interval ("is this actually moving right now") motion check.
+    // The fraction samples above are tens of seconds apart -- fine for the
+    // whiteout trend, useless for "technically animating but far too slow to
+    // read as exciting" (a real complaint: full rotations taking 30-100+s
+    // are imperceptible moment to moment). Sample a tight burst near the
+    // middle of the timeline instead, and require the change to be a
+    // meaningful fraction of the frame's own structure (peakStd) rather than
+    // a fixed pixel value, so it adapts to each engine's own contrast.
+    const midTarget = Math.max(1, Math.min(total, Math.round(total * 0.5)));
+    if (cur < midTarget) {
+      await page.evaluate((n) => window.advanceFrames(n), midTarget - cur);
+      cur = midTarget;
+    }
+    const burstFrames = Math.max(1, Math.round(cfg.visualFps * cfg.fastMotionWindowSec));
+    const burstBefore = await page.evaluate(frameStats, 'canvas');
+    await page.evaluate((n) => window.advanceFrames(n), burstFrames);
+    const burstAfter = await page.evaluate(frameStats, 'canvas');
+    const fastMotion = meanAbsDiff(burstBefore?.luma, burstAfter?.luma);
+    const fastMotionFloor = Math.max(cfg.minFastMotionAbs, peakStd * cfg.minFastMotionStdFrac);
+    if (fastMotion < fastMotionFloor) {
+      reasons.push(
+        `motion is too slow to read as exciting: only ${fastMotion.toFixed(2)} luma diff over `
+        + `${cfg.fastMotionWindowSec}s mid-timeline (need >= ${fastMotionFloor.toFixed(2)}, `
+        + `${(cfg.minFastMotionStdFrac * 100).toFixed(0)}% of this frame's own structure) — `
+        + `a viewer would perceive this as nearly static`,
       );
     }
 
     return {
       ok: reasons.length === 0,
       reasons,
-      stats: { peakMean, peakStd, motion, total, totalRise: Number(totalRise.toFixed(1)), monotonicNoDip },
+      stats: {
+        peakMean, peakStd, motion, total,
+        slopePerSec: Number(slopePerSec.toFixed(4)),
+        projectedRise: Number(projectedRise.toFixed(1)),
+        fastMotion: Number(fastMotion.toFixed(2)),
+        fastMotionFloor: Number(fastMotionFloor.toFixed(2)),
+      },
     };
   } finally {
     if (browser.connected) await browser.close().catch(() => {});

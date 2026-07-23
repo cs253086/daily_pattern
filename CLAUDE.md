@@ -52,21 +52,42 @@ them:
      its own default, or have no reset at all). An engine with no reset
      mechanism looked fine in that short, artificially-cycled test window
      and then accumulated unbounded for the full hour. Fixed in `validate.js`:
-     (1) stopped forcing `cycleSec` in validation so it tests the exact
-     config production will use, (2) extended the visual-phase test window
-     to 300 virtual seconds with 8 samples spread across it, and (3) added a
-     "never observed a reset" check — if mean brightness rises
-     monotonically with no dip across the *entire* sampled window
-     (`maxUnresetRise`, currently 40 luma levels), the engine is rejected
-     even if it hasn't crossed the white-out threshold *within the test
-     window*, because that trend reliably predicts it will over a much
-     longer real render. `generate.js`'s prompt now also states a hard,
-     numeric requirement (full reset at least every `cycleSec` — or ~90s if
-     `cycleSec` isn't used — via a real opaque clear, not just a fade) so
-     new Gemini engines are less likely to omit a reset in the first place.
-     Moral: a validator that tests a *different, shorter/easier*
-     configuration than what ships is worse than no validator — always
-     validate the literal parameters production will use.
+     stopped forcing `cycleSec` in validation so it tests the exact config
+     production will use, and extended the visual-phase test window to 300
+     virtual seconds with 8 samples spread across it. `generate.js`'s prompt
+     also states a hard, numeric requirement (full reset at least every
+     `cycleSec` — or ~90s if `cycleSec` isn't used — via a real opaque
+     clear, not just a fade) so new Gemini engines are less likely to omit a
+     reset in the first place. Moral: a validator that tests a *different,
+     shorter/easier* configuration than what ships is worse than no
+     validator — always validate the literal parameters production will use.
+   - **A "never dips" check is not enough — PARTIAL resets slip through
+     too.** Third occurrence of this bug class: a Gemini engine (theme
+     "flowing plasma fields with soft additive glow") passed the fixed
+     validator above (including its first "never observed a reset" rule:
+     reject if mean brightness rises monotonically with *zero* dip anywhere
+     across the sampled window) and still was visibly, mostly white by
+     ~56 of 60 minutes into the real render (user-reported screenshot).
+     Root cause: that rule only fired when there was *no dip at all*. An
+     engine whose fade/clear is present but too weak relative to its
+     accumulation rate dips brightness a little at each partial reset —
+     enough to break the strict "never dips" condition — while still
+     climbing on net every single cycle, so it passes a short test window
+     that happens to catch a couple of those small dips and still washes
+     out over the full, ~12x-longer hour. A pass/fail rule built only
+     around "did it ever dip" cannot distinguish a full, honest reset from
+     a partial one — it needed to look at the *trend*, not just presence-of
+     -a-dip. Fixed in `validate.js`: replaced the no-dip rule with a
+     least-squares linear regression fit through the sampled
+     mean-brightness-vs-time curve; the fitted slope is extrapolated across
+     a full `productionDurationSec` (3600s) and rejected if the *projected*
+     rise exceeds `maxProjectedRise` (50 luma levels) — this catches net
+     upward drift regardless of how many small local dips occurred along
+     the way. Verified against a synthetic fixture engine that fades weakly
+     and does a partial (not full) clear every 20s: correctly rejected
+     (projected ~52 luma rise) where the old no-dip rule would have passed
+     it. Also re-verified all three curated engines (`geometric`, `grid`,
+     `kaleidoscope`) still pass comfortably under the new check.
 4. **Titles are a few words** (mood + subject, e.g. "Calming Geometric
    Patterns") — not long tagged strings. Duration/use-case context belongs in
    the description, not the title (see `src/metadata.js`).
@@ -84,6 +105,20 @@ them:
    changing kaleidoscope's motion rates, re-verified the whiteout fix still
    held at the (new) full cycle length — don't assume changing speed
    parameters is safe without re-running the full-cycle test from item 3.
+   - **Prompt wording alone doesn't guarantee compliance — enforce it in
+     `validate.js` too.** The prompt already told Gemini engines pace must
+     be lively (see `generate.js`'s "LIVELY PACE" section), yet a real
+     Gemini-generated engine still shipped with motion too slow to read as
+     exciting (same run as the partial-reset whiteout above — item 3's last
+     bullet). `validate.js`'s old `motion` metric only compared samples tens
+     of seconds apart, so slow-but-technically-moving engines passed. Added
+     a dedicated short-interval check: sample two frames ~1.5s apart
+     mid-render and require the pixel change to be at least
+     `minFastMotionStdFrac` (12%) of that frame's own `peakStd` (adapts to
+     each engine's contrast instead of a fixed magic pixel value). Verified
+     against a synthetic fixture that clears/redraws cleanly every frame
+     (zero whiteout risk) but rotates once per 240s: correctly rejected for
+     motion even though its brightness trend is perfectly flat.
 
 ## Editing engine/prompt template literals — a gotcha to know about
 
