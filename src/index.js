@@ -10,7 +10,9 @@
 //   (all other render flags pass through — see src/render.js)
 
 import path from 'node:path';
-import { existsSync, readdirSync } from 'node:fs';
+import {
+  existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync,
+} from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import 'dotenv/config';
@@ -52,9 +54,43 @@ function curatedPool() {
   return pool;
 }
 
-// Deterministic daily fallback: rotate through the curated pool by seed so a
-// non-generated day still varies day to day. Falls back to Bloom only if the
-// manual pool is somehow empty (should never happen in normal operation).
+// Persisted rotation cursor for the curated pool (committed to git by the
+// workflow after each run — see .github/workflows/daily.yml). Tracks the
+// index of the NEXT curated engine to use whenever a fallback actually
+// happens, independent of calendar date.
+const ROTATION_STATE_PATH = path.join(repoRoot, 'state', 'engine-rotation.json');
+
+function readRotationIndex() {
+  try {
+    const data = JSON.parse(readFileSync(ROTATION_STATE_PATH, 'utf8'));
+    if (Number.isInteger(data.nextIndex) && data.nextIndex >= 0) return data.nextIndex;
+  } catch { /* missing or corrupt state file -- caller bootstraps instead */ }
+  return null;
+}
+
+function writeRotationIndex(nextIndex) {
+  try {
+    mkdirSync(path.dirname(ROTATION_STATE_PATH), { recursive: true });
+    writeFileSync(
+      ROTATION_STATE_PATH,
+      `${JSON.stringify({ nextIndex, updatedAt: new Date().toISOString() }, null, 2)}\n`,
+    );
+  } catch (e) {
+    console.warn(`[index] could not persist engine rotation state: ${e.message}`);
+  }
+}
+
+// Fallback when Gemini isn't available or fails: pick the next curated
+// engine in true round-robin order (persisted across runs), not a date-hash
+// pick. A date-hash pick (previous approach: seed % pool.length) can
+// coincidentally repeat the same engine on two different fallback days --
+// this happened for real (2026-07-21 and 2026-07-24 both hashed to
+// kaleidoscope, producing two visually-similar videos days apart even
+// though Gemini succeeded on the days in between). Round-robin guarantees
+// the whole pool cycles before any curated engine repeats, regardless of
+// how many Gemini-generated days fall in between fallbacks. Falls back to
+// Bloom only if the manual pool is somehow empty (should never happen in
+// normal operation).
 function curatedOr(reason, seed) {
   const pool = curatedPool();
   if (pool.length === 0) {
@@ -62,8 +98,16 @@ function curatedOr(reason, seed) {
     if (reason) console.warn(`[index] ${reason} — engines/manual/ is empty, using emergency Bloom fallback.`);
     return { engine: BLOOM, source: 'curated:bloom' };
   }
-  const n = Number(String(seed).replace(/\D/g, '')) || 0;
-  const engine = pool[n % pool.length];
+  let idx = readRotationIndex();
+  if (idx === null || idx >= pool.length) {
+    // No usable persisted state (first run ever, or pool size changed since
+    // last persisted) -- bootstrap deterministically from the seed rather
+    // than always starting at 0.
+    const n = Number(String(seed).replace(/\D/g, '')) || 0;
+    idx = n % pool.length;
+  }
+  const engine = pool[idx];
+  writeRotationIndex((idx + 1) % pool.length);
   if (reason) console.warn(`[index] ${reason} — using curated engine ${path.basename(engine)}.`);
   return { engine, source: `curated:${path.basename(engine, '.html')}` };
 }

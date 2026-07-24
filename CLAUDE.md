@@ -152,13 +152,36 @@ built-in palette — used for the image-of-the-day recoloring (`src/palette.js`)
 1. If `GEMINI_API_KEY` is set: ask Gemini for a new engine, validate it
    (`src/validate.js` — visual quality gate + render-speed budget), one
    repair attempt on failure.
-2. Otherwise (or if Gemini fails both attempts): rotate deterministically by
-   date through the curated pool — `engines/manual/*.html`. Currently:
+2. Otherwise (or if Gemini fails both attempts): pick the next curated
+   engine in true round-robin order — `engines/manual/*.html`. Currently:
    `geometric`, `grid`, `kaleidoscope`. `engines/bloom.html` exists only as a
    last-resort emergency fallback if the manual pool is ever empty — it's
    organic, not the house style, and excluded from normal rotation.
 3. For curated (non-Gemini) engines, `src/palette.js` recolors from that
    day's NASA APOD image when reachable (non-fatal if not).
+
+### Curated fallback rotation is stateful, not date-hashed
+
+A real complaint: two videos three days apart (2026-07-21 and 2026-07-24)
+looked visually too similar. Both had fallen back to the curated pool
+(Gemini failed both days, for unrelated reasons), and the old selection
+logic picked `pool[seed % pool.length]` where `seed` is the `YYYYMMDD`
+date string — a digit-sum hash. With only 3 curated engines, two dates
+whose digit sums happen to agree mod 3 pick the *same* engine, entirely by
+coincidence, regardless of how many Gemini-generated (visually distinct)
+days fell in between. Fixed: `curatedOr()` now reads/writes a persisted
+cursor in `state/engine-rotation.json` (`nextIndex`) and advances it by 1
+(wrapping) every time a curated fallback actually happens, so the pool is
+a true round-robin — `geometric → grid → kaleidoscope → geometric → …` —
+and can never repeat an engine until the whole pool has cycled, no matter
+the date or how sparse the fallbacks are. The state file is committed back
+to the repo by a workflow step (`.github/workflows/daily.yml`, "Persist
+engine rotation state", `git commit` + `git push origin HEAD:<ref>`),
+which is why `permissions: contents: write` is required at the workflow
+level (previously `contents: read` was enough, since nothing wrote back to
+the repo). If `state/engine-rotation.json` is ever missing or corrupt,
+`curatedOr()` bootstraps from the old date-hash as a one-time fallback,
+so a fresh checkout doesn't crash.
 
 ## Known constraints / gotchas
 
