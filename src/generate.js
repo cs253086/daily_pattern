@@ -7,6 +7,7 @@
 //   env: GEMINI_API_KEY (required), GEMINI_MODEL (default gemini-2.0-flash)
 
 import { mkdir, writeFile } from 'node:fs/promises';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -47,6 +48,51 @@ function hashStr(s) {
   let h = 2166136261 >>> 0;
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
   return h >>> 0;
+}
+
+// Persisted rotation cursor for THEME_HINTS, mirroring curatedOr()'s fix in
+// src/index.js for the exact same bug class: a date-hash pick
+// (hashStr(date) % THEME_HINTS.length) can coincidentally repeat or
+// cluster similar themes on nearby dates, and doesn't know or care what
+// theme was used yesterday. A real complaint: consecutive days picked
+// "concentric rotating regular polygons... vortex" and "recursive geometric
+// tessellation of triangles and hexagons... rotating" -- different hints,
+// but conceptually close, and with no memory of recent history there's
+// nothing steering it toward the *unused* parts of the list first. A true
+// round-robin guarantees every hint is used once before any repeats,
+// maximising day-to-day variety the same way the curated-engine fix does.
+const THEME_STATE_PATH = path.join(repoRoot, 'state', 'theme-rotation.json');
+
+function readThemeIndex() {
+  try {
+    const data = JSON.parse(readFileSync(THEME_STATE_PATH, 'utf8'));
+    if (Number.isInteger(data.nextIndex) && data.nextIndex >= 0) return data.nextIndex;
+  } catch { /* missing or corrupt state file -- caller bootstraps instead */ }
+  return null;
+}
+
+function writeThemeIndex(nextIndex) {
+  try {
+    mkdirSync(path.dirname(THEME_STATE_PATH), { recursive: true });
+    writeFileSync(
+      THEME_STATE_PATH,
+      `${JSON.stringify({ nextIndex, updatedAt: new Date().toISOString() }, null, 2)}\n`,
+    );
+  } catch (e) {
+    console.warn(`[generate] could not persist theme rotation state: ${e.message}`);
+  }
+}
+
+// Pick the next theme in round-robin order and advance the persisted cursor.
+// Bootstraps from the old date-hash if state is missing/corrupt (fresh
+// checkout safety net, same pattern as curatedOr()).
+function nextThemeHint(date) {
+  let idx = readThemeIndex();
+  if (idx === null || idx >= THEME_HINTS.length) {
+    idx = hashStr(String(date)) % THEME_HINTS.length;
+  }
+  writeThemeIndex((idx + 1) % THEME_HINTS.length);
+  return THEME_HINTS[idx];
 }
 
 function todayUTC() {
@@ -213,7 +259,12 @@ export async function generateEngine(opts = {}) {
   const date = opts.date || todayUTC();
   const seed = opts.seed ?? date.replace(/-/g, '');
   const outDir = opts.outDir || path.join(repoRoot, 'engines', 'auto');
-  const themeHint = opts.themeHint || THEME_HINTS[hashStr(String(date)) % THEME_HINTS.length];
+  // A repair call MUST reuse the same themeHint as the original attempt
+  // (the caller passes it explicitly -- see chooseEngine() in src/index.js)
+  // rather than picking a new one here, or a repair would silently switch
+  // creative direction mid-repair. Only a fresh (non-repair) call without an
+  // explicit themeHint advances the rotation.
+  const themeHint = opts.themeHint || nextThemeHint(date);
 
   const prompt = opts.repair
     ? buildRepairPrompt({ seed, date, themeHint, previousHtml: opts.repair.previousHtml, reasons: opts.repair.reasons })

@@ -81,22 +81,24 @@ jobs:
           DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '' }}
         run: node src/index.js
 
-      # curatedOr() in src/index.js writes state/engine-rotation.json whenever
-      # it picks a curated fallback engine, so the pool round-robins (no
-      # repeats) across runs instead of relying on a date-hash pick that can
-      # coincidentally repeat the same engine. Persist that state back to the
-      # repo so the next run sees it. Runs even if the render/upload step
-      # failed, since the rotation decision was still made before any later
+      # curatedOr() (src/index.js) and nextThemeHint() (src/generate.js) each
+      # write their own file under state/ whenever they make a pick, so both
+      # the curated-engine pool and the Gemini theme list round-robin (no
+      # repeats until the whole list has cycled) instead of relying on a
+      # date-hash pick that can coincidentally repeat or cluster similar
+      # choices on nearby dates. Persist all of state/ back to the repo so
+      # the next run sees it. Runs even if the render/upload step failed,
+      # since the rotation decisions were still made before any later
       # failure. [skip ci] avoids re-triggering any push-based workflow.
-      - name: Persist engine rotation state
+      - name: Persist rotation state
         if: always()
         continue-on-error: true
         run: |
-          if [ -n "$(git status --porcelain state/engine-rotation.json 2>/dev/null)" ]; then
+          if [ -n "$(git status --porcelain state/ 2>/dev/null)" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add state/engine-rotation.json
-            git commit -m "chore: update engine rotation state [skip ci]"
+            git add state/
+            git commit -m "chore: update rotation state [skip ci]"
             git push origin HEAD:${{ github.ref_name }}
           else
             echo "No rotation state change to commit."

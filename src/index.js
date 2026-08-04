@@ -154,6 +154,11 @@ async function chooseEngine(cli) {
     const previousHtml = await readFile(gen.path, 'utf8');
     const gen2 = await generateEngine({
       ...genOpts,
+      // Reuse the exact same theme as the original attempt -- generateEngine
+      // would otherwise independently pick a new one for this second call,
+      // switching creative direction mid-repair instead of just fixing the
+      // reported problems.
+      themeHint: gen.themeHint,
       repair: { previousHtml, reasons: result.reasons },
     });
     result = await validateEngine(gen2.path, validateOpts);

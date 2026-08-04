@@ -183,6 +183,53 @@ the repo). If `state/engine-rotation.json` is ever missing or corrupt,
 `curatedOr()` bootstraps from the old date-hash as a one-time fallback,
 so a fresh checkout doesn't crash.
 
+### Standing requirement: every video should look new, not just non-repeating
+
+User-stated durable rule (not a one-off fix): each day's video should read
+as genuinely new/creative, not merely "not an exact repeat of yesterday."
+Two mechanisms currently drive day-to-day variety, and BOTH had the same
+underlying bug independently:
+
+- Curated engine choice (`curatedOr()` in `src/index.js`) — fixed above via
+  `state/engine-rotation.json`.
+- Gemini's creative-direction theme (`THEME_HINTS` in `src/generate.js`) —
+  had the *identical* `hashStr(date) % list.length` bug. A real complaint:
+  two consecutive days picked "concentric rotating regular polygons...
+  vortex" and "recursive geometric tessellation of triangles and
+  hexagons... rotating" — different hints, but conceptually close, because
+  nothing steered selection toward the unused part of the list. Fixed the
+  same way: `nextThemeHint()` reads/writes a persisted cursor in
+  `state/theme-rotation.json`, so all 20 hints get used once before any
+  repeat. **Caught a real correctness bug while fixing this**: the one
+  Gemini repair attempt (`chooseEngine()` in `src/index.js`) called
+  `generateEngine()` a second time *without* passing through the first
+  call's `themeHint`, so it silently re-derived one instead of reusing it.
+  This was invisible under the old date-hash scheme (idempotent per date,
+  so both calls happened to agree by construction) but would have been a
+  real bug the moment theme selection became stateful — a repair call
+  would advance the rotation AND switch creative direction mid-repair
+  instead of just fixing the reported problems. Fixed by having
+  `chooseEngine()` explicitly pass `themeHint: gen.themeHint` on the repair
+  call. Lesson: when converting a date-hash pick to a stateful rotation
+  elsewhere in this codebase, check every caller for an implicit
+  idempotency assumption the date-hash was quietly providing.
+- Both `state/*.json` cursors are committed by the same workflow step
+  (`.github/workflows/daily.yml`, "Persist rotation state", which now does
+  `git add state/` rather than naming one file, so any future state file
+  under `state/` is covered automatically).
+- Residual limit worth remembering: with only 3 curated engines and 20
+  theme hints, round-robin guarantees no *coincidental* repeats, but if
+  Gemini fails validation on most days in a row (it has, in bursts — see
+  the render-cost / Actions-minutes gotcha below, and check whether
+  `validate.js` has gotten stricter than Gemini can reliably satisfy if
+  failures cluster), the pipeline leans hard on the 3-engine curated pool
+  and *will* cycle back to the same curated engine every 3rd fallback day,
+  which reads as repetitive even though it's not a bug in the rotation
+  logic itself. If that pattern recurs, the next lever is expanding the
+  curated pool (more hand-written `engines/manual/*.html` entries) rather
+  than re-tuning the rotation, since the rotation is already working
+  correctly at 3-wide.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
