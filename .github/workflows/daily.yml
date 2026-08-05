@@ -86,22 +86,27 @@ jobs:
       # the curated-engine pool and the Gemini theme list round-robin (no
       # repeats until the whole list has cycled) instead of relying on a
       # date-hash pick that can coincidentally repeat or cluster similar
-      # choices on nearby dates. Persist all of state/ back to the repo so
-      # the next run sees it. Runs even if the render/upload step failed,
-      # since the rotation decisions were still made before any later
-      # failure. [skip ci] avoids re-triggering any push-based workflow.
-      - name: Persist rotation state
+      # choices on nearby dates. Separately, promoteToCuratedPool()
+      # (src/index.js) copies today's approved Gemini engine into
+      # engines/manual/ so the curated pool itself grows over time. Persist
+      # both back to the repo so the next run sees them. Runs even if the
+      # render/upload step failed, since the rotation decisions and any
+      # promotion happen before render -- an unrelated later failure (e.g.
+      # an upload error) doesn't reflect on an engine that already passed
+      # the same quality gate used for today's actual video. [skip ci]
+      # avoids re-triggering any push-based workflow.
+      - name: Persist rotation state and promoted engines
         if: always()
         continue-on-error: true
         run: |
-          if [ -n "$(git status --porcelain state/ 2>/dev/null)" ]; then
+          if [ -n "$(git status --porcelain state/ engines/manual/ 2>/dev/null)" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add state/
-            git commit -m "chore: update rotation state [skip ci]"
+            git add state/ engines/manual/
+            git commit -m "chore: update rotation state / promoted engines [skip ci]"
             git push origin HEAD:${{ github.ref_name }}
           else
-            echo "No rotation state change to commit."
+            echo "No rotation state or promoted engine to commit."
           fi
 
       # Keep the day's Gemini-generated engine (and the thumbnail) for Phase 3

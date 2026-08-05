@@ -153,9 +153,11 @@ built-in palette — used for the image-of-the-day recoloring (`src/palette.js`)
    (`src/validate.js` — visual quality gate + render-speed budget), one
    repair attempt on failure.
 2. Otherwise (or if Gemini fails both attempts): pick the next curated
-   engine in true round-robin order — `engines/manual/*.html`. Currently:
-   `geometric`, `grid`, `kaleidoscope`. `engines/bloom.html` exists only as a
-   last-resort emergency fallback if the manual pool is ever empty — it's
+   engine in true round-robin order — `engines/manual/*.html`. Hand-written
+   core: `geometric`, `grid`, `kaleidoscope`, `starburst`, `wireframe`,
+   `tessellation`. Plus any `auto-YYYY-MM-DD-<theme-slug>.html` files — see
+   "The curated pool grows daily" below. `engines/bloom.html` exists only as
+   a last-resort emergency fallback if the manual pool is ever empty — it's
    organic, not the house style, and excluded from normal rotation.
 3. For curated (non-Gemini) engines, `src/palette.js` recolors from that
    day's NASA APOD image when reachable (non-fatal if not).
@@ -169,19 +171,81 @@ logic picked `pool[seed % pool.length]` where `seed` is the `YYYYMMDD`
 date string — a digit-sum hash. With only 3 curated engines, two dates
 whose digit sums happen to agree mod 3 pick the *same* engine, entirely by
 coincidence, regardless of how many Gemini-generated (visually distinct)
-days fell in between. Fixed: `curatedOr()` now reads/writes a persisted
-cursor in `state/engine-rotation.json` (`nextIndex`) and advances it by 1
-(wrapping) every time a curated fallback actually happens, so the pool is
-a true round-robin — `geometric → grid → kaleidoscope → geometric → …` —
-and can never repeat an engine until the whole pool has cycled, no matter
-the date or how sparse the fallbacks are. The state file is committed back
-to the repo by a workflow step (`.github/workflows/daily.yml`, "Persist
-engine rotation state", `git commit` + `git push origin HEAD:<ref>`),
-which is why `permissions: contents: write` is required at the workflow
-level (previously `contents: read` was enough, since nothing wrote back to
-the repo). If `state/engine-rotation.json` is ever missing or corrupt,
-`curatedOr()` bootstraps from the old date-hash as a one-time fallback,
-so a fresh checkout doesn't crash.
+days fell in between. Fixed: `curatedOr()` reads/writes a persisted cursor
+in `state/engine-rotation.json` every time a curated fallback actually
+happens, so the pool is a true round-robin and can never repeat an engine
+until the whole pool has cycled, no matter the date or how sparse the
+fallbacks are.
+
+**The cursor stores the last-used engine's NAME, not a numeric index** —
+this was a deliberate second fix, not the original design. The pool now
+grows over time (see below), and `curatedPool()` lists `engines/manual/`
+sorted alphabetically; inserting a new file can shift every OTHER engine's
+position in that sort order (e.g. adding `auto-2026-08-05-....html` sorts
+before `geometric`, shifting it from index 0 to 1, `kaleidoscope` from 2 to
+3, etc.). A persisted numeric index would silently point at a different
+engine the moment the pool's shape changed, breaking the round-robin
+guarantee with no error. Storing the name and looking up its current
+position each run sidesteps this: "next after whatever we last used" is
+always computed against the pool as it exists right now, so growth or
+reordering can't cause a skip or a silent repeat. Verified locally: added a
+file that sorts before every existing engine and confirmed round-robin
+still visits all 7 with no repeat before wrapping.
+
+The state file is committed back to the repo by a workflow step
+(`.github/workflows/daily.yml`, "Persist rotation state and promoted
+engines", `git commit` + `git push origin HEAD:<ref>`), which is why
+`permissions: contents: write` is required at the workflow level
+(previously `contents: read` was enough, since nothing wrote back to the
+repo). If `state/engine-rotation.json` is ever missing/corrupt, or names an
+engine no longer in the pool, `curatedOr()` bootstraps from the old
+date-hash as a one-time fallback, so a fresh checkout doesn't crash.
+
+### The curated pool grows daily (`promoteToCuratedPool()` in `src/index.js`)
+
+User request: "generate one every day so it increases the possibility" —
+more engines × Gemini themes × palettes × seeds compounds the space of
+possible outputs (not literally a factorial, but the underlying instinct —
+more independent factors multiply together — is right). Every day Gemini
+produces an engine that passes the SAME quality gate used to approve it for
+that day's actual published video, it is also copied into
+`engines/manual/` as `auto-<date>-<slugified-theme>.html`, so it becomes a
+permanent, hand-off-required-free addition to the curated fallback pool —
+available on any future day Gemini fails or is disabled, forever after.
+No extra quality bar beyond "good enough to publish today" — that's
+already `validate.js`'s full visual + speed gate. Skipped on dry runs
+(`--no-upload`/`DRY_RUN=1`) so test invocations don't leave permanent
+files behind; escape hatch via `--no-promote` / `PROMOTE_ENGINES=0` if this
+ever needs to be paused (e.g. if the pool is growing faster than desired,
+or a bad engine slips through and needs investigating before more get
+added). Runs even if the render/upload step later fails for unrelated
+reasons (network, Actions-minutes cap) — an infra failure downstream
+doesn't reflect on an engine that already passed the quality gate.
+
+### Even a fully clear-and-redraw engine can trip the whiteout heuristic
+
+Third source of a "brightness trend" false alarm, distinct from the two
+whiteout incidents above (which were about engines that genuinely
+accumulate light across frames without a strong-enough reset).
+`starburst.html` clears to solid black at the start of every single frame
+— it is structurally impossible for it to accumulate anything across
+frames — yet failed `validate.js`'s regression-based whiteout check at
+seed=1 (projected ~58 luma rise, threshold 50). Root cause: its `config()`
+randomised the nested star count 3–5 every ~40s cycle, and more stars means
+more additive overlap area, i.e. a real (not accumulating) brightness
+difference between cycles. With ~7 cycles inside the 300s test window, an
+unlucky seed can make that legitimate cycle-to-cycle variance look like a
+monotonic trend to a regression fit — the same statistical shape as a real
+accumulation bug, from a completely different, harmless cause. Fixed at the
+source (not by loosening the validator): fixed the star count at a
+constant 4 instead of randomising it, removing the variance rather than
+tolerating it. Verified across 8+ seeds afterward, all passing with a
+healthy margin (worst case +10 vs. the -58...+58 swing before). Lesson: a
+statistical "does the trend look like a whiteout" check can false-positive
+on any engine whose *legitimate* per-cycle randomisation swings overall
+canvas brightness a lot, not just on engines with a real reset bug — when
+one fails, check whether the engine can even physically accumulate before
+assuming the check found a real bug.
 
 ### Standing requirement: every video should look new, not just non-repeating
 

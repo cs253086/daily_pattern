@@ -13,7 +13,7 @@ import path from 'node:path';
 import {
   existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync,
 } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, copyFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import 'dotenv/config';
 
@@ -56,24 +56,33 @@ function curatedPool() {
 
 // Persisted rotation cursor for the curated pool (committed to git by the
 // workflow after each run — see .github/workflows/daily.yml). Tracks the
-// index of the NEXT curated engine to use whenever a fallback actually
-// happens, independent of calendar date.
+// NAME of the last curated engine used, not a numeric index. This matters
+// once the pool can grow (see promoteToCuratedPool() below): curatedPool()
+// is sorted alphabetically, so inserting a new file can shift every OTHER
+// engine's position in that sort order. A persisted numeric index would
+// then silently point at a different engine than intended the moment the
+// pool changes shape -- e.g. adding "auto-2026-08-05-....html" (sorts
+// before "geometric") would shift geometric from index 0 to 1, kaleidoscope
+// from 2 to 3, etc., breaking the "never immediately repeat" guarantee
+// without any error. Storing the NAME and looking up its current position
+// each time sidesteps this entirely: "next after whatever we last used" is
+// always computed against the pool as it exists right now.
 const ROTATION_STATE_PATH = path.join(repoRoot, 'state', 'engine-rotation.json');
 
-function readRotationIndex() {
+function readLastEngineName() {
   try {
     const data = JSON.parse(readFileSync(ROTATION_STATE_PATH, 'utf8'));
-    if (Number.isInteger(data.nextIndex) && data.nextIndex >= 0) return data.nextIndex;
+    if (typeof data.lastEngine === 'string' && data.lastEngine) return data.lastEngine;
   } catch { /* missing or corrupt state file -- caller bootstraps instead */ }
   return null;
 }
 
-function writeRotationIndex(nextIndex) {
+function writeLastEngineName(name) {
   try {
     mkdirSync(path.dirname(ROTATION_STATE_PATH), { recursive: true });
     writeFileSync(
       ROTATION_STATE_PATH,
-      `${JSON.stringify({ nextIndex, updatedAt: new Date().toISOString() }, null, 2)}\n`,
+      `${JSON.stringify({ lastEngine: name, updatedAt: new Date().toISOString() }, null, 2)}\n`,
     );
   } catch (e) {
     console.warn(`[index] could not persist engine rotation state: ${e.message}`);
@@ -87,10 +96,10 @@ function writeRotationIndex(nextIndex) {
 // this happened for real (2026-07-21 and 2026-07-24 both hashed to
 // kaleidoscope, producing two visually-similar videos days apart even
 // though Gemini succeeded on the days in between). Round-robin guarantees
-// the whole pool cycles before any curated engine repeats, regardless of
-// how many Gemini-generated days fall in between fallbacks. Falls back to
-// Bloom only if the manual pool is somehow empty (should never happen in
-// normal operation).
+// the pool cycles before any curated engine repeats, regardless of how many
+// Gemini-generated days fall in between fallbacks. Falls back to Bloom only
+// if the manual pool is somehow empty (should never happen in normal
+// operation).
 function curatedOr(reason, seed) {
   const pool = curatedPool();
   if (pool.length === 0) {
@@ -98,16 +107,21 @@ function curatedOr(reason, seed) {
     if (reason) console.warn(`[index] ${reason} — engines/manual/ is empty, using emergency Bloom fallback.`);
     return { engine: BLOOM, source: 'curated:bloom' };
   }
-  let idx = readRotationIndex();
-  if (idx === null || idx >= pool.length) {
-    // No usable persisted state (first run ever, or pool size changed since
-    // last persisted) -- bootstrap deterministically from the seed rather
-    // than always starting at 0.
+  const names = pool.map((p) => path.basename(p, '.html'));
+  const lastName = readLastEngineName();
+  const lastIdx = lastName ? names.indexOf(lastName) : -1;
+  let idx;
+  if (lastIdx === -1) {
+    // No usable persisted state (first run ever, or the last-used engine no
+    // longer exists in the pool) -- bootstrap deterministically from the
+    // seed rather than always starting at 0.
     const n = Number(String(seed).replace(/\D/g, '')) || 0;
     idx = n % pool.length;
+  } else {
+    idx = (lastIdx + 1) % pool.length;
   }
   const engine = pool[idx];
-  writeRotationIndex((idx + 1) % pool.length);
+  writeLastEngineName(names[idx]);
   if (reason) console.warn(`[index] ${reason} — using curated engine ${path.basename(engine)}.`);
   return { engine, source: `curated:${path.basename(engine, '.html')}` };
 }
@@ -144,7 +158,9 @@ async function chooseEngine(cli) {
     let result = await validateEngine(gen.path, validateOpts);
     if (result.ok) {
       console.log(`[index] generated engine passed (peakStd=${result.stats.peakStd.toFixed(1)}, motion=${result.stats.motion.toFixed(1)}, ${result.stats.avgMsPerFrame}ms/frame, ~${result.stats.projectedHourRenderMin}min for 1h).`);
-      return { engine: gen.path, source: 'gemini' };
+      return {
+        engine: gen.path, source: 'gemini', themeHint: gen.themeHint, date: gen.date,
+      };
     }
 
     // One repair attempt: hand the validator's reasons + the previous file
@@ -164,7 +180,9 @@ async function chooseEngine(cli) {
     result = await validateEngine(gen2.path, validateOpts);
     if (result.ok) {
       console.log(`[index] repaired engine passed (peakStd=${result.stats.peakStd.toFixed(1)}, motion=${result.stats.motion.toFixed(1)}, ${result.stats.avgMsPerFrame}ms/frame, ~${result.stats.projectedHourRenderMin}min for 1h).`);
-      return { engine: gen2.path, source: 'gemini-repaired' };
+      return {
+        engine: gen2.path, source: 'gemini-repaired', themeHint: gen2.themeHint, date: gen2.date,
+      };
     }
     return curatedOr(`generated engine failed validation after repair: ${result.reasons.join('; ')}`, seed);
   } catch (e) {
@@ -179,19 +197,56 @@ function defaultSeedStr() {
   return String(d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate());
 }
 
+function slugify(s, maxLen = 40) {
+  const slug = String(s || 'engine').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return (slug || 'engine').slice(0, maxLen).replace(/-+$/g, '');
+}
+
+// Standing requirement (user-stated): every video should be genuinely new,
+// not just "not an exact repeat." Beyond rotating the fixed pool of
+// hand-written curated engines and Gemini theme hints (see CLAUDE.md), the
+// combinatorial space itself grows every day this runs: any Gemini engine
+// that passes the SAME quality gate used to approve it for today's actual
+// published video also gets copied into the permanent curated pool
+// (engines/manual/), so it becomes available as a fallback option on any
+// future day Gemini fails or is disabled -- engines x themes x palettes x
+// seeds compounds daily instead of staying fixed at 6 hand-written engines.
+// Not gated on "first attempt only" -- if it was good enough to publish
+// today, it's good enough to be a future fallback candidate, same bar.
+async function promoteToCuratedPool(enginePath, themeHint, date) {
+  const destName = `auto-${date}-${slugify(themeHint)}.html`;
+  const destPath = path.join(MANUAL_DIR, destName);
+  await copyFile(enginePath, destPath);
+  console.log(`[index] promoted today's Gemini engine to the curated pool: engines/manual/${destName}`);
+  return destPath;
+}
+
 async function main() {
   const cli = parseArgs(process.argv.slice(2));
   const dryRun = cli['no-upload'] === true || process.env.DRY_RUN === '1';
 
   console.log(`[index] === daily run ${new Date().toISOString()} ===`);
 
-  const { engine, source } = await chooseEngine(cli);
+  const { engine, source, themeHint, date } = await chooseEngine(cli);
   const engineName = path.basename(engine, '.html');
 
   // Resolve config once so render + metadata agree on seed/duration.
   const cfg = resolveConfig({ ...cli, engine });
 
   console.log(`[index] engine=${engineName} (${source}) seed=${cfg.seed} duration=${cfg.duration}s upload=${!dryRun}`);
+
+  // Grow the curated pool from today's approved Gemini engine (see
+  // promoteToCuratedPool for why). Skipped on dry runs so ad-hoc/test
+  // invocations don't leave permanent files behind, and skippable via
+  // --no-promote / PROMOTE_ENGINES=0 as an escape hatch.
+  const promoteEnabled = process.env.PROMOTE_ENGINES !== '0' && cli['no-promote'] !== true;
+  if (!dryRun && promoteEnabled && source.startsWith('gemini')) {
+    try {
+      await promoteToCuratedPool(engine, themeHint, date);
+    } catch (e) {
+      console.warn(`[index] could not promote engine to curated pool: ${e.message}`);
+    }
+  }
 
   // Optional "image of the day" palette (NASA APOD). Only for curated engines —
   // Gemini engines generate their own colours. Enabled when IMAGE_PALETTE!=0

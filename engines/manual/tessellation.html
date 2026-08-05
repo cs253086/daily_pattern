@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tessellation — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, distinct from the other curated engines: a
+// Truchet-style grid where every cell is fully tiled by two colour
+// triangles split along a diagonal, and the diagonal's orientation flips
+// between the two classic Truchet states in a travelling wave from the
+// centre -- a solid, fully-connected animated mosaic (no dead space, no
+// thin isolated lines), unlike the stroke-only polygon/ring engines.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF, per-second rates, cheap vector strokes,
+// redraws each frame (crisp, no smear, no whiteout risk).
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 38);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 75, 72], [205, 72, 74], [225, 68, 76], [250, 62, 74], [270, 58, 72]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  const cx = W / 2, cy = H / 2;
+  const dt = 1 / FPS;
+
+  let cols, rows, cell, hue0, waveK, waveRate;
+  function config() {
+    // Fewer, bigger cells -> bold, clearly readable tiles.
+    const target = Math.round(rand(8, 13) * Math.max(0.6, Math.min(1.6, DENSITY)));
+    cols = target;
+    cell = W / cols;
+    rows = Math.ceil(H / cell) + 1;
+    hue0 = rng() * 360;
+    waveK = rand(0.010, 0.026);
+    // Guaranteed minimum magnitude with random sign -- never let the wave
+    // sit nearly still (same fix as every other curated engine here).
+    waveRate = (rng() < 0.5 ? -1 : 1) * rand(0.5, 1.2);
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  config();
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt * SPEED;
+
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.globalCompositeOperation = 'lighter';
+    const lwEdge = Math.max(1, Math.min(W, H) / 1080 * 2.2);
+
+    for (let gy = 0; gy < rows; gy++) {
+      for (let gx = 0; gx < cols; gx++) {
+        const x0 = gx * cell, y0 = gy * cell, x1 = x0 + cell, y1 = y0 + cell;
+        const cxp = x0 + cell * 0.5, cyp = y0 + cell * 0.5;
+        const dx = cxp - cx, dy = cyp - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const phase = clk * waveRate - dist * waveK;
+        // Classic Truchet tile: split the square into two triangles along
+        // one of the two diagonals. Which diagonal flips in a travelling
+        // wave from the centre -- this IS the animation (a discrete flip,
+        // not a continuous rotation, which is what makes it read as tiles
+        // rather than floating lines).
+        const flipA = Math.sin(phase) >= 0;
+        // Continuous per-cell size pulse, independent of the (comparatively
+        // sparse) discrete flip events -- without this, most frames 1-2s
+        // apart look nearly identical except where a flip happens to land,
+        // which reads as static (same failure class as a near-zero motion
+        // parameter, just via discrete events instead of a slow rate).
+        const pulse = 0.5 + 0.5 * Math.sin(clk * 2.4 + (gx + gy) * 0.35);
+
+        const baseA = PAL[(gx + gy) % PAL.length];
+        const baseB = PAL[(gx + gy + 2) % PAL.length];
+        const hueA = ((baseA[0] + hue0 * 0.05 + dist * 0.04 + clk * 4) % 360 + 360) % 360;
+        const hueB = ((baseB[0] + hue0 * 0.05 + dist * 0.04 + clk * 4) % 360 + 360) % 360;
+
+        // Two triangles that together exactly tile the cell -- no dead
+        // space, unlike a thin isolated segment. Inset each corner toward
+        // the cell centre so a thin black gutter shows between neighbouring
+        // tiles -- otherwise the fill is fully opaque wall-to-wall and loses
+        // the channel's "luminous shapes on black" identity (looks like flat
+        // wallpaper instead of a glowing mosaic).
+        const INSET = 0.78 + 0.14 * pulse;
+        const ins = (px, py) => [cxp + (px - cxp) * INSET, cyp + (py - cyp) * INSET];
+        const cTL = ins(x0, y0), cTR = ins(x1, y0), cBL = ins(x0, y1), cBR = ins(x1, y1);
+        const triA = flipA ? [cTL, cTR, cBR] : [cTL, cTR, cBL];
+        const triB = flipA ? [cTL, cBL, cBR] : [cTR, cBR, cBL];
+
+        ctx.beginPath();
+        ctx.moveTo(triA[0][0], triA[0][1]); ctx.lineTo(triA[1][0], triA[1][1]); ctx.lineTo(triA[2][0], triA[2][1]);
+        ctx.closePath();
+        ctx.fillStyle = `hsla(${hueA}, ${baseA[1]}%, ${baseA[2]}%, 0.92)`;
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(triB[0][0], triB[0][1]); ctx.lineTo(triB[1][0], triB[1][1]); ctx.lineTo(triB[2][0], triB[2][1]);
+        ctx.closePath();
+        ctx.fillStyle = `hsla(${hueB}, ${baseB[1]}%, ${baseB[2]}%, 0.92)`;
+        ctx.fill();
+
+        // Bright edge along the shared diagonal -- crisp Truchet-tile line.
+        const diag = flipA ? [cTL, cBR] : [cTR, cBL];
+        ctx.beginPath(); ctx.moveTo(diag[0][0], diag[0][1]); ctx.lineTo(diag[1][0], diag[1][1]);
+        ctx.strokeStyle = `hsla(${hueA}, ${baseA[1]}%, ${Math.min(90, baseA[2] + 22)}%, 0.9)`;
+        ctx.lineWidth = lwEdge;
+        ctx.stroke();
+      }
+    }
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; config(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
