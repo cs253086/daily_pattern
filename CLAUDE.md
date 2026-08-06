@@ -247,6 +247,54 @@ canvas brightness a lot, not just on engines with a real reset bug — when
 one fails, check whether the engine can even physically accumulate before
 assuming the check found a real bug.
 
+### Gemini's recent success rate is the real lever for daily variety — and it's currently poor
+
+A user complaint on 2026-08-06 ("I've seen this kind of pattern a few
+times recently") traced back to: `curatedOr()`'s round-robin IS working
+correctly (verified: `geometric → grid → kaleidoscope`, in order, across
+the three fallback days after the pool grew to 6 -- see git history of
+`state/engine-rotation.json`), but Gemini failed validation on **5 of the
+last 6 daily runs** (2026-08-02 through 08-06), so almost every recent
+video has come from the still-small curated pool, and a viewer will
+naturally perceive a repeat within a 3-6 day window even though the
+rotation never coincidentally repeats. `promoteToCuratedPool()` hasn't
+fired even once since it shipped, for the same reason -- it only runs on a
+Gemini *success*, and there hasn't been one.
+
+More strikingly, all 5 recent failures show the **exact same degenerate
+validator signature** regardless of theme: `peak mean luma 255.00, peak
+std 0.00, motion 0.00` -- a canvas that reads as perfectly uniform solid
+white with ZERO spatial variance for the entire test window, not a gradual
+whiteout drift. Five structurally unrelated themes ("flow field of fine
+lines," "concentric rotating polygons," "recursive tessellation,"
+"sacred-geometry lattice," "wireframe tunnel flythrough") independently
+producing the identical failure signature is a strong signal of something
+systemic (a model-quality dip, or a subtle prompt issue), not five
+coincidentally-different code bugs. Response times/lengths look normal
+(12-16KB HTML each) -- not a truncated/empty-response case.
+
+**Could not root-cause the actual generated code**: `engines/auto/*.html`
+is git-ignored (ephemeral per run) and only preserved as a GitHub Actions
+artifact, whose download URL points at Azure blob storage
+(`productionresultssa*.blob.core.windows.net`) -- this dev sandbox's
+egress policy blocks that host (confirmed via the agent-proxy status
+endpoint: `connect_rejected`, "gateway answered 403 to CONNECT"). Do not
+keep retrying that download; it's a policy block, not a transient
+failure. `GEMINI_API_KEY` is also not set in this sandbox, so the failing
+prompt can't be reproduced live here either.
+
+**Fixed instead**: added `logEngineSnippet()` in `src/index.js`, called on
+every validation failure (first attempt and repair). It logs the first 500
+chars of the generated `<script>` body plus a scan for a few suspicious
+tokens (`white`, `#fff`, `rgba(255,255,255`, `getContext('webgl'`)
+directly into the job log -- readable via `get_job_logs` alone, no
+artifact download needed. Next time this failure signature recurs, the
+actual generated code (or at least its opening section and any obviously
+suspicious tokens) will be visible without hitting the network-blocked
+artifact path. If the snippet points at a specific bug pattern, fix
+`generate.js`'s prompt at the source, the same way the other whiteout
+incidents were fixed once the actual code was visible.
+
 ### Standing requirement: every video should look new, not just non-repeating
 
 User-stated durable rule (not a one-off fix): each day's video should read

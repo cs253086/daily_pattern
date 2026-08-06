@@ -166,6 +166,7 @@ async function chooseEngine(cli) {
     // One repair attempt: hand the validator's reasons + the previous file
     // back to Gemini and ask for a fix.
     console.warn(`[index] first attempt failed: ${result.reasons.join('; ')}`);
+    await logEngineSnippet('first attempt', gen.path);
     console.log('[index] asking Gemini to repair…');
     const previousHtml = await readFile(gen.path, 'utf8');
     const gen2 = await generateEngine({
@@ -184,6 +185,7 @@ async function chooseEngine(cli) {
         engine: gen2.path, source: 'gemini-repaired', themeHint: gen2.themeHint, date: gen2.date,
       };
     }
+    await logEngineSnippet('repair attempt', gen2.path);
     return curatedOr(`generated engine failed validation after repair: ${result.reasons.join('; ')}`, seed);
   } catch (e) {
     return curatedOr(`generation error: ${e.message}`, seed);
@@ -195,6 +197,28 @@ async function chooseEngine(cli) {
 function defaultSeedStr() {
   const d = new Date();
   return String(d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate());
+}
+
+// Diagnostic aid for validation failures: engines/auto/*.html is git-ignored
+// (ephemeral per-run) and only otherwise preserved as a CI artifact, which
+// some sandboxed dev environments cannot download (network policy blocks
+// the artifact blob-storage host). Logging a snippet directly into the job
+// log means a failure is debuggable from `get_job_logs` alone, no artifact
+// access needed. Kept short (a few hundred chars + a handful of suspicious
+// tokens) so it doesn't bloat every log -- this is a diagnostic breadcrumb,
+// not a full dump.
+async function logEngineSnippet(label, htmlPath) {
+  try {
+    const html = await readFile(htmlPath, 'utf8');
+    const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
+    const script = scriptMatch ? scriptMatch[1] : html;
+    const suspiciousPatterns = ['getContext(\'webgl', 'getContext("webgl', 'white', 'rgba(255,255,255', '#fff', '#FFF'];
+    const found = suspiciousPatterns.filter((p) => script.includes(p));
+    console.log(`[index] ${label} snippet (first 500 chars of script):\n${script.slice(0, 500)}`);
+    console.log(`[index] ${label} suspicious tokens present: ${found.length ? found.join(', ') : '(none)'}`);
+  } catch (e) {
+    console.warn(`[index] could not log ${label} snippet: ${e.message}`);
+  }
 }
 
 function slugify(s, maxLen = 40) {
