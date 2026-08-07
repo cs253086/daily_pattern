@@ -37,6 +37,12 @@ const THEME_HINTS = [
   'grid of rotating triangles forming moiré interference',
   'geometric kaleidoscope of mirrored straight-edged shards',
   'orbiting polygons tracing crisp geometric spirograph paths',
+  // Genuine 3D (lit solid geometry with real depth, not a flat projection --
+  // see the "3D / WEBGL" section above)
+  'lit 3D polyhedra orbiting each other with real depth and per-face shading',
+  'extruded 3D isometric lattice of glowing faceted blocks',
+  'rotating 3D lit torus-and-ring structures with directional lighting',
+  'field of small lit 3D solids drifting through real perspective depth',
   // A few organic options for variety
   'blooming fractal petals opening and closing',
   'flowing plasma fields with soft additive glow',
@@ -157,6 +163,14 @@ Output ONLY the raw HTML document. Start with <!DOCTYPE html>. No markdown, no c
 - Prefer cheap vector drawing: a few hundred strokes/fills per frame, additive blending for the bloom feel, accumulating onto the canvas across frames (don't clear it every frame — use a subtle dark-alpha rect fade like 'rgba(0,0,0,0.02)' for trails).
 - If you use particles, cap at a few thousand TOTAL and update/draw them in a single pass with simple math (sin/cos, vector add). NOT a flock with O(n^2) interactions per frame.
 - WebGL is allowed if it's faster, but software rendering means most simple Canvas2D approaches will be faster than overengineered WebGL.
+
+=== 3D / WEBGL (OPTIONAL, encouraged sometimes for variety) ===
+Raw WebGL for genuine lit 3D geometry is fully supported by this renderer and is a good choice for some fraction of days: real per-pixel lighting and a depth buffer read as a meaningfully different, more three-dimensional look than a flat Canvas2D scene, which is valuable for day-to-day variety. You must write raw WebGL yourself (creating your own shaders, program, buffers, and a small hand-written 4x4 matrix helper) since no external 3D library can be loaded -- no network access is allowed, so nothing like three.js is available. If today's theme suggests real 3D structure (solids, lattices, depth, orbiting shapes), prefer WebGL; otherwise Canvas2D is fine as usual.
+If you do use WebGL, three renderer-specific requirements are CRITICAL:
+1. Create the context requesting preserveDrawingBuffer as true. Without this the headless capture pipeline reads back an already-cleared blank buffer and the whole video will be black.
+2. Headless software WebGL in this environment has been observed to occasionally fire a spurious context-lost event within the first fraction of a second after the context is created, even for completely correct code -- roughly half the time, and never observed to recur later once past the first couple of frames. Handle this at startup, before setting window.READY to true: listen for the context-lost event and call preventDefault on it (required for the context to become restorable), listen for the context-restored event and re-create every GL resource from scratch when it fires, and wait a short delay (a few hundred milliseconds is enough) after creating the context before declaring READY, so a possible early loss has time to fire and be recovered rather than silently rendering on a dead context.
+3. Clear both the color buffer and the depth buffer to opaque black at the start of every single frame, and enable depth testing for correct occlusion between shapes. This clear is a hardware buffer reset, not a compositing fade, so it is structurally immune to the whiteout/accumulation problem described above -- always prefer it over any fade-based approach for a 3D engine.
+One more thing worth knowing: a real per-pixel lighting model naturally makes the same scene look brighter or dimmer depending on which faces point toward the camera and light, and how much objects overlap and occlude each other. If you randomise things like orbit radius, object scale, or object count every time the scene resets, that alone can swing the average frame brightness enough to look like a fake trend to the automated brightness check, even though nothing is actually accumulating. Keep values that affect how much of the frame is covered (object scale, orbit radius, camera distance) fixed or only mildly varied instead; randomise rotation rates, orbit speed, phase offsets, and colors -- those add plenty of variety without swinging overall coverage. Keep total geometry modest (well under a thousand triangles) for the performance budget above.
 
 === CREATIVE DIRECTION FOR TODAY (${date}) ===
 Seed: ${seed}. Lean into this aesthetic: ${themeHint}.

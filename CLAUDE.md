@@ -147,6 +147,70 @@ advanceFrame() / advanceFrames(n)`. Deterministic (Mulberry32), no
 `requestAnimationFrame`. `colors` (format `h,s,l;h,s,l;...`) overrides the
 built-in palette — used for the image-of-the-day recoloring (`src/palette.js`).
 
+## 3D / WebGL engines are supported infrastructure, not just one engine
+
+User request: "Add infrastructures to generate 3D pattern videos as well."
+Everything up to this point was Canvas2D, including `wireframe.html`, which
+fakes a 3D look by projecting polyhedron edges onto a flat canvas by hand —
+not real per-pixel lighting or depth. `engines/manual/solids3d.html` is the
+first CURATED engine using raw WebGL: real shaders, a depth buffer, and
+per-face Lambertian lighting on solid (not wireframe) geometry. This is
+also now a supported PATH for Gemini generation, not just a one-off hand-
+written engine — `src/generate.js`'s prompt has a "3D / WEBGL" section and
+`THEME_HINTS` includes explicit lit-3D theme entries — so this compounds
+into the daily variety the same way the rest of the pool does.
+
+Building this surfaced real infrastructure gotchas worth knowing before
+touching WebGL in this codebase again:
+
+- **`preserveDrawingBuffer: true` is mandatory.** The capture pipeline
+  (`render.js`/`validate.js`) reads the canvas back via `drawImage`/
+  `toDataURL` on a separate tick after `advanceFrame()`, not synchronously
+  within the same draw call. Without `preserveDrawingBuffer: true` on
+  context creation, that readback can see an already-cleared buffer and the
+  whole video comes out black.
+- **Headless software WebGL (swiftshader) intermittently fires a spurious
+  `webglcontextlost` shortly after context creation.** Confirmed via
+  repeated trials in this sandbox: roughly half of otherwise-identical
+  launches lose context within ~100ms of creation, for a completely trivial
+  single `gl.clear()` — not caused by shader/geometry complexity. Critically,
+  **2000-frame stress tests never showed a loss after the first couple of
+  frames** — it's a startup-only risk, not a continuous one, which makes it
+  tractable: `solids3d.html`'s fix is to listen for `webglcontextlost`
+  (call `preventDefault()` on the event, required for the context to become
+  restorable) and `webglcontextrestored` (re-run ALL WebGL setup — shaders,
+  program, buffers — from scratch), then hold `window.READY` back for ~300ms
+  plus a short poll for recovery before declaring ready, instead of
+  signalling ready immediately after context creation. Verified: 6/6 runs
+  identical after the fix, vs. ~40% silently blank before it. Any future
+  WebGL engine (curated or in the Gemini prompt) needs this same pattern —
+  it's now documented in `generate.js`'s prompt too.
+- **A fourth source of whiteout-heuristic false positives, specific to real
+  3D with depth occlusion**: unlike the flat/additive engines, opaque
+  depth-tested solids can occlude each other, so how much total lit area is
+  *visible* (not accumulated — gl.clear() to opaque black every frame makes
+  true cross-frame accumulation structurally impossible) genuinely swings
+  with the 3D arrangement at each instant. Randomising things like orbit
+  radius, object scale, or orbit phase (which can make objects randomly
+  cluster and occlude each other, or spread out and reveal more total lit
+  area) is enough to swing sampled brightness far more than the 2D engines
+  ever do, occasionally reading as a fake trend to the regression check over
+  a short sampled window. Mitigated (not eliminated) by fixing orbit
+  radius/scale/phase and only randomising rotation rates and colors, plus
+  raising the ambient light floor to reduce per-face lighting-angle
+  variance — improved the pass rate substantially (most seeds now pass with
+  large margins) but a small residual failure rate remains as an honest,
+  inherent property of dynamic 3D occlusion, not a bug. This is fine in
+  practice: curated engines never run through `validate.js` at runtime (see
+  "Engine selection each run" below) — it's a design-time sanity check only.
+- **Colors read pastel/washed by default with naive Lambertian shading.**
+  Ambient + diffuse lighting multiplied onto an already fairly light HSL
+  base color, plus an additive fresnel rim term, pushed lit faces toward
+  near-white — directly against the "vivid, saturated, not pastel" house
+  style. Fixed by lowering the base palette lightness, toning down the rim
+  contribution, and adding a soft clamp on final fragment color
+  (`min(base + rim, vec3(0.86))`) so no face can wash out to full white.
+
 ## Engine selection each run (`src/index.js`)
 
 1. If `GEMINI_API_KEY` is set: ask Gemini for a new engine, validate it
@@ -155,7 +219,8 @@ built-in palette — used for the image-of-the-day recoloring (`src/palette.js`)
 2. Otherwise (or if Gemini fails both attempts): pick the next curated
    engine in true round-robin order — `engines/manual/*.html`. Hand-written
    core: `geometric`, `grid`, `kaleidoscope`, `starburst`, `wireframe`,
-   `tessellation`. Plus any `auto-YYYY-MM-DD-<theme-slug>.html` files — see
+   `tessellation`, `solids3d` (the last one is real WebGL — see "3D / WebGL
+   engines" above). Plus any `auto-YYYY-MM-DD-<theme-slug>.html` files — see
    "The curated pool grows daily" below. `engines/bloom.html` exists only as
    a last-resort emergency fallback if the manual pool is ever empty — it's
    organic, not the house style, and excluded from normal rotation.
