@@ -287,6 +287,42 @@ added). Runs even if the render/upload step later fails for unrelated
 reasons (network, Actions-minutes cap) — an infra failure downstream
 doesn't reflect on an engine that already passed the quality gate.
 
+**A real bad engine got promoted, because the quality gate had a genuine
+blind spot.** On 2026-08-09 a Gemini "isometric cube lattice" engine
+passed validation and was published AND auto-promoted into the permanent
+curated pool — then a user reported the video as "too white." Rendered
+the actual promoted file (now a normal committed file, no artifact-
+download workaround needed) at full 3600s duration: individual cube
+shapes were clipped to solid white from essentially the first frame (not
+a slow drift — confirmed by sampling from t=36s onward, already ~140/255
+average). Root cause was NOT a missing reset (this engine's hard-reset
+logic was actually correct, verified by reading it) — it was **local,
+within-a-single-frame overexposure**: several additively-blended cube
+faces, plus a stroke drawn in the same colour as its own fill (doubling
+the contribution at the shared area), were dense enough to clip individual
+cube shapes to solid white every single frame. `validate.js`'s
+`maxPeakMean` check (252) missed it because black background between the
+sparse cubes diluted the FRAME-WIDE average to ~140-157 — comfortably
+under threshold — even though the shapes themselves were locally maxed
+out. `peakStd` also stayed high (black background + white blobs still
+reads as "structured"), and there was no accumulation trend to catch
+either. This is a distinct failure mode from every prior whiteout
+incident above: those were all about brightness *drifting* over time;
+this one is bad from frame 1 and just wasn't being measured correctly.
+Fixed in `validate.js`: added `peakNearWhiteFrac`, the fraction of sampled
+pixels that are near-max brightness (luma > 248) at any one sample,
+independent of the frame-wide average — rejects if it exceeds
+`maxNearWhiteFrac` (12%). Verified against the actual bad engine (80.3%
+of pixels near-white — an easy catch) and all 7 curated engines (all under
+1%, comfortable margin). Removed the bad engine from `engines/manual/`.
+Also added prompt guidance in `generate.js` against the two concrete
+things that caused it: don't stroke a shape with the same bright colour as
+its own additive fill, and don't let many overlapping shapes cluster
+densely in one small region. Lesson: the promotion pipeline is only as
+good as the gate it depends on — when a promoted engine turns out bad,
+the fix belongs in `validate.js` (so it can't happen again for ANY
+engine, hand-written or generated), not just in removing that one file.
+
 ### Even a fully clear-and-redraw engine can trip the whiteout heuristic
 
 Third source of a "brightness trend" false alarm, distinct from the two

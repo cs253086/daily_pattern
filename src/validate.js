@@ -36,6 +36,12 @@ const DEFAULTS = {
   maxPeakMean: 252,
   minPeakStd: 5,
   minMotion: 1.0,
+  // Fraction (0-1) of sampled pixels allowed to be near-max brightness
+  // (luma > 248) at any one sample. Catches shapes clipped to solid white
+  // even when diluted by black background keeps the frame-wide average
+  // (maxPeakMean, above) looking moderate -- see the check site for the
+  // real incident this was calibrated against.
+  maxNearWhiteFrac: 0.12,
   // The visual test window (visualDuration) is much shorter than a real
   // render. Fit a straight line through the sampled mean-brightness trend
   // and extrapolate it across a full production render; if the projected
@@ -98,8 +104,14 @@ function frameStats(selector) {
   }
   const mean = sum / n;
   let varAcc = 0;
-  for (let p = 0; p < n; p++) { const dv = luma[p] - mean; varAcc += dv * dv; }
-  return { mean, std: Math.sqrt(varAcc / n), luma };
+  let nearWhite = 0;
+  for (let p = 0; p < n; p++) {
+    const dv = luma[p] - mean; varAcc += dv * dv;
+    if (luma[p] > 248) nearWhite++;
+  }
+  return {
+    mean, std: Math.sqrt(varAcc / n), luma, nearWhiteFrac: nearWhite / n,
+  };
 }
 
 function meanAbsDiff(a, b) {
@@ -218,6 +230,7 @@ async function runVisual(enginePath, cfg) {
     const stds = samples.map((s) => s.std);
     const peakMean = Math.max(...means);
     const peakStd = Math.max(...stds);
+    const peakNearWhiteFrac = Math.max(...samples.map((s) => s.nearWhiteFrac));
     let motion = 0;
     for (let i = 1; i < samples.length; i++) {
       motion = Math.max(motion, meanAbsDiff(samples[i].luma, samples[i - 1].luma));
@@ -227,6 +240,21 @@ async function runVisual(enginePath, cfg) {
     if (peakMean > cfg.maxPeakMean) reasons.push(`image is blown out to white (peak mean luma ${peakMean.toFixed(2)})`);
     if (peakStd < cfg.minPeakStd) reasons.push(`image lacks spatial structure (peak std ${peakStd.toFixed(2)})`);
     if (motion < cfg.minMotion) reasons.push(`little/no motion between frames (max diff ${motion.toFixed(2)})`);
+    // Catches shapes that are individually clipped to solid white even when
+    // the FRAME-WIDE average looks moderate -- a real engine slipped
+    // through here: additively-overlapping cube faces blew out to solid
+    // white blobs from frame 1 (not a drift), but plenty of black
+    // background between the sparse blobs diluted the frame average to a
+    // passing ~140/255, and peak std stayed high (black bg + white blobs is
+    // still "structured"). Measures the fraction of sampled pixels that are
+    // near-max brightness directly, independent of the rest of the frame.
+    if (peakNearWhiteFrac > cfg.maxNearWhiteFrac) {
+      reasons.push(
+        `shapes are locally blown out to solid white: ${(peakNearWhiteFrac * 100).toFixed(1)}% of sampled `
+        + `pixels are near-max brightness (>${cfg.maxNearWhiteFrac * 100}% threshold), even though the `
+        + `frame-wide average may look moderate — reads as washed-out clipped shapes, not vivid saturated color`,
+      );
+    }
 
     // Trend-based "will this whiteout over a full render" detector. Fit a
     // straight line through the sampled means (vs. their real-world sample
@@ -283,6 +311,7 @@ async function runVisual(enginePath, cfg) {
       reasons,
       stats: {
         peakMean, peakStd, motion, total,
+        peakNearWhiteFrac: Number(peakNearWhiteFrac.toFixed(4)),
         slopePerSec: Number(slopePerSec.toFixed(4)),
         projectedRise: Number(projectedRise.toFixed(1)),
         fastMotion: Number(fastMotion.toFixed(2)),
