@@ -42,6 +42,15 @@ const DEFAULTS = {
   // (maxPeakMean, above) looking moderate -- see the check site for the
   // real incident this was calibrated against.
   maxNearWhiteFrac: 0.12,
+  // Minimum average HSL saturation (0-100) among non-background,
+  // non-blown-out pixels, at the WORST (lowest) sampled point. Standing
+  // house-style rule is "vivid and clear, never pale/washed/pastel," but
+  // nothing was actually measuring colour saturation -- an engine could
+  // pass every other check while being grey/muddy/pastel the whole time.
+  // Curated engines bake in 70-95% HSL saturation and pass comfortably;
+  // this exists mainly to hold Gemini-generated engines to the same bar
+  // numerically instead of relying on prompt wording alone.
+  minAvgSat: 22,
   // The visual test window (visualDuration) is much shorter than a real
   // render. Fit a straight line through the sampled mean-brightness trend
   // and extrapolate it across a full production render; if the projected
@@ -98,9 +107,25 @@ function frameStats(selector) {
   const n = sw * sh;
   const luma = new Array(n);
   let sum = 0;
+  // Colourfulness ("is this actually vivid, not grey/pastel") is measured
+  // separately from luma: HSL saturation of pixels that are neither
+  // near-black nor near-white -- background and blown-out highlights have
+  // no meaningful hue, so including them would just dilute the signal
+  // toward "looks fine" regardless of how washed-out the actual coloured
+  // shapes are.
+  let satSum = 0;
+  let satCount = 0;
   for (let i = 0, p = 0; i < d.length; i += 4, p++) {
-    const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    const l = 0.299 * r + 0.587 * g + 0.114 * b;
     luma[p] = l; sum += l;
+    if (l > 20 && l < 235) {
+      const max = Math.max(r, g, b) / 255, min = Math.min(r, g, b) / 255;
+      const lNorm = (max + min) / 2;
+      const delta = max - min;
+      const sat = delta === 0 ? 0 : delta / (1 - Math.abs(2 * lNorm - 1));
+      satSum += sat; satCount++;
+    }
   }
   const mean = sum / n;
   let varAcc = 0;
@@ -110,7 +135,11 @@ function frameStats(selector) {
     if (luma[p] > 248) nearWhite++;
   }
   return {
-    mean, std: Math.sqrt(varAcc / n), luma, nearWhiteFrac: nearWhite / n,
+    mean,
+    std: Math.sqrt(varAcc / n),
+    luma,
+    nearWhiteFrac: nearWhite / n,
+    avgSat: satCount > 0 ? (satSum / satCount) * 100 : 0,
   };
 }
 
@@ -231,6 +260,11 @@ async function runVisual(enginePath, cfg) {
     const peakMean = Math.max(...means);
     const peakStd = Math.max(...stds);
     const peakNearWhiteFrac = Math.max(...samples.map((s) => s.nearWhiteFrac));
+    // Mean (not worst-sample) across the window -- an engine with periodic
+    // hard resets can legitimately have a near-black, low-saturation frame
+    // right at a reset instant; averaging avoids a single unlucky sample
+    // timing coincidence failing an otherwise-vivid engine.
+    const avgSat = samples.reduce((a, s) => a + s.avgSat, 0) / samples.length;
     let motion = 0;
     for (let i = 1; i < samples.length; i++) {
       motion = Math.max(motion, meanAbsDiff(samples[i].luma, samples[i - 1].luma));
@@ -240,6 +274,12 @@ async function runVisual(enginePath, cfg) {
     if (peakMean > cfg.maxPeakMean) reasons.push(`image is blown out to white (peak mean luma ${peakMean.toFixed(2)})`);
     if (peakStd < cfg.minPeakStd) reasons.push(`image lacks spatial structure (peak std ${peakStd.toFixed(2)})`);
     if (motion < cfg.minMotion) reasons.push(`little/no motion between frames (max diff ${motion.toFixed(2)})`);
+    if (avgSat < cfg.minAvgSat) {
+      reasons.push(
+        `colors read as pale/washed/grey rather than vivid (average saturation ${avgSat.toFixed(1)}, `
+        + `need >= ${cfg.minAvgSat}) — house style requires punchy, saturated color, not pastel`,
+      );
+    }
     // Catches shapes that are individually clipped to solid white even when
     // the FRAME-WIDE average looks moderate -- a real engine slipped
     // through here: additively-overlapping cube faces blew out to solid
@@ -311,6 +351,7 @@ async function runVisual(enginePath, cfg) {
       reasons,
       stats: {
         peakMean, peakStd, motion, total,
+        avgSat: Number(avgSat.toFixed(1)),
         peakNearWhiteFrac: Number(peakNearWhiteFrac.toFixed(4)),
         slopePerSec: Number(slopePerSec.toFixed(4)),
         projectedRise: Number(projectedRise.toFixed(1)),

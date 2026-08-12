@@ -16,6 +16,29 @@ them:
    fewer, clearer elements beat many small/thin ones. Before shipping a new
    or changed engine, render a frame and *look at it* — don't just pass the
    quality gate and assume it looks good.
+   - **This was prompt-only guidance with no numeric enforcement, and a real
+     curated engine violated it.** `validate.js` checked brightness/
+     structure/motion/local-whiteout but had zero awareness of colour
+     saturation — an engine could pass every check while reading as grey/
+     pastel. Investigating a user complaint ("colors should be vivid")
+     surfaced that `kaleidoscope.html`'s `ice` palette (and the identical
+     copy in all 6 other curated engines, having been copy-pasted across
+     them) used HSL saturation 56-76% / lightness 72-78%, well outside the
+     70-95%-saturation / ~58-66%-lightness range every other palette in the
+     same table uses — a real, already-shipping pastel-washout bug that had
+     gone unnoticed because nothing measured it. Confirmed visually
+     (rendered `kaleidoscope` at `seed=5`, which selects `ice`): a washed
+     lavender-grey mandala, not vivid at all. Fixed the `ice` palette in
+     all 7 curated engines to the same saturation/lightness range as every
+     other palette (kept the same cool hue spread, 185-270°, so it's still
+     recognisably "icy," just not desaturated). Also added a `validate.js`
+     check (`avgSat`, mean HSL saturation of non-background/non-blown-out
+     pixels across the sampled window, `minAvgSat: 22`) so this class of
+     bug — in curated engines *or* Gemini output — can't silently ship
+     again. Verified: a synthetic pastel fixture (18% saturation) is
+     correctly rejected; all 7 curated engines pass with a wide margin
+     (29-67 vs. the 22 threshold); the fixed `kaleidoscope`/`ice` combo
+     went from 16.0 to 35.5.
 2. **Geometric house style.** Crisp straight edges, defined shapes, polygons,
    lattices, radial/mirror symmetry — not soft organic blobs/fuzzy clouds.
    (See `src/generate.js`'s `HOUSE STYLE` prompt line and `THEME_HINTS`.)
@@ -225,13 +248,21 @@ project's existing self-contained/no-network convention.
 
 Design: sustained pad tones (root + fifth/fourth + a slowly-drifting
 major/minor "colour" third + octave), each with its own slow pitch-drift
-and amplitude-breathing LFO chosen once from the seed, plus sparse soft
-bell/chime accents. Everything is a continuous smooth function of time —
-deliberately NOT discrete section/crossfade state — which keeps the
-per-sample math simple and avoids any risk of audible clicks. Generates
-~1s Int16 stereo PCM chunks via a callback (an async function now, so the
-caller can await backpressure-aware writes) rather than buffering a
-multi-hundred-million-sample track in memory, mirroring `render.js`'s
+and amplitude-breathing LFO chosen once from the seed, plus a real MELODY
+on top — a generative pentatonic-scale random walk two octaves above the
+pad root, played with a soft plucked/kalimba timbre (fundamental + two
+quiet overtones). User feedback ("it should be melodic") on the first cut
+was correct: the original design only had sparse random single-note
+chimes, which is closer to ambient texture than an actual tune. Pentatonic
+was the key choice — no two scale degrees are ever dissonant with each
+other or with the pad, so a seeded random walk (mostly stepwise, occasional
+leap, occasional rest) reliably sounds like a plausible melody without any
+real composition logic. Everything (pad + melody) is a continuous smooth
+function of time — deliberately NOT discrete section/crossfade state —
+which keeps the per-sample math simple and avoids any risk of audible
+clicks. Generates ~1s Int16 stereo PCM chunks via a callback (an async
+function, so the caller can await backpressure-aware writes) rather than
+buffering a multi-hundred-million-sample track in memory, mirroring `render.js`'s
 existing pattern of streaming video frames into ffmpeg via stdin.
 
 Pipeline wiring (`src/render.js`): the frame-by-frame Puppeteer loop still

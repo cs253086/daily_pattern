@@ -15,11 +15,17 @@
 // section/crossfade state, which keeps the per-sample math simple and
 // avoids any risk of audible clicks at a section boundary. One interval
 // slowly drifts between a major- and minor-third colour over many minutes
-// so a full hour doesn't feel static. Sparse soft bell/chime accents add
-// gentle punctuation. Per-voice amplitudes are chosen conservatively so
-// the theoretical peak never approaches clipping -- no normalization pass
-// (and no need to hold the whole multi-hundred-million-sample track in
-// memory) is required.
+// so a full hour doesn't feel static. On top of that pad, a real MELODY
+// (not just sparse random chimes): a generative pentatonic-scale walk two
+// octaves above the pad root, mostly stepwise with occasional leaps and
+// rests, played with a soft plucked/kalimba-ish timbre (see planMelody /
+// the note synthesis below) -- pentatonic because no two scale degrees are
+// ever dissonant with each other or with the pad, so any seeded walk
+// through it reliably sounds like a plausible, pleasant tune rather than
+// a random string of notes. Per-voice amplitudes are chosen conservatively
+// so the theoretical peak never approaches clipping -- no normalization
+// pass (and no need to hold the whole multi-hundred-million-sample track
+// in memory) is required.
 
 function mulberry32(seed) {
   let s = seed >>> 0;
@@ -45,6 +51,51 @@ const CHORDS = [
 function equalPowerPan(pan) {
   const angle = ((pan + 1) * Math.PI) / 4; // pan in [-1,1] -> [0, PI/2]
   return [Math.cos(angle), Math.sin(angle)];
+}
+
+// Major pentatonic scale degrees (semitones from the scale root). No two
+// degrees ever form a dissonant interval, which is exactly why a random
+// walk through this scale reliably sounds musical without needing real
+// composition logic.
+const PENTATONIC = [0, 2, 4, 7, 9];
+function scaleFreq(scaleRootHz, degree) {
+  const octave = Math.floor(degree / PENTATONIC.length);
+  const idx = ((degree % PENTATONIC.length) + PENTATONIC.length) % PENTATONIC.length;
+  const semitones = PENTATONIC[idx] + octave * 12;
+  return scaleRootHz * 2 ** (semitones / 12);
+}
+
+// A slow, sparse, mostly-stepwise melodic walk -- deliberately unhurried
+// (a note every ~2-6s) to match a "meditation calm" mood, with occasional
+// rests for phrasing and rare bigger leaps so it doesn't feel mechanical.
+// Never repeats exactly over a full hour since it's a continuous random
+// walk, not a looped motif.
+function planMelody(rng, rootHz, duration) {
+  const scaleRootHz = rootHz * 4; // ~2 octaves above the pad -- sits clearly above it
+  const notes = [];
+  let degree = randInt(rng, 0, 4);
+  let t = rand(rng, 4, 10);
+  while (t < duration - 4) {
+    const roll = rng();
+    let step;
+    if (roll < 0.5) step = rng() < 0.5 ? -1 : 1; // stepwise motion (most common)
+    else if (roll < 0.72) step = 0; // repeated note
+    else if (roll < 0.92) step = (rng() < 0.5 ? -1 : 1) * 2; // small leap
+    else step = (rng() < 0.5 ? -1 : 1) * randInt(rng, 3, 5); // rare bigger leap
+    degree = Math.max(-3, Math.min(11, degree + step));
+
+    if (rng() >= 0.15) { // occasional rest, for breathing room between phrases
+      notes.push({
+        at: t,
+        freq: scaleFreq(scaleRootHz, degree),
+        amp: rand(rng, 0.1, 0.17),
+        decay: rand(rng, 1.3, 2.8),
+        pan: rand(rng, -0.45, 0.45),
+      });
+    }
+    t += rand(rng, 2.2, 5.8);
+  }
+  return notes;
 }
 
 // Builds the deterministic per-tone/per-bell parameters for one track.
@@ -78,22 +129,10 @@ export function planTrack({ seed, duration }) {
   const colourHigh = tones[2].ratio;
   const colourRate = 1 / rand(rng, 480, 900); // one full cycle every 8-15 min
 
-  const bells = [];
-  let t = rand(rng, 20, 60);
-  const bellRatios = [2, 3, 4, 6];
-  while (t < duration - 5) {
-    bells.push({
-      at: t,
-      freq: rootHz * bellRatios[randInt(rng, 0, bellRatios.length - 1)],
-      amp: rand(rng, 0.1, 0.18),
-      decay: rand(rng, 1.8, 3.2),
-      pan: rand(rng, -0.5, 0.5),
-    });
-    t += rand(rng, 45, 100);
-  }
+  const melody = planMelody(rng, rootHz, duration);
 
   return {
-    rootHz, tones, colourLow, colourHigh, colourRate, bells,
+    rootHz, tones, colourLow, colourHigh, colourRate, melody,
   };
 }
 
@@ -106,14 +145,14 @@ export async function synthesizeAmbient({
   seed, duration, sampleRate = 44100, onChunk,
 }) {
   const plan = planTrack({ seed, duration });
-  const { tones, bells, colourLow, colourHigh, colourRate } = plan;
+  const { tones, melody, colourLow, colourHigh, colourRate } = plan;
   const totalSamples = Math.round(duration * sampleRate);
   const CHUNK = sampleRate;
   const fadeSamples = Math.round(3 * sampleRate);
   const twoPi = Math.PI * 2;
 
-  let bellPtr = 0;
-  const activeBells = [];
+  let notePtr = 0;
+  const activeNotes = [];
 
   for (let start = 0; start < totalSamples; start += CHUNK) {
     const n = Math.min(CHUNK, totalSamples - start);
@@ -145,22 +184,27 @@ export async function synthesizeAmbient({
         r += s * pr;
       }
 
-      // Activate any bells whose onset has arrived, and remove ones that
-      // have fully decayed. Sparse (every 45-100s) so at most one or two
-      // are ever active at once -- no need to scan the whole bell list
+      // Activate any melody notes whose onset has arrived, and remove ones
+      // that have fully decayed. Sparse (every few seconds) so only one or
+      // two are ever active at once -- no need to scan the whole melody
       // per sample.
-      while (bellPtr < bells.length && bells[bellPtr].at <= t) {
-        activeBells.push({ ...bells[bellPtr], startT: t });
-        bellPtr++;
+      while (notePtr < melody.length && melody[notePtr].at <= t) {
+        activeNotes.push({ ...melody[notePtr], startT: t });
+        notePtr++;
       }
-      for (let bi = activeBells.length - 1; bi >= 0; bi--) {
-        const b = activeBells[bi];
-        const age = t - b.startT;
-        if (age > b.decay * 5) { activeBells.splice(bi, 1); continue; }
-        const attack = Math.min(1, age / 0.02);
-        const env = attack * Math.exp(-age / b.decay);
-        const s = Math.sin(twoPi * b.freq * t) * b.amp * env;
-        const [pl, pr] = equalPowerPan(b.pan);
+      for (let ni = activeNotes.length - 1; ni >= 0; ni--) {
+        const note = activeNotes[ni];
+        const age = t - note.startT;
+        if (age > note.decay * 5) { activeNotes.splice(ni, 1); continue; }
+        const attack = Math.min(1, age / 0.015);
+        const env = attack * Math.exp(-age / note.decay);
+        // Fundamental + two quiet overtones for a warm plucked/kalimba
+        // timbre -- distinct from the pad's pure chorus-sine tones, so the
+        // melody reads as its own voice on top rather than blending in.
+        const s = (Math.sin(twoPi * note.freq * t)
+          + Math.sin(twoPi * note.freq * 2 * t) * 0.32
+          + Math.sin(twoPi * note.freq * 3 * t) * 0.12) * note.amp * env;
+        const [pl, pr] = equalPowerPan(note.pan);
         l += s * pl;
         r += s * pr;
       }
