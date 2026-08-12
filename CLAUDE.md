@@ -1,7 +1,8 @@
 # daily_pattern — project guidance
 
 Automated pipeline: renders a daily generative-art video (1 hour) + a 30s
-Short, uploads both to the "Pattern Flow" YouTube channel. Runs via GitHub
+Short, both with procedurally generated ambient music (see "Ambient music"
+below), uploads both to the "Pattern Flow" YouTube channel. Runs via GitHub
 Actions cron (`.github/workflows/daily.yml`) calling `src/index.js`.
 
 ## Standing visual requirements (apply to ALL engines — curated and AI-generated)
@@ -210,6 +211,55 @@ touching WebGL in this codebase again:
   style. Fixed by lowering the base palette lightness, toning down the rim
   contribution, and adding a soft clamp on final fragment color
   (`min(base + rim, vec3(0.86))`) so no face can wash out to full white.
+
+## Ambient music (`src/audio.js`)
+
+User request: "can you add meditation calm music to each video?" Built as
+**procedurally generated audio, not licensed/library music** — this channel
+auto-publishes daily with no human review step, so bundling or fetching
+"royalty-free" tracks would carry real, unmanaged copyright risk (licenses
+vary, misattribution is easy, and nobody is checking each upload before it
+goes out). A 100% original track generated deterministically from the same
+per-day seed as the visual engine has zero such risk and matches this
+project's existing self-contained/no-network convention.
+
+Design: sustained pad tones (root + fifth/fourth + a slowly-drifting
+major/minor "colour" third + octave), each with its own slow pitch-drift
+and amplitude-breathing LFO chosen once from the seed, plus sparse soft
+bell/chime accents. Everything is a continuous smooth function of time —
+deliberately NOT discrete section/crossfade state — which keeps the
+per-sample math simple and avoids any risk of audible clicks. Generates
+~1s Int16 stereo PCM chunks via a callback (an async function now, so the
+caller can await backpressure-aware writes) rather than buffering a
+multi-hundred-million-sample track in memory, mirroring `render.js`'s
+existing pattern of streaming video frames into ffmpeg via stdin.
+
+Pipeline wiring (`src/render.js`): the frame-by-frame Puppeteer loop still
+writes video-only to a temp path (`<long>.noaudio.mp4`); a second ffmpeg
+invocation then stream-copies that video (fast, no re-encode) while piping
+freshly synthesized PCM in as a second input and encoding it to AAC, into
+the final `long.mp4`. The Short is cut from that same audio-bearing file
+with `-an` replaced by explicit `-c:a aac` — but only when muxing actually
+succeeded (see below), otherwise it stays silent like before. Verified
+end-to-end with a real ffmpeg build (this dev sandbox doesn't have one by
+default, installed it for this to actually test rather than shipping
+blind): correct video+audio stream count and exact duration match via
+`ffprobe`, no clipping post-AAC-encode (peak −7 to −9 dBFS, RMS around
+−19 to −22 dBFS via `ffmpeg -af astats`), and real variation over a
+10-minute window (RMS swings ~2x from the breathing/colour-drift LFOs, so
+it isn't a static drone). Overhead is small: ~1-2 minutes added to a full
+3600s render (pure-JS synthesis is ~40-70s; the mux is a stream-copy, not
+a re-encode) against a 50-90 minute video render.
+
+**Non-fatal by design**: muxing audio in is wrapped in a try/catch in
+`render()`. If it fails for any reason, the video-only temp file is
+renamed to the final `long.mp4` path and the render continues normally
+(silent, like every video before this feature) rather than losing the
+whole day's render over a new, less-battle-tested code path — verified by
+forcing a synthetic failure and confirming the fallback produces a valid
+silent video with `hasAudio: false` propagated correctly into the Short's
+cut. `render()`'s return value now includes `hasAudio` so callers can log
+or react to which path was taken.
 
 ## Engine selection each run (`src/index.js`)
 

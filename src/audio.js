@@ -102,7 +102,7 @@ export function planTrack({ seed, duration }) {
 // (raw PCM input) rather than buffering the whole multi-hundred-million-
 // sample track in memory. Mirrors render.js's existing pattern of
 // streaming video frames into ffmpeg via stdin.
-export function synthesizeAmbient({
+export async function synthesizeAmbient({
   seed, duration, sampleRate = 44100, onChunk,
 }) {
   const plan = planTrack({ seed, duration });
@@ -175,6 +175,6 @@ export function synthesizeAmbient({
       out[i * 2 + 1] = Math.max(-32767, Math.min(32767, Math.round(r * 32767)));
     }
 
-    onChunk(Buffer.from(out.buffer, out.byteOffset, out.byteLength));
+    await onChunk(Buffer.from(out.buffer, out.byteOffset, out.byteLength));
   }
 }

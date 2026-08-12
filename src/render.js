@@ -6,11 +6,12 @@
 //                advanceFrame(), advanceFrames(n)
 
 import { spawn } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rename, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import puppeteer from 'puppeteer';
+import { synthesizeAmbient } from './audio.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -168,6 +169,61 @@ function writeChunk(stream, buf) {
   });
 }
 
+// Mux the (video-only) file at videoOnlyPath with a freshly synthesized
+// ambient audio track, writing the result to cfg.longPath. Video is stream-
+// copied (fast, no re-encode); audio is piped in as raw PCM and encoded to
+// AAC. See src/audio.js for why this is procedurally generated rather than
+// licensed/library music.
+function spawnAudioMuxPipe(videoOnlyPath, outPath, sampleRate) {
+  const args = [
+    '-y',
+    '-i', videoOnlyPath,
+    '-f', 's16le',
+    '-ar', String(sampleRate),
+    '-ac', '2',
+    '-i', 'pipe:0',
+    '-c:v', 'copy',
+    '-c:a', 'aac',
+    '-b:a', '128k',
+    '-shortest',
+    '-movflags', '+faststart',
+    outPath,
+  ];
+  const proc = spawn('ffmpeg', args, { stdio: ['pipe', 'ignore', 'pipe'] });
+  let stderr = '';
+  proc.stderr.on('data', (d) => { stderr += d.toString(); if (stderr.length > 64000) stderr = stderr.slice(-64000); });
+
+  const done = new Promise((resolve, reject) => {
+    proc.on('error', reject);
+    proc.on('close', (code) => {
+      if (process.env.DEBUG_FFMPEG) console.error(`\n[ffmpeg] (audio mux) closed code=${code}\n${stderr.slice(-3000)}`);
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg (audio mux) exited ${code}\n${stderr.slice(-4000)}`));
+    });
+  });
+  return { proc, done };
+}
+
+async function addAmbientMusic(cfg, videoOnlyPath) {
+  const sampleRate = 44100;
+  const { proc: ff, done: ffDone } = spawnAudioMuxPipe(videoOnlyPath, cfg.longPath, sampleRate);
+  let ffmpegError = null;
+  ffDone.catch((e) => { ffmpegError = e; });
+  ff.stdin.on('error', (e) => { ffmpegError = ffmpegError || e; });
+
+  await synthesizeAmbient({
+    seed: cfg.seed,
+    duration: cfg.duration,
+    sampleRate,
+    onChunk: async (buf) => {
+      if (ffmpegError) throw ffmpegError;
+      await writeChunk(ff.stdin, buf);
+    },
+  });
+  ff.stdin.end();
+  await ffDone;
+}
+
 // Build the -vf filter for the Short based on shortFit. Returns null for 'none'.
 function shortFilter(cfg) {
   const w = cfg.shortWidth, h = cfg.shortHeight;
@@ -191,7 +247,11 @@ function shortFilter(cfg) {
 // Cut a clip from the long video, re-encoding so the in/out points are exact
 // (stream copy would snap to keyframes). Clamps to the available duration and
 // applies the configured aspect transform (default: fill to 1080x1920).
-async function cutShort(cfg) {
+// hasAudio reflects whether cfg.longPath actually has an ambient-music track
+// muxed in (see addAmbientMusic) -- carry it into the Short when present,
+// otherwise keep the Short silent as before rather than asking ffmpeg to
+// encode an audio stream that doesn't exist.
+async function cutShort(cfg, hasAudio) {
   const total = cfg.duration;
   const dur = Math.min(cfg.shortDuration, total);
   const start = Math.max(0, Math.min(cfg.shortStart, total - dur));
@@ -207,7 +267,7 @@ async function cutShort(cfg) {
     '-preset', cfg.preset,
     '-crf', String(cfg.crf),
     '-pix_fmt', 'yuv420p',
-    '-an',
+    ...(hasAudio ? ['-c:a', 'aac', '-b:a', '128k'] : ['-an']),
     '-movflags', '+faststart',
     cfg.shortPath,
   ];
@@ -297,7 +357,8 @@ export async function render(cli = {}) {
       throw new Error(`No element matches canvas selector "${cfg.canvasSelector}".`);
     }
 
-    const { proc: ff, done: ffDone } = spawnFfmpegPipe(cfg, cfg.longPath);
+    const videoOnlyPath = `${cfg.longPath}.noaudio.mp4`;
+    const { proc: ff, done: ffDone } = spawnFfmpegPipe(cfg, videoOnlyPath);
     // Surface a broken pipe (ffmpeg died) instead of hanging on writes.
     let ffmpegError = null;
     ffDone.catch((e) => { ffmpegError = e; });
@@ -332,10 +393,27 @@ export async function render(cli = {}) {
 
     ff.stdin.end();
     await ffDone;
-    console.log(`[render] wrote ${cfg.longPath}`);
+    console.log(`[render] wrote ${videoOnlyPath} (video only)`);
 
-    const shortInfo = await cutShort(cfg);
-    console.log(`[render] wrote ${cfg.shortPath} (start ${shortInfo.start}s, ${shortInfo.dur}s, fit=${shortInfo.fit})`);
+    // Add procedurally generated ambient music (see src/audio.js for why
+    // it's synthesized rather than licensed/library audio). Non-fatal by
+    // design: this is new and untested against a real ffmpeg build in some
+    // dev environments, so a mux failure falls back to shipping the
+    // video-only file rather than losing the whole day's render over it.
+    let hasAudio = true;
+    try {
+      await addAmbientMusic(cfg, videoOnlyPath);
+      await unlink(videoOnlyPath).catch(() => {});
+      console.log(`[render] wrote ${cfg.longPath} (with ambient music)`);
+    } catch (e) {
+      hasAudio = false;
+      console.warn(`[render] ambient music mux failed, falling back to video-only: ${e.message}`);
+      await rename(videoOnlyPath, cfg.longPath);
+      console.log(`[render] wrote ${cfg.longPath} (video only, no music)`);
+    }
+
+    const shortInfo = await cutShort(cfg, hasAudio);
+    console.log(`[render] wrote ${cfg.shortPath} (start ${shortInfo.start}s, ${shortInfo.dur}s, fit=${shortInfo.fit}, audio=${hasAudio})`);
 
     const thumbInfo = await extractThumbnail(cfg);
     console.log(`[render] wrote ${cfg.thumbnailPath} (frame at ${thumbInfo.at.toFixed(1)}s)`);
@@ -350,6 +428,7 @@ export async function render(cli = {}) {
       fps: cfg.fps,
       duration: cfg.duration,
       totalFrames,
+      hasAudio,
     };
   } finally {
     await browser.close();
