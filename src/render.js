@@ -86,6 +86,12 @@ export function resolveConfig(cli = {}) {
 
     outDir: pick(cli, 'outDir', 'OUT_DIR', path.join(repoRoot, 'output')),
     readyTimeoutMs: pick(cli, 'readyTimeout', 'READY_TIMEOUT_MS', 60000, num),
+
+    // Ambient music (src/audio.js). Off by default for now (user request,
+    // 2026-08-13) while the sound design is still being tuned -- opt back
+    // in with --music or MUSIC=1 (wired through to the workflow as
+    // vars.MUSIC, same pattern as IMAGE_PALETTE) once it's ready again.
+    music: pick(cli, 'music', 'MUSIC', false, (v) => v === true || v === '1' || v === 'true'),
   };
 
   cfg.longPath = path.join(cfg.outDir, pick(cli, 'longName', 'LONG_NAME', 'long.mp4'));
@@ -396,20 +402,26 @@ export async function render(cli = {}) {
     console.log(`[render] wrote ${videoOnlyPath} (video only)`);
 
     // Add procedurally generated ambient music (see src/audio.js for why
-    // it's synthesized rather than licensed/library audio). Non-fatal by
-    // design: this is new and untested against a real ffmpeg build in some
-    // dev environments, so a mux failure falls back to shipping the
-    // video-only file rather than losing the whole day's render over it.
-    let hasAudio = true;
-    try {
-      await addAmbientMusic(cfg, videoOnlyPath);
-      await unlink(videoOnlyPath).catch(() => {});
-      console.log(`[render] wrote ${cfg.longPath} (with ambient music)`);
-    } catch (e) {
-      hasAudio = false;
-      console.warn(`[render] ambient music mux failed, falling back to video-only: ${e.message}`);
+    // it's synthesized rather than licensed/library audio) -- unless
+    // disabled (cfg.music, off by default for now, see resolveConfig).
+    // Non-fatal by design when enabled: a mux failure falls back to
+    // shipping the video-only file rather than losing the whole day's
+    // render over it.
+    let hasAudio = false;
+    if (!cfg.music) {
       await rename(videoOnlyPath, cfg.longPath);
-      console.log(`[render] wrote ${cfg.longPath} (video only, no music)`);
+      console.log(`[render] wrote ${cfg.longPath} (music disabled)`);
+    } else {
+      try {
+        await addAmbientMusic(cfg, videoOnlyPath);
+        await unlink(videoOnlyPath).catch(() => {});
+        hasAudio = true;
+        console.log(`[render] wrote ${cfg.longPath} (with ambient music)`);
+      } catch (e) {
+        console.warn(`[render] ambient music mux failed, falling back to video-only: ${e.message}`);
+        await rename(videoOnlyPath, cfg.longPath);
+        console.log(`[render] wrote ${cfg.longPath} (video only, no music)`);
+      }
     }
 
     const shortInfo = await cutShort(cfg, hasAudio);

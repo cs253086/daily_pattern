@@ -237,6 +237,14 @@ touching WebGL in this codebase again:
 
 ## Ambient music (`src/audio.js`)
 
+**Currently OFF by default** (`cfg.music` defaults to `false` in
+`resolveConfig()`, `src/render.js`) — user request 2026-08-13, while the
+sound design is still being tuned. Opt back in with `--music` / `MUSIC=1`,
+or set the repo variable `vars.MUSIC=1` (wired into
+`.github/workflows/daily.yml` the same way as `IMAGE_PALETTE`) to re-enable
+it for scheduled runs without touching code. Everything below describes
+the feature as built; it just isn't wired on by default right now.
+
 User request: "can you add meditation calm music to each video?" Built as
 **procedurally generated audio, not licensed/library music** — this channel
 auto-publishes daily with no human review step, so bundling or fetching
