@@ -312,8 +312,10 @@ or react to which path was taken.
    `spirograph` (glowing hypotrochoid/epitrochoid curves — a smooth
    continuous-curve texture, distinct from every polygon/tile/ring/lit-solid
    engine above), `arcrings` (bold segmented rotating "radar" rings, distinct
-   from `geometric`'s full polygons and `kaleidoscope`'s mirrored stamps).
-   Plus any `auto-YYYY-MM-DD-<theme-slug>.html` files — see
+   from `geometric`'s full polygons and `kaleidoscope`'s mirrored stamps),
+   `cascade` (directional top-to-bottom falling-block cascade with NO centre
+   or radial symmetry at all — see "Archetype clustering" below for why this
+   one exists). Plus any `auto-YYYY-MM-DD-<theme-slug>.html` files — see
    "The curated pool grows daily" below. `engines/bloom.html` exists only as
    a last-resort emergency fallback if the manual pool is ever empty — it's
    organic, not the house style, and excluded from normal rotation.
@@ -531,6 +533,38 @@ rotation, colour). This is now a well-established pattern across four
 engines: when a *legitimately* clear-and-redraw engine fails the whiteout
 check, look for a randomised parameter that changes how much of the frame
 is covered/overlapping, not an actual accumulation bug.
+
+### Archetype clustering: engine-identity rotation isn't the whole story
+
+A 2026-08-14 complaint ("another similar pattern") traced to `curatedOr()`
+correctly cycling to `kaleidoscope.html` -- verified: this was the exact
+next engine after `grid` in the (now 10-wide, alphabetically-sorted) pool,
+the first fallback to actually run against that expanded pool. The
+rotation logic was not broken. But investigating *why* it still read as
+"the same pattern" surfaced a real, different problem: `kaleidoscope`,
+`starburst`, and `spirograph` -- three separate files, never violating the
+round-robin's no-immediate-repeat guarantee -- all render the same basic
+*archetype*: centred, radially-symmetric, mandala-like. A viewer doesn't
+parse "mirrored stamps" vs. "star polygons" vs. "hypotrochoid curves" as
+different constructions; they see "circular symmetric pattern, again."
+Engine-identity round-robin is already mathematically optimal for what it
+guarantees (no repeat of the same file until the whole pool cycles) --
+it has no concept of two *different* files looking similar, and 30% of
+the pool sharing one silhouette is enough to read as repetitive even with
+perfect rotation.
+
+Fixed by adding `cascade.html`: deliberately NO centre and NO radial
+symmetry -- a directional top-to-bottom field of falling/rotating blocks,
+phase-staggered by column for a diagonal sweep, with hue tied to
+horizontal position (not radius) for a left-to-right colour gradient
+instead of a radial one. This is a distinct pattern from every other
+engine in the pool along an axis (centred-symmetric vs. directional-
+flowing) that plain engine-identity tracking can't see. If more
+"everything feels similar" complaints recur even with correct rotation,
+audit the pool for *archetype* balance (centred/radial vs. grid/tiled vs.
+directional/flowing vs. lit-3D), not just engine count -- a bigger pool
+of engines that all share one composition doesn't actually fix perceived
+repetitiveness.
 
 ### Standing requirement: every video should look new, not just non-repeating
 
