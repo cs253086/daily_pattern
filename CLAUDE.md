@@ -308,8 +308,12 @@ or react to which path was taken.
 2. Otherwise (or if Gemini fails both attempts): pick the next curated
    engine in true round-robin order — `engines/manual/*.html`. Hand-written
    core: `geometric`, `grid`, `kaleidoscope`, `starburst`, `wireframe`,
-   `tessellation`, `solids3d` (the last one is real WebGL — see "3D / WebGL
-   engines" above). Plus any `auto-YYYY-MM-DD-<theme-slug>.html` files — see
+   `tessellation`, `solids3d` (real WebGL — see "3D / WebGL engines" above),
+   `spirograph` (glowing hypotrochoid/epitrochoid curves — a smooth
+   continuous-curve texture, distinct from every polygon/tile/ring/lit-solid
+   engine above), `arcrings` (bold segmented rotating "radar" rings, distinct
+   from `geometric`'s full polygons and `kaleidoscope`'s mirrored stamps).
+   Plus any `auto-YYYY-MM-DD-<theme-slug>.html` files — see
    "The curated pool grows daily" below. `engines/bloom.html` exists only as
    a last-resort emergency fallback if the manual pool is ever empty — it's
    organic, not the house style, and excluded from normal rotation.
@@ -484,6 +488,49 @@ suspicious tokens) will be visible without hitting the network-blocked
 artifact path. If the snippet points at a specific bug pattern, fix
 `generate.js`'s prompt at the source, the same way the other whiteout
 incidents were fixed once the actual code was visible.
+
+**Update, 2026-08-13**: the diagnostic above worked for the first time (a
+user complaint about a repeated `grid.html` video led to checking recent
+history, which turned up real failure logs with real snippets) but the
+first-500-chars capture turned out to be nearly useless in practice: that
+range is *always* the boilerplate URL-param/canvas-setup header, never the
+actual draw loop, for essentially every engine Gemini writes (they all
+front-load the same kind of setup code). Two checked failures both showed
+the same combined signature: "shapes are locally blown out to solid white"
+*together with* "motion is too slow... only 0.00-0.01 luma diff" -- which
+in combination point at the canvas rendering something bad once and then
+effectively *freezing* (a static frame is simultaneously blown-out and
+zero-motion by definition), a genuinely different bug shape from every
+prior whiteout incident (all of which were about brightness *drifting*,
+never a frozen frame). Still couldn't pin down the exact cause -- the
+first 500 chars are never the relevant code, and `GEMINI_API_KEY` isn't
+set in this sandbox to reproduce live. Fixed `logEngineSnippet()` to also
+locate and print ~1400 chars of context around the REAL `advanceFrame`
+assignment (distinguished from an earlier placeholder like `window.
+advanceFrame = null;`, seen verbatim in a real failed engine, by matching
+an actual `advanceFrame = function`/`advanceFrame = (` pattern and taking
+the *last* such match) -- verified against a synthetic fixture reproducing
+that exact null-placeholder-then-real-assignment shape: correctly skips
+the placeholder and captures the real render loop. Next occurrence should
+finally be diagnosable enough to fix `generate.js`'s prompt with real
+evidence instead of guessing.
+
+**In the meantime, mitigated the symptom directly**: since a finite
+curated pool mathematically must repeat within (pool size + 1) fallback
+days no matter how good the round-robin is, and Gemini's success rate
+alone can't be fixed without live reproduction, added two more hand-written
+curated engines (`spirograph`, `arcrings` -- see "Engine selection each
+run" above) purely to extend that runway now rather than wait on a Gemini
+root-cause. `spirograph` hit the SAME whiteout-regression false positive as
+`starburst` and `solids3d` before it (randomising curve count and the R/r
+loop-density ratio swings total stroke overlap/coverage a lot between
+cycles, read as a fake trend by the regression fit) -- fixed the same way,
+by fixing those two parameters and only randomising shape details that
+don't swing overall coverage (loop size `d`, epicycloid/hypocycloid choice,
+rotation, colour). This is now a well-established pattern across four
+engines: when a *legitimately* clear-and-redraw engine fails the whiteout
+check, look for a randomised parameter that changes how much of the frame
+is covered/overlapping, not an actual accumulation bug.
 
 ### Standing requirement: every video should look new, not just non-repeating
 

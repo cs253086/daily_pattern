@@ -204,9 +204,18 @@ function defaultSeedStr() {
 // some sandboxed dev environments cannot download (network policy blocks
 // the artifact blob-storage host). Logging a snippet directly into the job
 // log means a failure is debuggable from `get_job_logs` alone, no artifact
-// access needed. Kept short (a few hundred chars + a handful of suspicious
-// tokens) so it doesn't bloat every log -- this is a diagnostic breadcrumb,
-// not a full dump.
+// access needed. Kept short so it doesn't bloat every log -- this is a
+// diagnostic breadcrumb, not a full dump.
+//
+// A recurring failure signature ("locally blown out to white" + "near-zero
+// motion" together -- consistent with the canvas rendering something bad
+// once and then effectively freezing, not a slow drift) turned out to be
+// undiagnosable from just the file's first 500 chars: that's always the
+// boilerplate URL-param/canvas-setup header, never the actual draw loop
+// where a bug like this would live. Also capture a window of context
+// around the REAL advanceFrame assignment (distinguished from an earlier
+// placeholder like "window.advanceFrame = null;" by matching an actual
+// function/arrow assignment), which is far more likely to contain the bug.
 async function logEngineSnippet(label, htmlPath) {
   try {
     const html = await readFile(htmlPath, 'utf8');
@@ -214,7 +223,20 @@ async function logEngineSnippet(label, htmlPath) {
     const script = scriptMatch ? scriptMatch[1] : html;
     const suspiciousPatterns = ['getContext(\'webgl', 'getContext("webgl', 'white', 'rgba(255,255,255', '#fff', '#FFF'];
     const found = suspiciousPatterns.filter((p) => script.includes(p));
-    console.log(`[index] ${label} snippet (first 500 chars of script):\n${script.slice(0, 500)}`);
+
+    console.log(`[index] ${label} head (first 300 chars of script):\n${script.slice(0, 300)}`);
+
+    const assignMatches = script.match(/advanceFrame\s*=\s*(?:function|\()/g);
+    const anchorText = assignMatches ? assignMatches[assignMatches.length - 1] : 'advanceFrame';
+    const anchor = script.lastIndexOf(anchorText);
+    if (anchor >= 0) {
+      const start = Math.max(0, anchor - 100);
+      const region = script.slice(start, start + 1400);
+      console.log(`[index] ${label} render-loop region (near advanceFrame):\n${region}`);
+    } else {
+      console.log(`[index] ${label} could not locate "advanceFrame" anywhere in the script (${script.length} chars total) -- likely missing entirely.`);
+    }
+
     console.log(`[index] ${label} suspicious tokens present: ${found.length ? found.join(', ') : '(none)'}`);
   } catch (e) {
     console.warn(`[index] could not log ${label} snippet: ${e.message}`);
