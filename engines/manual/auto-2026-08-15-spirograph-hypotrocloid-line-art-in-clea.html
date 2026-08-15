@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Spirograph Engine</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: black; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        // --- Hard Contract Globals ---
+        window.READY = false;
+        window.TOTAL_FRAMES = 0;
+        window.currentFrame = 0;
+        window.advanceFrame = null;
+        window.advanceFrames = null;
+
+        // --- PRNG (Mulberry32) ---
+        let mulberry32_a;
+        function mulberry32(seed) {
+            seed = seed || 0;
+            mulberry32_a = seed + 0x6D2B79F5;
+            return function() {
+                var t = mulberry32_a += 0x6D2B79F5;
+                t = Math.imul(t ^ t >>> 15, t | 1);
+                t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+                return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            };
+        }
+        let R; // Will be set to the PRNG function
+
+        // --- Utility Functions ---
+        function getQueryParam(name, defaultValue, type = 'float') {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has(name)) {
+                if (type === 'int') return parseInt(urlParams.get(name));
+                if (type === 'float') return parseFloat(urlParams.get(name));
+                return urlParams.get(name);
+            }
+            return defaultValue;
+        }
+
+        function randomInRange(min, max) {
+            return min + R() * (max - min);
+        }
+
+        function randomIntInRange(min, max) {
+            return Math.floor(min + R() * (max - min + 1));
+        }
+
+        function randomSign() {
+            return R() < 0.5 ? -1 : 1;
+        }
+
+        function hslToRgb(h, s, l) {
+            let c = (1 - Math.abs(2 * l - 1)) * s;
+            let x = c * (1 - Math.abs((h / 60) % 2 - 1));
+            let m = l - c / 2;
+            let r = 0, g = 0, b = 0;
+            if (0 <= h && h < 60) { r = c; g = x; b = 0; } else if (60 <= h && h < 120) { r = x; g = c; b = 0; } else if (120 <= h && h < 180) { r = 0; g = c; b = x; } else if (180 <= h && h < 240) { r = 0; g = x; b = c; } else if (240 <= h && h < 300) { r = x; g = 0; b = c; } else if (300 <= h && h < 360) { r = c; g = 0; b = x; }
+            r = Math.round((r + m) * 255);
+            g = Math.round((g + m) * 255);
+            b = Math.round((b + m) * 255);
+            return `rgb(${r},${g},${b})`;
+        }
+
+        // --- Engine Parameters ---
+        let canvas, ctx;
+        let width, height, fps, duration, speed, density, cycleSec;
+        let dt; // delta time: 1 / fps
+        let startTime;
+
+        let spirographs = [];
+        let paletteHues = [];
+        const MAX_SPIROGRAPHS = 6;
+        const MIN_STROKE_ALPHA = 0.08;
+        const MAX_STROKE_ALPHA = 0.15;
+        const FADE_ALPHA = 0.01;
+
+        // --- Spirograph Class ---
+        class Spirograph {
+            constructor(maxRadius) {
+                this.R = randomInRange(maxRadius * 0.4, maxRadius * 0.8); // Radius of the fixed circle
+                this.r = randomInRange(this.R * 0.2, this.R * 0.6); // Radius of the moving circle
+                this.d = randomInRange(this.r * 0.5, this.r * 1.2); // Distance of the pen from the center of the moving circle
+
+                this.k = this.R / this.r; // Ratio R/r, determines the shape
+                this.p = this.d / this.r; // Ratio d/r, determines loopiness
+
+                this.centerX = width / 2;
+                this.centerY = height / 2;
+
+                this.angleOffset = randomInRange(0, Math.PI * 2);
+                this.rotationSpeed = randomSign() * randomInRange(0.4, 1.5) * speed; // rad/s
+
+                this.currentAngle = 0; // Starts at 0, accumulates
+
+                this.hueIndex = randomIntInRange(0, paletteHues.length - 1);
+                this.saturation = randomInRange(0.7, 0.95); // High saturation
+                this.lightness = randomInRange(0.5, 0.7); // Moderate lightness
+
+                this.lineWidth = randomInRange(1.5, 4) * density;
+                this.trailAlpha = randomInRange(MIN_STROKE_ALPHA, MAX_STROKE_ALPHA);
+                this.color = ''; // Updated per frame
+            }
+
+            update(time) {
+                this.currentAngle = (this.angleOffset + time * this.rotationSpeed) % (Math.PI * 2);
+
+                // Modulate hue over time for gentle shifts
+                let baseHue = paletteHues[this.hueIndex];
+                let hueShift = Math.sin(time * 0.1 * speed + this.angleOffset) * 20; // Shift hue by +/- 20 degrees
+                let currentHue = (baseHue + hueShift + 360) % 360;
+
+                this.color = hslToRgb(currentHue, this.saturation, this.lightness);
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.centerX, this.centerY);
+
+                const currentAngle = this.currentAngle;
+
+                // Inner circle's rotation relative to the outer circle's rotation
+                const theta = currentAngle;
+                const phi = (this.k - 1) * currentAngle;
+
+                // Position of the pen relative to the center of the fixed circle
+                const x = (this.R - this.r) * Math.cos(theta) + this.d * Math.cos(phi);
+                const y = (this.R - this.r) * Math.sin(theta) + this.d * Math.sin(phi);
+
+                // Draw the point with glowing effect
+                ctx.strokeStyle = this.color;
+                ctx.lineWidth = this.lineWidth;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                
+                // Draw a soft, wide stroke for glow
+                ctx.globalAlpha = this.trailAlpha * 2; // Slightly higher for bloom
+                ctx.lineWidth = this.lineWidth * 4;
+                ctx.strokeRect(x - 0.5, y - 0.5, 1, 1); // Draw a point by stroking a tiny rect
+
+                // Draw a bright, thin core stroke
+                ctx.globalAlpha = this.trailAlpha;
+                ctx.lineWidth = this.lineWidth;
+                ctx.strokeRect(x - 0.5, y - 0.5, 1, 1);
+
+                ctx.restore();
+            }
+        }
+
+        // --- Main Initialization ---
+        function init() {
+            canvas = document.getElementById('canvas');
+            ctx = canvas.getContext('2d', { alpha: false }); // Disable alpha for the canvas context
+
+            // Get URL params
+            width = getQueryParam('width', 1920, 'int');
+            height = getQueryParam('height', 1080, 'int');
+            const seed = getQueryParam('seed', 12345, 'int');
+            fps = getQueryParam('fps', 24, 'int');
+            duration = getQueryParam('duration', 3600, 'int'); // in seconds
+            speed = getQueryParam('speed', 1.0, 'float');
+            density = getQueryParam('density', 1.0, 'float');
+            cycleSec = getQueryParam('cycleSec', 90, 'float'); // Mandatory hard reset cycle
+
+            // Set canvas dimensions
+            canvas.width = width;
+            canvas.height = height;
+
+            // Set global composite operation for additive blending
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.imageSmoothingEnabled = true;
+
+            // Initialize PRNG
+            R = mulberry32(seed);
+
+            dt = 1 / fps;
+            window.TOTAL_FRAMES = Math.round(duration * fps);
+            startTime = 0; // Simulated time
+
+            // Generate palette hues
+            const baseHue = randomInRange(0, 360);
+            const numHues = randomIntInRange(3, 6);
+            for (let i = 0; i < numHues; i++) {
+                let hue = (baseHue + (i * (360 / numHues)) + randomInRange(-20, 20)) % 360;
+                if (hue < 0) hue += 360;
+                paletteHues.push(hue);
+            }
+
+            // Create spirographs
+            const maxRadius = Math.min(width, height) * 0.45 * density;
+            const numSpiros = randomIntInRange(3, MAX_SPIROGRAPHS);
+            for (let i = 0; i < numSpiros; i++) {
+                spirographs.push(new Spirograph(maxRadius));
+            }
+
+            // --- Define advanceFrame and advanceFrames ---
+            window.advanceFrame = () => {
+                const currentTime = startTime + window.currentFrame * dt;
+
+                // Mandatory hard reset: clear to black every cycleSec
+                if (window.currentFrame === 0 || Math.round(currentTime / cycleSec) !== Math.round((currentTime - dt) / cycleSec)) {
+                    ctx.globalCompositeOperation = 'source-over'; // Reset to default for clearing
+                    ctx.fillStyle = 'black';
+                    ctx.fillRect(0, 0, width, height);
+                    ctx.globalCompositeOperation = 'lighter'; // Restore additive blending
+                } else {
+                    // Gradual fade for trails if not hard clearing
+                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.fillStyle = `rgba(0,0,0,${FADE_ALPHA})`;
+                    ctx.fillRect(0, 0, width, height);
+                    ctx.globalCompositeOperation = 'lighter';
+                }
+
+                // Update and draw spirographs
+                for (const spiro of spirographs) {
+                    spiro.update(currentTime);
+                    spiro.draw();
+                }
+
+                window.currentFrame++;
+            };
+
+            window.advanceFrames = (n) => {
+                for (let i = 0; i < n; i++) {
+                    window.advanceFrame();
+                }
+            };
+
+            window.READY = true;
+        }
+
+        // Initialize when the script loads
+        init();
+    </script>
+</body>
+</html>
