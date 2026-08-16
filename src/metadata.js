@@ -31,7 +31,7 @@ const BASE_TAGS = [
   'sacred geometry', 'kaleidoscope', 'hypnotic visuals', 'stress relief',
   'deep sleep', 'work from home', 'no talking', 'silent video', 'seamless loop',
   'trippy visuals', 'psychedelic art', 'desktop wallpaper', 'tv screensaver',
-  'ai generated art', 'looping background', 'calming visuals',
+  'looping background', 'calming visuals',
 ];
 
 // Small deterministic hash so we can pick template variants from a seed.
@@ -84,24 +84,30 @@ export function buildMetadata(info = {}) {
   // so it needs the value proposition + primary keywords up front, not just
   // a mood label), then a longer keyword-rich body (200-500 words performs
   // best), a subscribe CTA (genuinely relevant for a daily-upload channel),
-  // then transparency/debug info and hashtags last.
-  const hook = `${mood} ${subject} — ${durLabel.phrase} of hypnotic geometric visuals, silent & looping, perfect ${useCase.toLowerCase()}, deep sleep, or focus.`;
+  // then hashtags last. Deliberately says nothing about HOW the video was
+  // made (no "generated"/"automated"/"AI"/"seed"/"engine" language, no raw
+  // debug fields) — viewers care what it's like to watch, not the pipeline
+  // behind it; that's implementation detail, not marketing copy.
+  const hasAudio = !!info.hasAudio;
+  const audioHookFragment = hasAudio ? ' with calming ambient music' : ', silent & looping';
+  const hook = `${mood} ${subject} — ${durLabel.phrase} of vivid, ever-shifting geometric visuals${audioHookFragment}, perfect ${useCase.toLowerCase()}, deep sleep, or focus.`;
+
+  const visualParagraph = 'Watch bold, saturated colour and crisp rotating geometry slowly shift and evolve across the full runtime — expect kaleidoscopic symmetry, sharp-edged polygons, and a palette that drifts and deepens the longer you watch. No two days look quite the same, so there\'s always something new if you check back tomorrow.';
+
+  const audioParagraph = hasAudio
+    ? 'This video features a soft, original ambient soundtrack that breathes and evolves alongside the visuals — gentle pads and a slow, wandering melody designed to sit quietly in the background. Works great as animated wallpaper, a TV or desktop screensaver, or company while you work, study, code, read, journal, do yoga, or wind down before sleep.'
+    : 'This video is completely silent — no music, no talking, no sound effects — so you can pair it with your own playlist, a podcast, white noise, or just enjoy it on mute. Works great as animated wallpaper, a TV or desktop screensaver, or an ambient backdrop while working, studying, coding, reading, journaling, meditating, doing yoga, or winding down before sleep.';
 
   const description = [
     hook,
     '',
-    `A brand-new pattern is generated and rendered automatically every single day — this one is from ${date}. Same seed always reproduces the exact same video, so nothing here is stock footage or reused: today's geometry, colour palette, and motion are unique to this date. Expect crisp rotating polygons, kaleidoscopic symmetry, and vivid, saturated colour that slowly evolves across the full runtime — no two days ever look the same.`,
+    visualParagraph,
     '',
-    "This video is completely silent — no music, no talking, no sound effects — so you can pair it with your own playlist, a podcast, white noise, or just enjoy it on mute. Works great as animated wallpaper, a TV or desktop screensaver, or an ambient backdrop while working, studying, coding, reading, journaling, meditating, doing yoga, or winding down before sleep.",
+    audioParagraph,
     creditLine ? '' : undefined,
     creditLine,
     '',
-    'This channel runs on a fully automated pipeline: a generative-art engine writes and renders new geometry every day, with no manual editing and no stock assets — just code, colour, and motion.',
-    '',
-    'New hypnotic geometric pattern uploaded daily — subscribe so you never miss tomorrow\'s.',
-    '',
-    `Seed: ${seed}`,
-    info.engineName ? `Engine: ${info.engineName}` : '',
+    `New ${mood.toLowerCase()} ${subject.toLowerCase()} every day — subscribe so you never miss tomorrow's.`,
     '',
     '#generativeart #screensaver #ambient #relaxing #hypnotic',
   ].filter((line) => line !== undefined).join('\n');
@@ -113,10 +119,9 @@ export function buildMetadata(info = {}) {
   // #Shorts (required for reliable Shorts-shelf placement).
   const shortTitle = clampTitle(`${mood} ${subject} #Shorts`);
   const shortDescription = [
-    `A 30-second taste of today's ${subject.toLowerCase()} — silent, seamless, and hypnotic.`,
-    `New AI-and-code generated pattern every day. Full ${durLabel.phrase} version is on the channel — subscribe for tomorrow's.`,
+    `A 30-second taste of today's ${subject.toLowerCase()}${hasAudio ? ', with a calming ambient soundtrack' : ''} — crisp, hypnotic, and endlessly satisfying to watch.`,
+    `New pattern every day. Full ${durLabel.phrase} version is on the channel — subscribe for tomorrow's.`,
     '',
-    `Seed: ${seed}`,
     '#Shorts #generativeart #satisfying #ambient #hypnotic',
   ].join('\n');
 

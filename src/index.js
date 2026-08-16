@@ -326,6 +326,7 @@ async function main() {
     durationSec: cfg.duration,
     imageCredit,
     engineName,
+    hasAudio: renderResult.hasAudio,
   });
   console.log(`[index] long title : ${metadata.long.title}`);
   console.log(`[index] short title: ${metadata.short.title}`);

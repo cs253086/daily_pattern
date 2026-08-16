@@ -143,6 +143,21 @@ them:
      against a synthetic fixture that clears/redraws cleanly every frame
      (zero whiteout risk) but rotates once per 240s: correctly rejected for
      motion even though its brightness trend is perfectly flat.
+6. **Video descriptions never reveal that the pipeline is automated.**
+   User request 2026-08-15: no "generated automatically," "fully automated
+   pipeline," "AI-and-code generated," or raw `Seed:`/`Engine:` debug
+   fields in the public-facing description — viewers care what the video
+   is like to watch, not the production process behind it. `metadata.js`'s
+   description now describes the visuals and (accurately, based on
+   `hasAudio`) the audio, with no mention of how either was made. Genre
+   terms like "generative art"/"procedural art" are kept (established art-
+   genre vocabulary real human artists use too, not an automation
+   confession, and good for discovery) — the one tag that crossed the line
+   (`ai generated art`) was removed. If ambient music (currently off by
+   default, see "Ambient music" below) gets re-enabled, the description
+   automatically switches from the "completely silent" paragraph to one
+   describing the soundtrack — don't let these two drift out of sync if
+   editing either.
 
 ## Editing engine/prompt template literals — a gotcha to know about
 
