@@ -252,13 +252,24 @@ touching WebGL in this codebase again:
 
 ## Ambient music (`src/audio.js`)
 
-**Currently OFF by default** (`cfg.music` defaults to `false` in
-`resolveConfig()`, `src/render.js`) — user request 2026-08-13, while the
-sound design is still being tuned. Opt back in with `--music` / `MUSIC=1`,
-or set the repo variable `vars.MUSIC=1` (wired into
-`.github/workflows/daily.yml` the same way as `IMAGE_PALETTE`) to re-enable
-it for scheduled runs without touching code. Everything below describes
-the feature as built; it just isn't wired on by default right now.
+**ON by default** (`cfg.music` defaults to `true` in `resolveConfig()`,
+`src/render.js`) as of 2026-08-17 — user request ("insert license free
+music in each video"). It was off from 2026-08-13 to 2026-08-17 while the
+sound design was being tuned (melody added, levels verified — see below);
+that tuning is done, so it's back on for every scheduled run. Disable with
+`--music=0` / `MUSIC=0`, or set the repo variable `vars.MUSIC=0` (wired
+into `.github/workflows/daily.yml` the same way as `IMAGE_PALETTE`) if it
+ever needs to be turned off again without a code change.
+
+**"License free" here means procedurally generated from scratch per day,
+not fetched from a stock/royalty-free library.** That distinction is the
+whole reason this feature exists in this form: see the "Built as
+procedurally generated audio, not licensed/library music" rationale below
+— an unattended, no-human-review daily pipeline has real unmanaged
+copyright exposure with ANY externally-sourced track, royalty-free-labeled
+or not (licenses vary, misattribution is easy). A 100% original,
+deterministically-generated-from-seed track has zero such exposure by
+construction, which is what satisfies "license free" safely here.
 
 User request: "can you add meditation calm music to each video?" Built as
 **procedurally generated audio, not licensed/library music** — this channel

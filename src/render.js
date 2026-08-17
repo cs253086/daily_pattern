@@ -87,11 +87,14 @@ export function resolveConfig(cli = {}) {
     outDir: pick(cli, 'outDir', 'OUT_DIR', path.join(repoRoot, 'output')),
     readyTimeoutMs: pick(cli, 'readyTimeout', 'READY_TIMEOUT_MS', 60000, num),
 
-    // Ambient music (src/audio.js). Off by default for now (user request,
-    // 2026-08-13) while the sound design is still being tuned -- opt back
-    // in with --music or MUSIC=1 (wired through to the workflow as
-    // vars.MUSIC, same pattern as IMAGE_PALETTE) once it's ready again.
-    music: pick(cli, 'music', 'MUSIC', false, (v) => v === true || v === '1' || v === 'true'),
+    // Ambient music (src/audio.js) -- 100% original, procedurally generated
+    // per day from the same seed as the visuals, so it carries zero
+    // licensing/copyright risk (see src/audio.js's header for why this is
+    // "license-free" by construction rather than fetched stock/library
+    // tracks). ON by default (user request, 2026-08-17); disable with
+    // --music=0 / MUSIC=0 (wired through to the workflow as vars.MUSIC,
+    // same pattern as IMAGE_PALETTE) if needed again.
+    music: pick(cli, 'music', 'MUSIC', true, (v) => !(v === false || v === '0' || v === 'false')),
   };
 
   cfg.longPath = path.join(cfg.outDir, pick(cli, 'longName', 'LONG_NAME', 'long.mp4'));

@@ -72,10 +72,10 @@ jobs:
           # Blank falls back to DEMO_KEY. Set IMAGE_PALETTE=0 to disable entirely.
           NASA_API_KEY: ${{ secrets.NASA_API_KEY }}
           IMAGE_PALETTE: ${{ vars.IMAGE_PALETTE }}
-          # Procedurally generated ambient music (src/audio.js). Off by
-          # default for now (user request, 2026-08-13) while the sound
-          # design is still being tuned. Set repo variable MUSIC=1 to turn
-          # it back on.
+          # Procedurally generated, 100% original ambient music (src/audio.js) --
+          # no licensing/copyright risk since nothing is fetched from a stock
+          # library. ON by default (user request, 2026-08-17). Set repo
+          # variable MUSIC=0 to disable if ever needed again.
           MUSIC: ${{ vars.MUSIC }}
           # Default 3600s (1 hour). REQUIRES a verified YouTube channel —
           # unverified channels reject uploads >15 min ("Processing abandoned:
