@@ -55,39 +55,89 @@ function curatedPool() {
   return pool;
 }
 
-// Persisted rotation cursor for the curated pool (committed to git by the
-// workflow after each run — see .github/workflows/daily.yml). Tracks the
-// NAME of the last curated engine used, not a numeric index. This matters
-// once the pool can grow (see promoteToCuratedPool() below): curatedPool()
-// is sorted alphabetically, so inserting a new file can shift every OTHER
-// engine's position in that sort order. A persisted numeric index would
-// then silently point at a different engine than intended the moment the
-// pool changes shape -- e.g. adding "auto-2026-08-05-....html" (sorts
-// before "geometric") would shift geometric from index 0 to 1, kaleidoscope
-// from 2 to 3, etc., breaking the "never immediately repeat" guarantee
-// without any error. Storing the NAME and looking up its current position
-// each time sidesteps this entirely: "next after whatever we last used" is
-// always computed against the pool as it exists right now.
-const ROTATION_STATE_PATH = path.join(repoRoot, 'state', 'engine-rotation.json');
-
-function readLastEngineName() {
+// Classify an engine file as real WebGL 3D (getContext('webgl'/'webgl2'))
+// vs everything else (Canvas2D, incl. wireframe.html which only fakes 3D by
+// projecting edges onto a flat canvas -- see CLAUDE.md's "3D / WebGL
+// engines" section for why that distinction matters). Content-sniffed
+// rather than a hardcoded name list so future engines -- hand-written OR
+// Gemini-generated-then-promoted via promoteToCuratedPool() -- are
+// classified automatically without needing this list maintained.
+const WEBGL_RE = /getContext\(\s*['"]webgl2?['"]/;
+function isWebGLEngine(enginePath) {
   try {
-    const data = JSON.parse(readFileSync(ROTATION_STATE_PATH, 'utf8'));
-    if (typeof data.lastEngine === 'string' && data.lastEngine) return data.lastEngine;
-  } catch { /* missing or corrupt state file -- caller bootstraps instead */ }
-  return null;
+    return WEBGL_RE.test(readFileSync(enginePath, 'utf8'));
+  } catch {
+    return false;
+  }
 }
 
-function writeLastEngineName(name) {
+// Persisted rotation cursor for the curated pool (committed to git by the
+// workflow after each run — see .github/workflows/daily.yml). Tracks the
+// NAME of the last curated engine used PER DIMENSION BUCKET (3D vs 2D, see
+// below), not a numeric index. This matters once the pool can grow (see
+// promoteToCuratedPool() below): curatedPool() is sorted alphabetically, so
+// inserting a new file can shift every OTHER engine's position in that sort
+// order. A persisted numeric index would then silently point at a
+// different engine than intended the moment the pool changes shape -- e.g.
+// adding "auto-2026-08-05-....html" (sorts before "geometric") would shift
+// geometric from index 0 to 1, kaleidoscope from 2 to 3, etc., breaking the
+// "never immediately repeat" guarantee without any error. Storing the NAME
+// and looking up its current position each time sidesteps this entirely:
+// "next after whatever we last used" is always computed against the pool
+// as it exists right now.
+const ROTATION_STATE_PATH = path.join(repoRoot, 'state', 'engine-rotation.json');
+
+function readRotationState() {
+  try {
+    const data = JSON.parse(readFileSync(ROTATION_STATE_PATH, 'utf8'));
+    // Old schema (pre dimension-weighting, single `lastEngine` field, no
+    // 3D/2D split): migrate it into whichever bucket it turns out to
+    // belong to, rather than discarding it and losing the "don't
+    // immediately repeat" guarantee for one bucket right after this
+    // change ships. The other bucket just bootstraps normally below.
+    if (typeof data.lastEngine === 'string' && data.last3D === undefined && data.last2D === undefined) {
+      const p = curatedPool().find((f) => path.basename(f, '.html') === data.lastEngine);
+      if (p && isWebGLEngine(p)) return { last3D: data.lastEngine, last2D: null };
+      if (p) return { last3D: null, last2D: data.lastEngine };
+    }
+    return {
+      last3D: typeof data.last3D === 'string' ? data.last3D : null,
+      last2D: typeof data.last2D === 'string' ? data.last2D : null,
+    };
+  } catch { /* missing or corrupt state file -- caller bootstraps instead */ }
+  return { last3D: null, last2D: null };
+}
+
+function writeRotationState(state) {
   try {
     mkdirSync(path.dirname(ROTATION_STATE_PATH), { recursive: true });
     writeFileSync(
       ROTATION_STATE_PATH,
-      `${JSON.stringify({ lastEngine: name, updatedAt: new Date().toISOString() }, null, 2)}\n`,
+      `${JSON.stringify({ ...state, updatedAt: new Date().toISOString() }, null, 2)}\n`,
     );
   } catch (e) {
     console.warn(`[index] could not persist engine rotation state: ${e.message}`);
   }
+}
+
+function hashStr(s) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h >>> 0;
+}
+
+// Round-robin within a single bucket (a list of engine paths + that
+// bucket's persisted "last used" name). Bootstraps deterministically from
+// the seed if there's no usable cursor (first run, or the last-used engine
+// no longer exists in this bucket), same logic as the pre-weighting
+// version, just parameterised over which subset of the pool to cycle.
+function nextInBucket(bucketPool, lastName, seed) {
+  const names = bucketPool.map((p) => path.basename(p, '.html'));
+  const lastIdx = lastName ? names.indexOf(lastName) : -1;
+  const idx = lastIdx === -1
+    ? (Number(String(seed).replace(/\D/g, '')) || 0) % bucketPool.length
+    : (lastIdx + 1) % bucketPool.length;
+  return bucketPool[idx];
 }
 
 // Fallback when Gemini isn't available or fails: pick the next curated
@@ -101,6 +151,18 @@ function writeLastEngineName(name) {
 // Gemini-generated days fall in between fallbacks. Falls back to Bloom only
 // if the manual pool is somehow empty (should never happen in normal
 // operation).
+//
+// Dimension-weighted, 2026-08-19 (user request: "generate more 3d patterns
+// than 2d patterns"): the pool is split into a 3D bucket (real WebGL
+// engines, content-sniffed via isWebGLEngine) and a 2D bucket (everything
+// else), each with its OWN independent round-robin cursor so neither bucket
+// can repeat before it fully cycles. Which bucket today's pick comes FROM
+// is a deterministic 65/35-weighted choice from the seed (not true
+// randomness -- keeps this project's "same seed -> same everything"
+// reproducibility convention), favouring 3D on clear majority of days
+// without starving 2D variety entirely. Falls back to whichever bucket is
+// non-empty if the other is (e.g. before any 3D engine existed).
+const P_3D = 0.65;
 function curatedOr(reason, seed) {
   const pool = curatedPool();
   if (pool.length === 0) {
@@ -108,23 +170,19 @@ function curatedOr(reason, seed) {
     if (reason) console.warn(`[index] ${reason} — engines/manual/ is empty, using emergency Bloom fallback.`);
     return { engine: BLOOM, source: 'curated:bloom' };
   }
-  const names = pool.map((p) => path.basename(p, '.html'));
-  const lastName = readLastEngineName();
-  const lastIdx = lastName ? names.indexOf(lastName) : -1;
-  let idx;
-  if (lastIdx === -1) {
-    // No usable persisted state (first run ever, or the last-used engine no
-    // longer exists in the pool) -- bootstrap deterministically from the
-    // seed rather than always starting at 0.
-    const n = Number(String(seed).replace(/\D/g, '')) || 0;
-    idx = n % pool.length;
-  } else {
-    idx = (lastIdx + 1) % pool.length;
-  }
-  const engine = pool[idx];
-  writeLastEngineName(names[idx]);
-  if (reason) console.warn(`[index] ${reason} — using curated engine ${path.basename(engine)}.`);
-  return { engine, source: `curated:${path.basename(engine, '.html')}` };
+  const pool3D = pool.filter(isWebGLEngine);
+  const pool2D = pool.filter((p) => !isWebGLEngine(p));
+  const state = readRotationState();
+
+  const want3D = pool3D.length > 0 && (pool2D.length === 0 || (hashStr(`${seed}:dim`) % 100) < P_3D * 100);
+  const bucketPool = want3D ? pool3D : pool2D;
+  const bucketKey = want3D ? 'last3D' : 'last2D';
+
+  const engine = nextInBucket(bucketPool, state[bucketKey], seed);
+  const name = path.basename(engine, '.html');
+  writeRotationState({ ...state, [bucketKey]: name });
+  if (reason) console.warn(`[index] ${reason} — using curated engine ${path.basename(engine)} (${want3D ? '3D' : '2D'} bucket).`);
+  return { engine, source: `curated:${name}` };
 }
 
 // Decide which engine to render:

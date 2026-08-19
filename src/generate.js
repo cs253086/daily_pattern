@@ -19,7 +19,17 @@ const repoRoot = path.resolve(__dirname, '..');
 // aims for a GEOMETRIC aesthetic — crisp shapes, straight edges, symmetry,
 // lattices, tessellations — so the list is geometry-forward (a few organic
 // options remain for variety).
-const THEME_HINTS = [
+// Split into a 2D bucket and a genuine-3D bucket (real WebGL, lit solid
+// geometry with a depth buffer -- see the "3D / WEBGL" prompt section
+// below) rather than one flat list, so theme selection can be weighted
+// toward 3D (see nextThemeHint below) the same way src/index.js's
+// curatedOr() weights the curated-engine fallback pool -- user request
+// 2026-08-19, "generate more 3d patterns than 2d patterns". Note
+// "rotating 3D wireframe polytope" stays in the 2D bucket even though it
+// says "3D" in its text: it's a flat projection of edges onto a Canvas2D
+// canvas (like wireframe.html), not real per-pixel lit depth, so it
+// doesn't get the same weighting boost as the genuinely-3D WebGL hints.
+const THEME_HINTS_2D = [
   // Geometric core (crisp edges, defined shapes, symmetry)
   'concentric rotating regular polygons nesting into a hypnotic vortex',
   'recursive geometric tessellation of triangles and hexagons slowly rotating',
@@ -37,17 +47,20 @@ const THEME_HINTS = [
   'grid of rotating triangles forming moiré interference',
   'geometric kaleidoscope of mirrored straight-edged shards',
   'orbiting polygons tracing crisp geometric spirograph paths',
-  // Genuine 3D (lit solid geometry with real depth, not a flat projection --
-  // see the "3D / WEBGL" section above)
-  'lit 3D polyhedra orbiting each other with real depth and per-face shading',
-  'extruded 3D isometric lattice of glowing faceted blocks',
-  'rotating 3D lit torus-and-ring structures with directional lighting',
-  'field of small lit 3D solids drifting through real perspective depth',
   // A few organic options for variety
   'blooming fractal petals opening and closing',
   'flowing plasma fields with soft additive glow',
   'metaballs gently merging and splitting',
   'flow field where thousands of fine lines follow noise currents',
+];
+// Genuine 3D (lit solid geometry with real depth, not a flat projection).
+const THEME_HINTS_3D = [
+  'lit 3D polyhedra orbiting each other with real depth and per-face shading',
+  'extruded 3D isometric lattice of glowing faceted blocks',
+  'rotating 3D lit torus-and-ring structures with directional lighting',
+  'field of small lit 3D solids drifting through real perspective depth',
+  'a dense grid/lattice of small lit 3D cubes at fixed positions, each spinning independently, camera slowly turning like a turntable',
+  'lit 3D crystalline cluster of faceted gems refracting a slowly rotating light',
 ];
 
 function hashStr(s) {
@@ -56,9 +69,9 @@ function hashStr(s) {
   return h >>> 0;
 }
 
-// Persisted rotation cursor for THEME_HINTS, mirroring curatedOr()'s fix in
-// src/index.js for the exact same bug class: a date-hash pick
-// (hashStr(date) % THEME_HINTS.length) can coincidentally repeat or
+// Persisted rotation cursors for THEME_HINTS_2D / THEME_HINTS_3D, mirroring
+// curatedOr()'s fix in src/index.js for the exact same bug class: a
+// date-hash pick (hashStr(date) % list.length) can coincidentally repeat or
 // cluster similar themes on nearby dates, and doesn't know or care what
 // theme was used yesterday. A real complaint: consecutive days picked
 // "concentric rotating regular polygons... vortex" and "recursive geometric
@@ -67,38 +80,63 @@ function hashStr(s) {
 // nothing steering it toward the *unused* parts of the list first. A true
 // round-robin guarantees every hint is used once before any repeats,
 // maximising day-to-day variety the same way the curated-engine fix does.
+//
+// Two independent cursors (one per bucket), 2026-08-19: same dimension-
+// weighting change as curatedOr(), so a Gemini success is also more likely
+// to land on a 3D theme than a 2D one, not just the curated fallback path.
 const THEME_STATE_PATH = path.join(repoRoot, 'state', 'theme-rotation.json');
+const THEME_P_3D = 0.65;
 
-function readThemeIndex() {
+function readThemeIndices() {
   try {
     const data = JSON.parse(readFileSync(THEME_STATE_PATH, 'utf8'));
-    if (Number.isInteger(data.nextIndex) && data.nextIndex >= 0) return data.nextIndex;
+    // Old schema (single flat `nextIndex` against the pre-split list): no
+    // clean way to map a flat index onto the new two-list split, so just
+    // bootstrap both cursors fresh from the date-hash below, same
+    // graceful-degradation pattern used for missing/corrupt state
+    // elsewhere in this project.
+    if (Number.isInteger(data.next2D) || Number.isInteger(data.next3D)) {
+      return {
+        next2D: Number.isInteger(data.next2D) ? data.next2D : null,
+        next3D: Number.isInteger(data.next3D) ? data.next3D : null,
+      };
+    }
   } catch { /* missing or corrupt state file -- caller bootstraps instead */ }
-  return null;
+  return { next2D: null, next3D: null };
 }
 
-function writeThemeIndex(nextIndex) {
+function writeThemeIndices(next) {
   try {
     mkdirSync(path.dirname(THEME_STATE_PATH), { recursive: true });
     writeFileSync(
       THEME_STATE_PATH,
-      `${JSON.stringify({ nextIndex, updatedAt: new Date().toISOString() }, null, 2)}\n`,
+      `${JSON.stringify({ ...next, updatedAt: new Date().toISOString() }, null, 2)}\n`,
     );
   } catch (e) {
     console.warn(`[generate] could not persist theme rotation state: ${e.message}`);
   }
 }
 
-// Pick the next theme in round-robin order and advance the persisted cursor.
-// Bootstraps from the old date-hash if state is missing/corrupt (fresh
-// checkout safety net, same pattern as curatedOr()).
-function nextThemeHint(date) {
-  let idx = readThemeIndex();
-  if (idx === null || idx >= THEME_HINTS.length) {
-    idx = hashStr(String(date)) % THEME_HINTS.length;
+// Pick the next theme in round-robin order and advance the persisted
+// cursor for whichever bucket (2D/3D) this pick came from. Which bucket is
+// chosen from is a deterministic 65/35-weighted pick from seed+date (not
+// true randomness -- keeps this project's "same seed -> same everything"
+// reproducibility convention). Bootstraps from the date-hash if a bucket's
+// cursor is missing/corrupt (fresh checkout safety net, same pattern as
+// curatedOr()).
+function nextThemeHint(date, seed) {
+  const { next2D, next3D } = readThemeIndices();
+  const want3D = (hashStr(`${seed ?? date}:theme-dim`) % 100) < THEME_P_3D * 100;
+  const list = want3D ? THEME_HINTS_3D : THEME_HINTS_2D;
+  let idx = want3D ? next3D : next2D;
+  if (idx === null || idx >= list.length) {
+    idx = hashStr(String(date)) % list.length;
   }
-  writeThemeIndex((idx + 1) % THEME_HINTS.length);
-  return THEME_HINTS[idx];
+  writeThemeIndices({
+    next2D: want3D ? next2D : (idx + 1) % list.length,
+    next3D: want3D ? (idx + 1) % list.length : next3D,
+  });
+  return list[idx];
 }
 
 function todayUTC() {
@@ -279,7 +317,7 @@ export async function generateEngine(opts = {}) {
   // rather than picking a new one here, or a repair would silently switch
   // creative direction mid-repair. Only a fresh (non-repair) call without an
   // explicit themeHint advances the rotation.
-  const themeHint = opts.themeHint || nextThemeHint(date);
+  const themeHint = opts.themeHint || nextThemeHint(date, seed);
 
   const prompt = opts.repair
     ? buildRepairPrompt({ seed, date, themeHint, previousHtml: opts.repair.previousHtml, reasons: opts.repair.reasons })

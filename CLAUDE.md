@@ -368,13 +368,17 @@ actually true.
    (`src/validate.js` — visual quality gate + render-speed budget), one
    repair attempt on failure.
 2. Otherwise (or if Gemini fails both attempts): pick the next curated
-   engine in true round-robin order — `engines/manual/*.html`. Hand-written
-   core: `geometric`, `grid`, `kaleidoscope`, `starburst`, `wireframe`,
-   `tessellation`, `solids3d` (real WebGL — see "3D / WebGL engines" above),
-   `spirograph` (glowing hypotrochoid/epitrochoid curves — a smooth
-   continuous-curve texture, distinct from every polygon/tile/ring/lit-solid
-   engine above), `arcrings` (bold segmented rotating "radar" rings, distinct
-   from `geometric`'s full polygons and `kaleidoscope`'s mirrored stamps),
+   engine — **dimension-weighted round-robin**, see below — from
+   `engines/manual/*.html`. Hand-written core: `geometric`, `grid`,
+   `kaleidoscope`, `starburst`, `wireframe`, `tessellation`, `solids3d`
+   (real WebGL — see "3D / WebGL engines" above), `lattice3d` (second real
+   WebGL engine — a dense fixed-position 3D grid of independently-spinning
+   cubes on a single-axis turntable, deliberately a different 3D
+   composition from solids3d's sparse orbiting solids), `spirograph`
+   (glowing hypotrochoid/epitrochoid curves — a smooth continuous-curve
+   texture, distinct from every polygon/tile/ring/lit-solid engine above),
+   `arcrings` (bold segmented rotating "radar" rings, distinct from
+   `geometric`'s full polygons and `kaleidoscope`'s mirrored stamps),
    `cascade` (directional top-to-bottom falling-block cascade with NO centre
    or radial symmetry at all — see "Archetype clustering" below for why this
    one exists). Plus any `auto-YYYY-MM-DD-<theme-slug>.html` files — see
@@ -422,6 +426,81 @@ engines", `git commit` + `git push origin HEAD:<ref>`), which is why
 repo). If `state/engine-rotation.json` is ever missing/corrupt, or names an
 engine no longer in the pool, `curatedOr()` bootstraps from the old
 date-hash as a one-time fallback, so a fresh checkout doesn't crash.
+
+### Curated fallback (and Gemini theme selection) is dimension-weighted toward 3D
+
+User request 2026-08-19: "generate more 3d patterns than 2d patterns."
+Before this, `curatedOr()`'s round-robin treated the whole pool as one flat
+list — with only `solids3d` as real 3D out of ~12 engines, a flat
+round-robin structurally could never give 3D more than its ~1/12 share no
+matter how "fair" the rotation was.
+
+Fixed by splitting the curated pool into two independent buckets and
+round-robin cursors: a **3D bucket** (real WebGL engines, detected by
+content-sniffing each file for `getContext('webgl'`/`getContext('webgl2'`
+— not a hardcoded name list, so future hand-written OR Gemini-promoted 3D
+engines are picked up automatically) and a **2D bucket** (everything
+else). Each fallback day, which bucket to draw from is a deterministic
+65/35-weighted pick hashed from the seed (`hashStr(`${seed}:dim`) % 100 <
+65`) — not true randomness, to preserve this project's "same seed → same
+everything" reproducibility convention — then a normal round-robin picks
+the next unused engine *within* that bucket, so neither bucket can repeat
+an engine before it fully cycles. Falls back to whichever bucket is
+non-empty if the other is (e.g. before any 3D engine existed).
+
+Building this exposed a real gap: only one 3D engine (`solids3d`) existed,
+so weighting 65% of days toward "the 3D bucket" would have meant 65% of
+days literally repeating the same single file — not real 3D *variety*,
+just more frequent repetition of one thing. Added `lattice3d.html` (a
+second, compositionally distinct real-WebGL engine — a dense fixed-grid
+lattice of independently-spinning cubes on a single-axis turntable, vs.
+solids3d's sparse orbiting solids) specifically so the 3D bucket has real
+alternation to offer, not just a de-facto single choice. Iterated on its
+camera/spacing before shipping: an initial version at tight spacing and a
+close camera read as an indistinct clustered blob (visually
+indistinguishable from solids3d's own composition, defeating the point);
+widening the spacing, pulling the camera back, and switching from a
+two-axis tumble to a single-axis turntable (a tumble on both axes
+foreshortens a grid into an overlapping mess at some rotation angles,
+losing the "ordered lattice" read) fixed this — verified by actually
+rendering frames and looking at them, not just passing `validate.js`,
+per the standing "look at it" visual-requirements rule. `validate.js`
+passes across 5 tested seeds with a healthy margin (avgSat 51.6–57.6 vs.
+the 22 minimum; motion, near-white, and whiteout-projection checks all
+comfortably clear).
+
+The exact same weighting change was applied to Gemini's theme selection
+(`nextThemeHint()` in `src/generate.js`), not just the curated fallback:
+`THEME_HINTS` was split into `THEME_HINTS_2D` and `THEME_HINTS_3D` (note:
+"rotating 3D wireframe polytope" stays in the 2D bucket despite the "3D"
+in its text — it's a flat Canvas2D edge projection like `wireframe.html`,
+not real lit depth, so it doesn't get the weighting boost), each with its
+own persisted round-robin cursor in `state/theme-rotation.json`
+(`next2D`/`next3D` replacing the old flat `nextIndex`), picked via the
+same 65/35 seed-hashed bucket choice. So a Gemini success is now also more
+likely to land on a genuinely-3D theme than a 2D one, keeping both paths
+consistent with the user's request regardless of which one actually
+produces that day's video.
+
+Both `state/*.json` files gracefully migrate from their pre-weighting
+schema (a single `lastEngine` / `nextIndex`) rather than discarding it: on
+first run after this change, whichever bucket the old cursor's engine/
+theme actually belongs to gets seeded from it (preserving the
+no-immediate-repeat guarantee for that bucket), and the other bucket just
+bootstraps fresh from the date-hash, same graceful-degradation pattern
+already used for missing/corrupt state elsewhere in this project.
+
+Verified end-to-end (not just the weighting math in isolation) by
+temporarily exporting `curatedOr()`/`nextThemeHint()`, backing up the real
+`state/*.json` files, running each function ~40 times with varying seeds
+against production code, and restoring the backups afterward: curated
+fallback picked the 3D bucket 70% of the time (N=40, consistent with the
+65% target), theme selection picked 3D exactly 65% of the time (N=40),
+neither bucket ever immediately repeated an engine/theme within its own
+sequence, and the old-schema migration was confirmed live (a real
+`lastEngine: "tessellation"` file correctly seeded `last2D` and the very
+next pick was `wireframe`, the correct next-in-order 2D engine after
+tessellation).
 
 ### The curated pool grows daily (`promoteToCuratedPool()` in `src/index.js`)
 
