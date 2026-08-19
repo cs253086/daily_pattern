@@ -60,6 +60,10 @@ export function resolveConfig(cli = {}) {
     cycleSec: pick(cli, 'cycleSec', 'CYCLE_SEC', '', (v) => String(v)),
     // optional image-of-the-day palette: "h,s,l;h,s,l;..." recolours the engine
     colors: pick(cli, 'colors', 'COLORS', '', (v) => String(v)),
+    // optional image-of-the-day structure: "gw,gh:v1,v2,..." luminance grid
+    // (see src/palette.js's encodeStructure) -- lets an engine (currently
+    // composer.html) derive layout, not just colour, from the day's image.
+    lum: pick(cli, 'lum', 'LUM', '', (v) => String(v)),
 
     canvasSelector: pick(cli, 'canvas', 'CANVAS_SELECTOR', 'canvas'),
     jpegQuality: pick(cli, 'jpegQuality', 'JPEG_QUALITY', 0.92, num),
@@ -134,6 +138,7 @@ function buildEngineUrl(cfg) {
   if (cfg.density !== '') p.set('density', cfg.density);
   if (cfg.cycleSec !== '') p.set('cycleSec', cfg.cycleSec);
   if (cfg.colors !== '') p.set('colors', cfg.colors);
+  if (cfg.lum !== '') p.set('lum', cfg.lum);
   return url.href;
 }
 

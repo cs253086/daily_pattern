@@ -87,6 +87,31 @@ function readPixels(size) {
   return Array.from(ctx.getImageData(0, 0, w, h).data);
 }
 
+// In-page: draw the loaded <img> straight into a gw x gh canvas. The
+// browser's own image-scaling (bilinear/box downsampling) does the
+// per-region averaging for us for free -- each of the gw*gh output pixels
+// approximates the average colour of that patch of the source image, no
+// hand-written box-blur needed. Returns a flat row-major array of
+// perceptual luminance (0-100) per cell, letting the day's actual photo
+// content (not just its colour palette) drive engine layout -- see
+// composer.html / the "lum" URL param.
+function readLuminanceGrid(gw, gh) {
+  const img = document.getElementById('src');
+  const c = document.createElement('canvas');
+  c.width = gw; c.height = gh;
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(img, 0, 0, gw, gh);
+  const data = ctx.getImageData(0, 0, gw, gh).data;
+  const out = [];
+  for (let i = 0; i < data.length; i += 4) {
+    // Perceptual luma (Rec. 709), 0-100.
+    const l = (0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) / 255 * 100;
+    out.push(Math.round(l));
+  }
+  return out;
+}
+
 function rgbToHsl(r, g, b) {
   r /= 255; g /= 255; b /= 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b);
@@ -132,6 +157,18 @@ function quantise(data, count) {
 }
 
 async function extractPalette(imageOrUrl, { count = 5, size = 96 } = {}) {
+  const r = await extractImageData(imageOrUrl, { paletteCount: count, paletteSize: size, gridW: 0, gridH: 0 });
+  return r ? r.colors : null;
+}
+
+// Load the image ONCE and extract both the colour palette and a low-res
+// luminance grid from it in the same Puppeteer session -- avoids a second
+// network fetch/decode for what would otherwise be two near-identical
+// passes over the same image. Pass gridW/gridH = 0 to skip structure
+// extraction (palette only).
+async function extractImageData(imageOrUrl, {
+  paletteCount = 5, paletteSize = 96, gridW = 8, gridH = 5,
+} = {}) {
   let dataUrl;
   try {
     dataUrl = await toDataUrl(imageOrUrl);
@@ -154,9 +191,14 @@ async function extractPalette(imageOrUrl, { count = 5, size = 96 } = {}) {
       if (img.complete && img.naturalWidth) resolve(true);
     }), dataUrl);
     if (!ok) { console.warn('[palette] image failed to decode'); return null; }
-    const data = await page.evaluate(readPixels, size);
-    const pal = quantise(data, count);
-    return pal.length >= 2 ? pal : null;
+    const data = await page.evaluate(readPixels, paletteSize);
+    const colors = quantise(data, paletteCount);
+    if (colors.length < 2) return null;
+    let structure = null;
+    if (gridW > 0 && gridH > 0) {
+      structure = await page.evaluate(readLuminanceGrid, gridW, gridH);
+    }
+    return { colors, structure, gridW, gridH };
   } catch (e) {
     console.warn(`[palette] extraction error: ${e.message}`);
     return null;
@@ -170,31 +212,48 @@ export function encodeColors(pal) {
   return pal.map((c) => c.map((n) => Math.round(n)).join(',')).join(';');
 }
 
-// Public: get today's image palette, or null. Never throws.
+// Encode a luminance grid as a URL param: "gw,gh:v1,v2,v3,..." (row-major,
+// each v a 0-100 integer). Compact and easy for an engine to reshape.
+export function encodeStructure(grid, gridW, gridH) {
+  return `${gridW},${gridH}:${grid.join(',')}`;
+}
+
+// Public: get today's image palette (+ a luminance-grid "structure" for
+// engines that want to derive layout from the image, not just colour), or
+// null. Never throws.
 export async function dailyImagePalette({ date = todayUTC(), apiKey = process.env.NASA_API_KEY } = {}) {
   try {
     const apod = await fetchApod({ date, apiKey });
     if (!apod) return null;
-    const colors = await extractPalette(apod.imageUrl, { count: 5 });
-    if (!colors) return null;
-    console.log(`[palette] extracted ${colors.length} colours from APOD "${apod.title}"`);
-    return { colors, title: apod.title, imageUrl: apod.imageUrl, source: 'NASA APOD' };
+    const r = await extractImageData(apod.imageUrl, { paletteCount: 5, gridW: 8, gridH: 5 });
+    if (!r) return null;
+    console.log(`[palette] extracted ${r.colors.length} colours + ${r.gridW}x${r.gridH} structure grid from APOD "${apod.title}"`);
+    return {
+      colors: r.colors,
+      structure: r.structure,
+      gridW: r.gridW,
+      gridH: r.gridH,
+      title: apod.title,
+      imageUrl: apod.imageUrl,
+      source: 'NASA APOD',
+    };
   } catch (e) {
     console.warn(`[palette] dailyImagePalette failed: ${e.message}`);
     return null;
   }
 }
 
-// CLI: `node src/palette.js [imageUrlOrFile]` — extract & print a palette.
-// With no arg, tries today's APOD.
+// CLI: `node src/palette.js [imageUrlOrFile]` — extract & print a palette
+// (+ structure grid). With no arg, tries today's APOD.
 if (import.meta.url === `file://${process.argv[1]}`) {
   const arg = process.argv[2];
   const run = arg
-    ? extractPalette(arg, { count: 5 }).then((c) => ({ colors: c, source: arg }))
+    ? extractImageData(arg, { paletteCount: 5, gridW: 8, gridH: 5 }).then((r) => ({ ...r, source: arg }))
     : dailyImagePalette();
   run.then((r) => {
     if (!r || !r.colors) { console.log('no palette'); process.exit(1); }
     console.log(JSON.stringify(r, null, 2));
     console.log('colors param:', encodeColors(r.colors));
+    if (r.structure) console.log('lum param:', encodeStructure(r.structure, r.gridW, r.gridH));
   }).catch((e) => { console.error(e.message); process.exit(1); });
 }

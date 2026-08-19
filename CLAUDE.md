@@ -754,6 +754,109 @@ underlying bug independently:
   than re-tuning the rotation, since the rotation is already working
   correctly at 3-wide.
 
+## Composable multi-factor engine + image-derived structure (`composer.html`)
+
+User request 2026-08-19: "we could [have] unlimited creative patterns if
+we have many factors and mix them together randomly everyday," plus a
+follow-up idea, "you can also generate a pattern based on images." Every
+lever up to this point (more engine files, dimension-weighted rotation,
+archetype diversity) still ultimately picks ONE discrete file from a
+finite pool each day — more files helps, but it's addition, not
+multiplication, and the pool was already showing signs of feeling
+repetitive well before it could grow large enough to feel truly
+"unlimited." `composer.html` addresses this a structurally different way:
+one engine whose composition is built from **independent randomized
+factors that combine multiplicatively**, plus a **second, independent axis
+of variety driven by that day's actual NASA APOD photo content**, not just
+its colour palette.
+
+**Factors** (`LAYOUT` x `SHAPE`, 4 x 3 = 12 combinations from one file):
+- `LAYOUT`: `radial` (one ring of large elements around centre),
+  `grid` (regular lattice), `directional` (falling/drifting columns),
+  `rings` (multiple concentric rings) — deliberately spanning the same
+  centred/grid/directional archetype axis documented in "Archetype
+  clustering" above, so this one engine alone covers ground that used to
+  require several separate files.
+- `SHAPE`: `polygon`, `star`, `wedge` (arc segment) — what each element
+  in the layout actually looks like.
+
+**Why LAYOUT/SHAPE are picked ONCE per video (from the seed), not
+re-picked every `cycleSec` reconfigure**: this is the fourth occurrence of
+the whiteout-regression false-positive bug class documented earlier for
+`starburst`/`spirograph`/`solids3d` — randomising *any* parameter that
+changes how much of the frame is covered/overlapping between reconfigure
+cycles reads as a fake brightness trend to `validate.js`'s regression
+check, even on a structurally clear-and-redraw engine. Different LAYOUTs
+have very different total ink coverage, so re-picking LAYOUT every cycle
+would be the same bug at a larger scale. Fixing both per video (like every
+other seed-derived choice in this codebase, e.g. palette selection) avoids
+this entirely while still giving 12 distinct compositions across days;
+`config()` still re-randomises non-coverage-affecting per-cycle details
+(colours, rotation/orbit rates, per-element phase) exactly like every
+other curated engine.
+
+**Two more failure modes found only by actually rendering frames and
+looking at them** (per the standing "look at it" visual-requirements
+rule — a first version passed `validate.js` cleanly while looking broken):
+- *Independent per-element orbit rates scatter a ring apart over time.*
+  `radial`/`rings` elements started evenly spaced around a circle, but
+  each was initially given its OWN random orbit rate — geometrically still
+  a perfect circle at any instant (confirmed by dumping actual computed
+  positions via a temporary debug hook), but visually the elements drift
+  in and out of alignment and the "ring" reads as scattered points once
+  rendered. Fixed by giving each ring ONE shared orbit rate for all its
+  elements (a rigid group, like `arcrings.html`'s rings-rotate-as-one-unit
+  design) — the ring still visibly rotates, but never loses its shape.
+- *Geometrically correct isn't the same as perceptually legible.* Even
+  with rigid rotation, an initial `rings` layout with only 4-6 elements
+  per ring (verified via the same debug dump to genuinely be an even
+  circle) still didn't read as "concentric rings" to the eye — human
+  perception needs enough points along a circle to connect them into a
+  ring shape without relying on motion. Fixed by roughly doubling density
+  per ring (9-13 elements) and widening the radius gaps between rings.
+  The `directional` layout had an analogous problem (too few, too-sparse
+  elements per column to read as a coherent falling stream) — fixed by
+  increasing elements-per-column and, more effectively, giving every
+  element in a column the SAME shared colour (not just the same shared
+  fall rate), which reinforces the "these belong to one stream" read even
+  where the vertical gaps are still fairly wide.
+
+**Image-derived structure, not just colour** (`src/palette.js`): until
+now, the daily NASA APOD image only contributed a 5-colour palette
+(`dailyImagePalette`/`encodeColors`, used by `colors=h,s,l;...`). Extended
+`extractImageData()` to also sample a low-res (8x5) luminance grid from
+the SAME already-loaded image in the same Puppeteer session (no second
+fetch/decode) — the browser's own image-scaling does the per-region
+averaging for free: drawing the full image into a tiny gw x gh canvas and
+reading those pixels back approximates the average brightness of each
+region. Encoded as a new `lum=gw,gh:v1,v2,...` URL param
+(`encodeStructure()`), wired through `src/index.js` (fetched alongside the
+palette, harmless no-op for every engine except `composer.html`) and
+`src/render.js`/`resolveConfig()` exactly like `colors`. `composer.html`
+samples this grid at each element's layout-relative `(u,v)` position (e.g.
+literal grid-cell coordinates for the `grid` layout, angle/radius for
+`radial`/`rings`) to modulate per-element size (0.82-1.18x) and hue shift
+(±20°) — bounded ranges chosen so the image's actual content visibly
+shapes the composition without being able to break vividness or
+structural readability. Falls back to a structured-but-random per-element
+value when no `lum` param is present (no image today, or an engine other
+than `composer.html`), so the code path — and its visual character —
+doesn't depend on whether that day's image fetch happened to succeed.
+Verified locally with a synthetic left-dark/right-bright test grid (since
+`api.nasa.gov` is blocked from this dev sandbox, same as every other
+external integration here): the rendered grid layout showed a clear
+cool-to-warm hue gradient left-to-right with a visible size difference,
+confirming the modulation works end-to-end.
+
+Verified: `validate.js` passes across all 12 LAYOUT x SHAPE combinations
+(found via a small offline classifier script that replicates the engine's
+own `rng()` sequence to locate a seed for each combo) with healthy margins
+— avgSat 44-56 (vs. the 22 minimum), projectedRise well under the 50
+threshold, zero near-white pixels, and a ~10.6min projected full-hour
+render time (well within the CI budget). Being a plain Canvas2D engine
+(`getContext('2d')`, no WebGL), it's automatically classified into the 2D
+bucket by the dimension-weighted rotation above — no extra wiring needed.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

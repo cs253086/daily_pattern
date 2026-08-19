@@ -22,7 +22,7 @@ import { buildMetadata } from './metadata.js';
 import { uploadAll } from './upload.js';
 import { generateEngine } from './generate.js';
 import { validateEngine } from './validate.js';
-import { dailyImagePalette, encodeColors } from './palette.js';
+import { dailyImagePalette, encodeColors, encodeStructure } from './palette.js';
 import { dailyStockTrack } from './stockMusic.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -370,6 +370,13 @@ async function main() {
         renderCli.colors = encodeColors(pal.colors);
         imageCredit = pal;
         console.log(`[index] recolouring ${engineName} from ${pal.source}: "${pal.title}" (${pal.colors.length} colours)`);
+        // Structure (a low-res luminance grid sampled from the same image)
+        // is only meaningful to engines that read the `lum` param
+        // (currently composer.html) -- harmless no-op extra URL param for
+        // every other engine, which just ignores params it doesn't know.
+        if (pal.structure) {
+          renderCli.lum = encodeStructure(pal.structure, pal.gridW, pal.gridH);
+        }
       } else {
         console.log('[index] no image palette today; using engine default palette.');
       }

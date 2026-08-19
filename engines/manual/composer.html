@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Composer — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// A single engine that combines several INDEPENDENT randomized factors
+// instead of being one fixed composition, so the effective daily variety
+// multiplies rather than just adding one more discrete file to the pool --
+// user request 2026-08-19: "we could [have] unlimited creative patterns if
+// we have many factors and mix them together randomly everyday."
+//
+// Factors, each chosen once per video from the seed (see "why fixed per
+// video, not per reconfigure cycle" below):
+//   LAYOUT : radial | grid | directional | rings  (where elements sit and
+//            how they move -- see CLAUDE.md's "Archetype clustering"
+//            section for why silhouette/composition diversity matters
+//            more than just engine-file count)
+//   SHAPE  : polygon | star | wedge               (what each element is)
+// That is 4 x 3 = 12 distinct compositions from ONE file, on top of the
+// usual per-cycle randomisation (palette, rotation rates, element
+// details) every other curated engine already does. Also consumes the
+// optional `lum` URL param (see src/palette.js's encodeStructure/
+// dailyImagePalette) -- a low-res luminance grid sampled from that day's
+// NASA APOD image -- to let the actual photo content (not just its colour
+// palette) modulate per-element size and hue, a genuinely different kind
+// of daily variety from anything randomised-from-seed. Falls back to a
+// structured-but-random modulation when no image is available, so the
+// code path (and its visual character) doesn't depend on whether the
+// image fetch happened to succeed that day.
+//
+// Why LAYOUT/SHAPE are picked ONCE at startup, not re-picked in config()'s
+// per-cycle reconfigure: earlier engines in this pool (starburst,
+// spirograph, solids3d) hit the exact same whiteout-regression false
+// positive from a different cause each time -- randomising a parameter
+// that changes how much of the frame is covered/overlapping between
+// reconfigure cycles reads as a fake upward brightness trend to
+// validate.js's regression check, even on an engine that's structurally
+// clear-and-redraw (no real accumulation possible). Different LAYOUTs
+// have very different total ink coverage (e.g. a dense "rings" layout vs.
+// a sparse "radial" one), so re-picking LAYOUT every cycleSec would be
+// the same bug at a larger scale. Fixing it per video (from the seed,
+// like every other seed-derived choice in this codebase) sidesteps this
+// entirely while still giving 12 distinct compositions across days.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, lum, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF, per-second rates, cheap vector fills/
+// strokes. Redraws each frame (no accumulation, no whiteout risk).
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 40);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+  const sign = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  // Optional image-derived structure: "gw,gh:v1,v2,..." row-major 0-100
+  // luminance grid (see src/palette.js). Sampled at each element's
+  // layout-relative (u,v) position (both in [0,1]) to modulate size/hue.
+  // Falls back to a structured-but-random value when absent so the code
+  // path doesn't depend on whether today's image fetch succeeded.
+  function parseLum() {
+    const raw = params.get('lum');
+    if (!raw) return null;
+    const parts = raw.split(':');
+    if (parts.length !== 2) return null;
+    const [gwS, ghS] = parts[0].split(',');
+    const gw = parseInt(gwS, 10), gh = parseInt(ghS, 10);
+    const vals = parts[1].split(',').map(Number);
+    if (!Number.isFinite(gw) || !Number.isFinite(gh) || gw <= 0 || gh <= 0) return null;
+    if (vals.length !== gw * gh || vals.some((v) => !Number.isFinite(v))) return null;
+    return { gw, gh, vals };
+  }
+  const LUM = parseLum();
+  function lumAt(u, v) {
+    if (!LUM) return rand(20, 90);
+    const cx = Math.min(LUM.gw - 1, Math.max(0, Math.round(u * (LUM.gw - 1))));
+    const cy = Math.min(LUM.gh - 1, Math.max(0, Math.round(v * (LUM.gh - 1))));
+    return LUM.vals[cy * LUM.gw + cx];
+  }
+
+  const cx0 = W / 2, cy0 = H / 2;
+  const minDim = Math.min(W, H);
+  const dt = 1 / FPS;
+
+  // ---- The two factors, fixed once per video from the seed -------------
+  const LAYOUTS = ['radial', 'grid', 'directional', 'rings'];
+  const SHAPES = ['polygon', 'star', 'wedge'];
+  const LAYOUT = LAYOUTS[randInt(0, LAYOUTS.length - 1)];
+  const SHAPE = SHAPES[randInt(0, SHAPES.length - 1)];
+
+  // ---- Shape drawing: a single element stamp centred at the origin,
+  // rotated/scaled by the caller via ctx transform. ----------------------
+  function drawPolygon(size, sides, style, lw) {
+    ctx.beginPath();
+    for (let i = 0; i <= sides; i++) {
+      const a = (i / sides) * Math.PI * 2 - Math.PI / 2;
+      const x = Math.cos(a) * size, y = Math.sin(a) * size;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = style; ctx.lineWidth = lw; ctx.stroke();
+  }
+  function drawStar(size, points, innerRatio, style, lw) {
+    ctx.beginPath();
+    const n = points * 2;
+    for (let i = 0; i <= n; i++) {
+      const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+      const r = (i % 2 === 0) ? size : size * innerRatio;
+      const x = Math.cos(a) * r, y = Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = style; ctx.lineWidth = lw; ctx.stroke();
+  }
+  function drawWedge(size, angleWidth, style, lw) {
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, size, -angleWidth / 2, angleWidth / 2);
+    ctx.closePath();
+    ctx.strokeStyle = style; ctx.lineWidth = lw; ctx.stroke();
+  }
+  function drawElement(el, size, style, lw) {
+    if (SHAPE === 'polygon') drawPolygon(size, el.sides, style, lw);
+    else if (SHAPE === 'star') drawStar(size, el.points, el.innerRatio, style, lw);
+    else drawWedge(size, el.angleWidth, style, lw);
+  }
+
+  // ---- Layout: build a fixed-count, fixed-position element list. Count
+  // and positions never change after startup (only per-cycle details like
+  // rotation rate/hue/phase get re-randomised in config()) -- same
+  // "don't randomise coverage" lesson as every other engine here.
+  let elements;
+  function buildLayout() {
+    const list = [];
+    if (LAYOUT === 'radial') {
+      const n = Math.max(5, Math.round(rand(7, 11) * Math.max(0.6, Math.min(1.6, DENSITY))));
+      const radius = minDim * 0.3;
+      for (let i = 0; i < n; i++) {
+        const angle0 = (i / n) * Math.PI * 2;
+        list.push({
+          mode: 'polar', cx: cx0, cy: cy0, radius, angle0, ringId: 0,
+          u: i / n, v: 0.5,
+          baseSize: minDim * rand(0.075, 0.1),
+        });
+      }
+    } else if (LAYOUT === 'grid') {
+      const gx = Math.max(3, Math.round(rand(4, 5) * Math.max(0.6, Math.min(1.6, DENSITY))));
+      const gy = Math.max(3, Math.round(gx * (H / W)));
+      const spacing = Math.min(W / (gx + 1), H / (gy + 1));
+      for (let ix = 0; ix < gx; ix++) {
+        for (let iy = 0; iy < gy; iy++) {
+          const x0 = (ix + 1) * (W / (gx + 1));
+          const y0 = (iy + 1) * (H / (gy + 1));
+          list.push({
+            mode: 'static', x0, y0,
+            u: gx > 1 ? ix / (gx - 1) : 0.5, v: gy > 1 ? iy / (gy - 1) : 0.5,
+            baseSize: spacing * 0.34,
+          });
+        }
+      }
+    } else if (LAYOUT === 'directional') {
+      const cols = Math.max(6, Math.round(rand(7, 10) * Math.max(0.6, Math.min(1.6, DENSITY))));
+      // 5 (not 3) per column, spaced closer together -- an earlier version
+      // with fewer/sparser elements per column had each column's elements
+      // so far apart vertically that it read as scattered confetti rather
+      // than a coherent falling stream, confirmed by actually rendering
+      // and looking at it. Denser packing is what makes "column" legible.
+      const perCol = 5;
+      for (let gxI = 0; gxI < cols; gxI++) {
+        const x0 = (gxI + 0.5) * (W / cols);
+        // Shared fall rate AND colour per column (not per element) --
+        // keeps every element in a column moving in lockstep and reading
+        // as one coherent stream, same "rigid group, not independent
+        // drift" fix as the radial/rings ringId grouping below. Shared
+        // colour additionally reinforces the column grouping visually
+        // even where the vertical gaps are still fairly wide.
+        const colVy = rand(0.11, 0.2) * H;
+        for (let b = 0; b < perCol; b++) {
+          list.push({
+            mode: 'drift', x0, y0: (b / perCol) * H, vy: colVy, colId: gxI,
+            u: gxI / Math.max(1, cols - 1), v: 0.5,
+            baseSize: (W / cols) * 0.4,
+          });
+        }
+      }
+    } else { // rings
+      // Fewer, more widely-spaced RINGS but each with enough elements to
+      // actually read as a ring at a glance in a single static frame, not
+      // just "several scattered points" -- a first version with only 4-6
+      // elements per ring was geometrically a perfect circle (verified via
+      // a debug dump of actual computed positions) but visually
+      // unreadable as one, since human perception needs enough points
+      // along a circle to connect them into a ring shape without relying
+      // on motion. Confirmed by actually rendering and looking at it, per
+      // the standing "look at it" rule -- geometry being correct isn't the
+      // same as the composition reading correctly.
+      const nRings = 3;
+      for (let r = 0; r < nRings; r++) {
+        const t = (r + 1) / nRings;
+        const radius = 0.16 * minDim + t * minDim * 0.32;
+        const n = Math.max(9, Math.round(rand(10, 13) * Math.max(0.6, Math.min(1.6, DENSITY))));
+        for (let i = 0; i < n; i++) {
+          const angle0 = (i / n) * Math.PI * 2 + (r % 2 ? Math.PI / n : 0);
+          list.push({
+            mode: 'polar', cx: cx0, cy: cy0, radius, angle0, ringId: r,
+            u: i / n, v: t,
+            baseSize: minDim * rand(0.028, 0.038),
+          });
+        }
+      }
+    }
+    return list;
+  }
+
+  let hue0;
+  function config() {
+    hue0 = rng() * 360;
+    // Shared orbit rate PER RING (not per element): a ring's elements
+    // started evenly spaced by buildLayout(), and if each one drifted at
+    // its own independent rate they'd gradually collide and bunch up --
+    // exactly the "elements independently drift into overlapping clumps"
+    // failure mode confirmed by actually rendering this engine's radial/
+    // rings layouts before this fix (per the standing "look at it" rule).
+    // A single shared rate per ring keeps the ring rigid -- it still
+    // visibly rotates, but never loses its shape -- same principle as
+    // arcrings.html's rings-rotate-as-one-unit design.
+    const ringIds = [...new Set(elements.filter((e) => e.mode === 'polar').map((e) => e.ringId))];
+    const ringOrbitRate = {};
+    for (const id of ringIds) ringOrbitRate[id] = sign() * rand(0.08, 0.18);
+    // Shared colour PER COLUMN for the directional layout -- reinforces
+    // the "these belong to the same stream" read even where vertical gaps
+    // between a column's own elements are still fairly wide.
+    const colIds = [...new Set(elements.filter((e) => e.colId !== undefined).map((e) => e.colId))];
+    const colColor = {};
+    for (const id of colIds) colColor[id] = randInt(0, PAL.length - 1);
+    for (const el of elements) {
+      el.rot0 = rng() * Math.PI * 2;
+      // Guaranteed minimum magnitude with random sign -- same fix as every
+      // other curated engine here.
+      el.rotRate = sign() * rand(0.35, 0.9);
+      el.pulseRate = rand(0.5, 1.2);
+      el.pulsePhase = rng() * Math.PI * 2;
+      el.orbitRate = el.mode === 'polar' ? ringOrbitRate[el.ringId] : 0;
+      el.colorIdx = el.colId !== undefined ? colColor[el.colId] : randInt(0, PAL.length - 1);
+      const lum = lumAt(el.u, el.v);
+      el.sizeMul = 0.82 + (lum / 100) * 0.36;
+      el.hueShift = (lum / 100) * 40 - 20;
+      if (SHAPE === 'polygon') el.sides = randInt(3, 7);
+      else if (SHAPE === 'star') { el.points = randInt(4, 7); el.innerRatio = rand(0.38, 0.55); }
+      else el.angleWidth = rand(0.5, 1.1);
+    }
+  }
+
+  elements = buildLayout();
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  config();
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function positionOf(el) {
+    if (el.mode === 'polar') {
+      const a = el.angle0 + clk * el.orbitRate;
+      return { x: el.cx + Math.cos(a) * el.radius, y: el.cy + Math.sin(a) * el.radius };
+    }
+    if (el.mode === 'drift') {
+      const margin = el.baseSize * 2;
+      const span = H + margin * 2;
+      let y = (el.y0 + clk * el.vy) % span;
+      if (y < 0) y += span;
+      return { x: el.x0, y: y - margin };
+    }
+    return { x: el.x0, y: el.y0 };
+  }
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt * SPEED;
+
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.globalCompositeOperation = 'lighter';
+    const lwBright = Math.max(1.6, minDim / 480);
+    const lwSoft = lwBright * 3.2;
+
+    for (const el of elements) {
+      const { x, y } = positionOf(el);
+      const rot = el.rot0 + clk * el.rotRate;
+      const size = el.baseSize * el.sizeMul * (0.88 + 0.12 * Math.sin(clk * el.pulseRate + el.pulsePhase));
+      const base = PAL[el.colorIdx];
+      const hue = ((base[0] + hue0 * 0.05 + el.hueShift + clk * 4) % 360 + 360) % 360;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rot);
+      drawElement(el, size, `hsla(${hue}, ${base[1]}%, ${Math.min(84, base[2] + 16)}%, 0.92)`, lwBright);
+      drawElement(el, size, `hsla(${hue}, ${base[1]}%, ${base[2]}%, 0.2)`, lwSoft);
+      ctx.restore();
+    }
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; config(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
