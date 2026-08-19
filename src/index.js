@@ -23,6 +23,7 @@ import { uploadAll } from './upload.js';
 import { generateEngine } from './generate.js';
 import { validateEngine } from './validate.js';
 import { dailyImagePalette, encodeColors } from './palette.js';
+import { dailyStockTrack } from './stockMusic.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -319,6 +320,32 @@ async function main() {
     }
   }
 
+  // Optional license-free (CC0) background music, fetched from Freesound.org
+  // (src/stockMusic.js) rather than synthesized -- user request 2026-08-19,
+  // "don't make music yourself, get a license free music somewhere".
+  // Enabled/disabled by the same cfg.music flag render() itself would use
+  // (--music=0 / MUSIC=0). Any failure is non-fatal: renderCli.musicTrackPath
+  // just stays unset and render() ships the video silent, same as before
+  // this feature existed.
+  let musicCredit = null;
+  if (cfg.music) {
+    try {
+      mkdirSync(cfg.outDir, { recursive: true });
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const trackPath = path.join(cfg.outDir, 'stock-track.mp3');
+      const track = await dailyStockTrack({ date: dateStr, seed: cfg.seed, destPath: trackPath });
+      if (track) {
+        renderCli.musicTrackPath = track.path;
+        musicCredit = track;
+        console.log(`[index] background music: "${track.title}" by ${track.username} (CC0, freesound.org)`);
+      } else {
+        console.log('[index] no stock music available today; video will be silent.');
+      }
+    } catch (e) {
+      console.warn(`[index] stock music skipped: ${e.message}`);
+    }
+  }
+
   const renderResult = await render(renderCli);
 
   const metadata = buildMetadata({
@@ -327,6 +354,7 @@ async function main() {
     imageCredit,
     engineName,
     hasAudio: renderResult.hasAudio,
+    musicCredit: renderResult.hasAudio ? musicCredit : null,
   });
   console.log(`[index] long title : ${metadata.long.title}`);
   console.log(`[index] short title: ${metadata.short.title}`);

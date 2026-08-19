@@ -11,7 +11,6 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import puppeteer from 'puppeteer';
-import { synthesizeAmbient } from './audio.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -87,14 +86,20 @@ export function resolveConfig(cli = {}) {
     outDir: pick(cli, 'outDir', 'OUT_DIR', path.join(repoRoot, 'output')),
     readyTimeoutMs: pick(cli, 'readyTimeout', 'READY_TIMEOUT_MS', 60000, num),
 
-    // Ambient music (src/audio.js) -- 100% original, procedurally generated
-    // per day from the same seed as the visuals, so it carries zero
-    // licensing/copyright risk (see src/audio.js's header for why this is
-    // "license-free" by construction rather than fetched stock/library
-    // tracks). ON by default (user request, 2026-08-17); disable with
-    // --music=0 / MUSIC=0 (wired through to the workflow as vars.MUSIC,
-    // same pattern as IMAGE_PALETTE) if needed again.
+    // Ambient music: a real license-free (CC0) track fetched from
+    // Freesound.org by src/stockMusic.js and looped to cover the render.
+    // ON by default (user request, 2026-08-17; source changed from
+    // procedurally-synthesized to real fetched CC0 tracks, 2026-08-19, per
+    // user request "don't make music yourself, get a license free music
+    // somewhere"). Disable with --music=0 / MUSIC=0 (wired through to the
+    // workflow as vars.MUSIC, same pattern as IMAGE_PALETTE) if needed.
+    // musicTrackPath is the local file path of that day's downloaded
+    // track, set by the caller (src/index.js) before calling render() —
+    // render() itself does no network fetching. If music is on but no
+    // track path is given (fetch failed/skipped upstream), the video is
+    // shipped silent rather than failing the run.
     music: pick(cli, 'music', 'MUSIC', true, (v) => !(v === false || v === '0' || v === 'false')),
+    musicTrackPath: pick(cli, 'musicTrackPath', 'MUSIC_TRACK_PATH', '', (v) => String(v)),
   };
 
   cfg.longPath = path.join(cfg.outDir, pick(cli, 'longName', 'LONG_NAME', 'long.mp4'));
@@ -178,59 +183,26 @@ function writeChunk(stream, buf) {
   });
 }
 
-// Mux the (video-only) file at videoOnlyPath with a freshly synthesized
-// ambient audio track, writing the result to cfg.longPath. Video is stream-
-// copied (fast, no re-encode); audio is piped in as raw PCM and encoded to
-// AAC. See src/audio.js for why this is procedurally generated rather than
-// licensed/library music.
-function spawnAudioMuxPipe(videoOnlyPath, outPath, sampleRate) {
+// Mux the (video-only) file at videoOnlyPath with a real license-free
+// track downloaded to trackPath (see src/stockMusic.js), writing the
+// result to cfg.longPath. Video is stream-copied (fast, no re-encode);
+// the track is looped with -stream_loop -1 to cover the full video length
+// (the track is almost always much shorter than a 1-hour render) and
+// trimmed to match via -shortest.
+async function muxStockTrack(cfg, videoOnlyPath, trackPath) {
   const args = [
     '-y',
     '-i', videoOnlyPath,
-    '-f', 's16le',
-    '-ar', String(sampleRate),
-    '-ac', '2',
-    '-i', 'pipe:0',
+    '-stream_loop', '-1',
+    '-i', trackPath,
     '-c:v', 'copy',
     '-c:a', 'aac',
     '-b:a', '128k',
     '-shortest',
     '-movflags', '+faststart',
-    outPath,
+    cfg.longPath,
   ];
-  const proc = spawn('ffmpeg', args, { stdio: ['pipe', 'ignore', 'pipe'] });
-  let stderr = '';
-  proc.stderr.on('data', (d) => { stderr += d.toString(); if (stderr.length > 64000) stderr = stderr.slice(-64000); });
-
-  const done = new Promise((resolve, reject) => {
-    proc.on('error', reject);
-    proc.on('close', (code) => {
-      if (process.env.DEBUG_FFMPEG) console.error(`\n[ffmpeg] (audio mux) closed code=${code}\n${stderr.slice(-3000)}`);
-      if (code === 0) resolve();
-      else reject(new Error(`ffmpeg (audio mux) exited ${code}\n${stderr.slice(-4000)}`));
-    });
-  });
-  return { proc, done };
-}
-
-async function addAmbientMusic(cfg, videoOnlyPath) {
-  const sampleRate = 44100;
-  const { proc: ff, done: ffDone } = spawnAudioMuxPipe(videoOnlyPath, cfg.longPath, sampleRate);
-  let ffmpegError = null;
-  ffDone.catch((e) => { ffmpegError = e; });
-  ff.stdin.on('error', (e) => { ffmpegError = ffmpegError || e; });
-
-  await synthesizeAmbient({
-    seed: cfg.seed,
-    duration: cfg.duration,
-    sampleRate,
-    onChunk: async (buf) => {
-      if (ffmpegError) throw ffmpegError;
-      await writeChunk(ff.stdin, buf);
-    },
-  });
-  ff.stdin.end();
-  await ffDone;
+  await runFfmpeg(args, 'audio mux');
 }
 
 // Build the -vf filter for the Short based on shortFit. Returns null for 'none'.
@@ -256,8 +228,8 @@ function shortFilter(cfg) {
 // Cut a clip from the long video, re-encoding so the in/out points are exact
 // (stream copy would snap to keyframes). Clamps to the available duration and
 // applies the configured aspect transform (default: fill to 1080x1920).
-// hasAudio reflects whether cfg.longPath actually has an ambient-music track
-// muxed in (see addAmbientMusic) -- carry it into the Short when present,
+// hasAudio reflects whether cfg.longPath actually has a music track muxed
+// in (see muxStockTrack) -- carry it into the Short when present,
 // otherwise keep the Short silent as before rather than asking ffmpeg to
 // encode an audio stream that doesn't exist.
 async function cutShort(cfg, hasAudio) {
@@ -404,24 +376,25 @@ export async function render(cli = {}) {
     await ffDone;
     console.log(`[render] wrote ${videoOnlyPath} (video only)`);
 
-    // Add procedurally generated ambient music (see src/audio.js for why
-    // it's synthesized rather than licensed/library audio) -- unless
-    // disabled (cfg.music, off by default for now, see resolveConfig).
-    // Non-fatal by design when enabled: a mux failure falls back to
+    // Mux in a real license-free (CC0) track fetched upstream by the caller
+    // (see src/stockMusic.js) -- unless disabled (cfg.music) or no track was
+    // available (fetch skipped/failed upstream, e.g. no API key or a
+    // network hiccup). Non-fatal by design: any problem falls back to
     // shipping the video-only file rather than losing the whole day's
     // render over it.
     let hasAudio = false;
-    if (!cfg.music) {
+    if (!cfg.music || !cfg.musicTrackPath) {
       await rename(videoOnlyPath, cfg.longPath);
-      console.log(`[render] wrote ${cfg.longPath} (music disabled)`);
+      const why = !cfg.music ? 'music disabled' : 'no track available';
+      console.log(`[render] wrote ${cfg.longPath} (${why})`);
     } else {
       try {
-        await addAmbientMusic(cfg, videoOnlyPath);
+        await muxStockTrack(cfg, videoOnlyPath, cfg.musicTrackPath);
         await unlink(videoOnlyPath).catch(() => {});
         hasAudio = true;
-        console.log(`[render] wrote ${cfg.longPath} (with ambient music)`);
+        console.log(`[render] wrote ${cfg.longPath} (with license-free music)`);
       } catch (e) {
-        console.warn(`[render] ambient music mux failed, falling back to video-only: ${e.message}`);
+        console.warn(`[render] music mux failed, falling back to video-only: ${e.message}`);
         await rename(videoOnlyPath, cfg.longPath);
         console.log(`[render] wrote ${cfg.longPath} (video only, no music)`);
       }

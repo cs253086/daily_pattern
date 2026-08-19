@@ -95,8 +95,16 @@ export function buildMetadata(info = {}) {
   const visualParagraph = 'Watch bold, saturated colour and crisp rotating geometry slowly shift and evolve across the full runtime — expect kaleidoscopic symmetry, sharp-edged polygons, and a palette that drifts and deepens the longer you watch. No two days look quite the same, so there\'s always something new if you check back tomorrow.';
 
   const audioParagraph = hasAudio
-    ? 'This video features a soft, original ambient soundtrack that breathes and evolves alongside the visuals — gentle pads and a slow, wandering melody designed to sit quietly in the background. Works great as animated wallpaper, a TV or desktop screensaver, or company while you work, study, code, read, journal, do yoga, or wind down before sleep.'
+    ? 'This video features a soft ambient soundtrack that plays quietly in the background alongside the visuals. Works great as animated wallpaper, a TV or desktop screensaver, or company while you work, study, code, read, journal, do yoga, or wind down before sleep.'
     : 'This video is completely silent — no music, no talking, no sound effects — so you can pair it with your own playlist, a podcast, white noise, or just enjoy it on mute. Works great as animated wallpaper, a TV or desktop screensaver, or an ambient backdrop while working, studying, coding, reading, journaling, meditating, doing yoga, or winding down before sleep.';
+
+  // Music credit is a courtesy, not a legal requirement (only CC0-licensed
+  // tracks are used — see src/stockMusic.js), same spirit as the image
+  // credit above.
+  const mc = info.musicCredit;
+  const musicCreditLine = hasAudio && mc && mc.title
+    ? `Music: "${mc.title}" by ${mc.username} (freesound.org, CC0 license).`
+    : undefined;
 
   const description = [
     hook,
@@ -106,6 +114,8 @@ export function buildMetadata(info = {}) {
     audioParagraph,
     creditLine ? '' : undefined,
     creditLine,
+    musicCreditLine ? '' : undefined,
+    musicCreditLine,
     '',
     `New ${mood.toLowerCase()} ${subject.toLowerCase()} every day — subscribe so you never miss tomorrow's.`,
     '',

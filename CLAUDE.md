@@ -250,81 +250,117 @@ touching WebGL in this codebase again:
   contribution, and adding a soft clamp on final fragment color
   (`min(base + rim, vec3(0.86))`) so no face can wash out to full white.
 
-## Ambient music (`src/audio.js`)
+## Ambient music (`src/stockMusic.js`)
 
 **ON by default** (`cfg.music` defaults to `true` in `resolveConfig()`,
 `src/render.js`) as of 2026-08-17 — user request ("insert license free
-music in each video"). It was off from 2026-08-13 to 2026-08-17 while the
-sound design was being tuned (melody added, levels verified — see below);
-that tuning is done, so it's back on for every scheduled run. Disable with
-`--music=0` / `MUSIC=0`, or set the repo variable `vars.MUSIC=0` (wired
-into `.github/workflows/daily.yml` the same way as `IMAGE_PALETTE`) if it
-ever needs to be turned off again without a code change.
+music in each video"). Disable with `--music=0` / `MUSIC=0`, or set the
+repo variable `vars.MUSIC=0` (wired into `.github/workflows/daily.yml` the
+same way as `IMAGE_PALETTE`) if it ever needs to be turned off again
+without a code change.
 
-**"License free" here means procedurally generated from scratch per day,
-not fetched from a stock/royalty-free library.** That distinction is the
-whole reason this feature exists in this form: see the "Built as
-procedurally generated audio, not licensed/library music" rationale below
-— an unattended, no-human-review daily pipeline has real unmanaged
-copyright exposure with ANY externally-sourced track, royalty-free-labeled
-or not (licenses vary, misattribution is easy). A 100% original,
-deterministically-generated-from-seed track has zero such exposure by
-construction, which is what satisfies "license free" safely here.
+### Source: real CC0 tracks fetched from Freesound.org, not synthesized
 
-User request: "can you add meditation calm music to each video?" Built as
-**procedurally generated audio, not licensed/library music** — this channel
-auto-publishes daily with no human review step, so bundling or fetching
-"royalty-free" tracks would carry real, unmanaged copyright risk (licenses
-vary, misattribution is easy, and nobody is checking each upload before it
-goes out). A 100% original track generated deterministically from the same
-per-day seed as the visual engine has zero such risk and matches this
-project's existing self-contained/no-network convention.
+**Superseded design, 2026-08-19** — user request: "don't make music
+yourself. get a license free music somewhere." The original design (see
+git history / the deleted `src/audio.js`) procedurally synthesized ambient
+pad tones + a pentatonic melody from scratch each day, specifically to
+avoid the unmanaged copyright risk of externally-sourced "royalty-free"
+tracks in this unattended, no-human-review pipeline (licenses vary,
+misattribution is easy). That reasoning was sound for *some* external
+source, but the user explicitly wants real fetched music, not something
+generated in-house — so the design changed to fetch real tracks while
+preserving the same safety property a different way: **restrict the
+source to CC0-licensed tracks only**. CC0 (public-domain-equivalent)
+requires zero attribution and carries no license-compliance risk to get
+wrong unattended, unlike CC-BY (needs correct attribution in every video,
+an easy thing to get subtly wrong at scale) or CC-BY-NC (unusable on a
+monetizable channel). This is the same underlying principle as before —
+minimize unmanaged legal exposure in a pipeline nobody reviews before it
+publishes — just satisfied by filtering rather than by generating.
 
-Design: sustained pad tones (root + fifth/fourth + a slowly-drifting
-major/minor "colour" third + octave), each with its own slow pitch-drift
-and amplitude-breathing LFO chosen once from the seed, plus a real MELODY
-on top — a generative pentatonic-scale random walk two octaves above the
-pad root, played with a soft plucked/kalimba timbre (fundamental + two
-quiet overtones). User feedback ("it should be melodic") on the first cut
-was correct: the original design only had sparse random single-note
-chimes, which is closer to ambient texture than an actual tune. Pentatonic
-was the key choice — no two scale degrees are ever dissonant with each
-other or with the pad, so a seeded random walk (mostly stepwise, occasional
-leap, occasional rest) reliably sounds like a plausible melody without any
-real composition logic. Everything (pad + melody) is a continuous smooth
-function of time — deliberately NOT discrete section/crossfade state —
-which keeps the per-sample math simple and avoids any risk of audible
-clicks. Generates ~1s Int16 stereo PCM chunks via a callback (an async
-function, so the caller can await backpressure-aware writes) rather than
-buffering a multi-hundred-million-sample track in memory, mirroring `render.js`'s
-existing pattern of streaming video frames into ffmpeg via stdin.
+**Provider choice was investigated, not assumed.** Pixabay was the first
+candidate (recommended for its true no-attribution-required Content
+License), but its documented public REST API
+(`https://pixabay.com/api/docs/`) covers Images and Videos only — no
+music/audio search endpoint could be confirmed to exist via web search,
+and `pixabay.com` itself is blocked by this dev sandbox's network egress
+policy (confirmed via the agent-proxy status endpoint), so the docs page
+couldn't be loaded directly to verify either way. Rather than build
+against a guessed endpoint that might not exist and would then silently
+do nothing forever, this was flagged to the user, who chose
+**Freesound.org** instead — a long-established, well-documented public
+API (`https://freesound.org/apiv2/`) I have much higher confidence
+actually exists as described.
 
-Pipeline wiring (`src/render.js`): the frame-by-frame Puppeteer loop still
-writes video-only to a temp path (`<long>.noaudio.mp4`); a second ffmpeg
-invocation then stream-copies that video (fast, no re-encode) while piping
-freshly synthesized PCM in as a second input and encoding it to AAC, into
-the final `long.mp4`. The Short is cut from that same audio-bearing file
-with `-an` replaced by explicit `-c:a aac` — but only when muxing actually
-succeeded (see below), otherwise it stays silent like before. Verified
-end-to-end with a real ffmpeg build (this dev sandbox doesn't have one by
-default, installed it for this to actually test rather than shipping
-blind): correct video+audio stream count and exact duration match via
-`ffprobe`, no clipping post-AAC-encode (peak −7 to −9 dBFS, RMS around
-−19 to −22 dBFS via `ffmpeg -af astats`), and real variation over a
-10-minute window (RMS swings ~2x from the breathing/colour-drift LFOs, so
-it isn't a static drone). Overhead is small: ~1-2 minutes added to a full
-3600s render (pure-JS synthesis is ~40-70s; the mux is a stream-copy, not
-a re-encode) against a 50-90 minute video render.
+**Design (`src/stockMusic.js`, mirrors `src/palette.js`'s NASA-APOD
+integration closely):**
+- `dailyStockTrack({ date, seed, apiKey, destPath })` — date+seed-
+  deterministic (same day always picks the same query/results-page/track
+  index), matching this project's "same seed → same everything"
+  reproducibility convention.
+- Calls Freesound's `/search/text/` endpoint with
+  `filter=license:"Creative Commons 0" duration:[25 TO 480]` (CC0 only;
+  25–480s so an hour-long loop doesn't repeat every few seconds) and a
+  rotating pool of ambient-leaning query terms, then downloads the
+  chosen result's pre-rendered MP3 "preview" file (no OAuth2 needed —
+  a simple `token` query param is sufficient for search + preview
+  download; OAuth2 is only required for the original non-preview file,
+  which isn't needed here).
+- **Fully optional and non-fatal**, same contract as `palette.js`: no API
+  key, a network error, zero CC0 results, or a download failure all
+  return `null` rather than throwing — the caller just ships a silent
+  video, exactly like before this feature existed. Verified locally: with
+  `FREESOUND_API_KEY` unset, logs a warning and returns `null` without
+  crashing; with a dummy key (freesound.org is also blocked in this
+  sandbox, same as pixabay.com/NASA/YouTube), the real HTTP failure is
+  caught and logged with the actual response body, still returning `null`
+  cleanly rather than throwing.
+- **Requires a `FREESOUND_API_KEY` secret** (free — register at
+  `https://freesound.org/apiv2/apply/`) to actually do anything; wired
+  into `.github/workflows/daily.yml` next to the other API-key secrets.
+  Without it, the pipeline behaves exactly as if music were disabled
+  (silent videos, no error) — this is a soft dependency, not a hard one.
+- **This integration could not be exercised end-to-end against the real
+  API in this dev sandbox** (`freesound.org` is blocked, same situation as
+  `api.nasa.gov`/`youtube.com`/`pixabay.com` — confirmed via the
+  agent-proxy status endpoint, not assumed) — only the GitHub Actions
+  runner has open internet to it. If the exact search/response shape
+  above turns out to be subtly wrong, `dailyStockTrack`'s catch-all logs
+  the real error (including the response body on a non-2xx search
+  result), so the next run's job log will show the actual problem instead
+  of a silent no-op — the same diagnose-from-job-logs pattern already
+  established for Gemini engine failures (`logEngineSnippet` in
+  `src/index.js`) and for the NASA integration.
 
-**Non-fatal by design**: muxing audio in is wrapped in a try/catch in
-`render()`. If it fails for any reason, the video-only temp file is
-renamed to the final `long.mp4` path and the render continues normally
-(silent, like every video before this feature) rather than losing the
-whole day's render over a new, less-battle-tested code path — verified by
-forcing a synthetic failure and confirming the fallback produces a valid
-silent video with `hasAudio: false` propagated correctly into the Short's
-cut. `render()`'s return value now includes `hasAudio` so callers can log
-or react to which path was taken.
+**Pipeline wiring**: `src/index.js` fetches the day's track *before*
+calling `render()` (same position as the NASA palette fetch), passing the
+local downloaded file path through as `renderCli.musicTrackPath`.
+`src/render.js` itself does no network fetching — it just takes whatever
+local file path it's given (or none) and, if present, loops it with
+ffmpeg's `-stream_loop -1` while stream-copying the already-rendered
+video, trimming to the video's exact length with `-shortest`. Verified
+locally with a real ffmpeg build (installed in this sandbox specifically
+to test this) and a synthetic 3-second test track: an 8-second render
+correctly produced an 8.0-second output with both video and AAC audio
+streams (via `ffprobe`), confirming the loop-to-length behavior works,
+and a render with no track path given correctly fell back to a valid
+silent video (`hasAudio: false`).
+
+A short courtesy credit line — `Music: "<title>" by <username>
+(freesound.org, CC0 license).` — is added to the video description when a
+track was used (`src/metadata.js`'s `musicCreditLine`, same pattern as the
+NASA image credit line). Not legally required for CC0 content, but good
+practice, and it costs nothing to include.
+
+**Non-fatal by design end-to-end**: muxing is still wrapped in a
+try/catch in `render()` exactly as before — any failure renames the
+video-only temp file to the final `long.mp4` path and the render
+continues normally (silent) rather than losing the whole day's render.
+`render()`'s return value still includes `hasAudio` so callers can log or
+react to which path was taken, and `metadata.js` only shows audio-related
+copy (the audio paragraph, the music credit line) when `hasAudio` is
+actually true.
 
 ## Engine selection each run (`src/index.js`)
 

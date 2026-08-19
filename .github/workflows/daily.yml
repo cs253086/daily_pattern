@@ -72,10 +72,15 @@ jobs:
           # Blank falls back to DEMO_KEY. Set IMAGE_PALETTE=0 to disable entirely.
           NASA_API_KEY: ${{ secrets.NASA_API_KEY }}
           IMAGE_PALETTE: ${{ vars.IMAGE_PALETTE }}
-          # Procedurally generated, 100% original ambient music (src/audio.js) --
-          # no licensing/copyright risk since nothing is fetched from a stock
-          # library. ON by default (user request, 2026-08-17). Set repo
-          # variable MUSIC=0 to disable if ever needed again.
+          # Background music: a real license-free track fetched from
+          # Freesound.org (src/stockMusic.js), restricted to CC0-licensed
+          # results only (no attribution required). Requires a free API key
+          # from https://freesound.org/apiv2/apply/ -- without it, music is
+          # skipped and the video ships silent (non-fatal). ON by default
+          # (user request, 2026-08-17; switched from procedurally-generated
+          # to real fetched CC0 tracks, 2026-08-19). Set repo variable
+          # MUSIC=0 to disable entirely if ever needed again.
+          FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
           MUSIC: ${{ vars.MUSIC }}
           # Default 3600s (1 hour). REQUIRES a verified YouTube channel —
           # unverified channels reject uploads >15 min ("Processing abandoned:
