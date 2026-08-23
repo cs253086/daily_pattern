@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Lit 3D Torus Rings — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Third curated real-WebGL engine (see solids3d.html and lattice3d.html
+// for the first two). A third, genuinely different 3D composition on
+// purpose: a handful of large lit TORI (rings), a rounded donut silhouette
+// with none of the flat faces solids3d/lattice3d are built from -- built
+// specifically to widen the curated 3D bucket after a real incident (see
+// CLAUDE.md, 2026-08-22) where a 2-engine 3D bucket, combined with a fixed
+// 65% dimension-weighting toward it, gave one specific file (solids3d) a
+// ~32.5% chance on any curated-fallback day -- a worse single-engine
+// repeat rate than this project had before dimension-weighting existed at
+// all. More engines in the bucket is the direct fix for that.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. Same WebGL gotchas as the other two
+// real-WebGL engines: preserveDrawingBuffer:true (offscreen frame capture
+// reads back on a separate tick), webglcontextlost/restored handling for
+// headless swiftshader's startup-only spurious context loss, gl.clear()
+// to opaque black every frame (structurally whiteout-proof).
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 44);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true, antialias: true })
+    || canvas.getContext('experimental-webgl', { preserveDrawingBuffer: true, antialias: true });
+
+  let contextLost = false;
+  canvas.addEventListener('webglcontextlost', (e) => {
+    contextLost = true;
+    e.preventDefault();
+  });
+  canvas.addEventListener('webglcontextrestored', () => {
+    initGL();
+    contextLost = false;
+  });
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+  function hsl2rgb(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [f(0), f(8), f(4)];
+  }
+
+  function mat4Identity() { return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); }
+  function mat4Multiply(a, b) {
+    const out = new Float32Array(16);
+    for (let c = 0; c < 4; c++) {
+      for (let r = 0; r < 4; r++) {
+        let sum = 0;
+        for (let k = 0; k < 4; k++) sum += a[k * 4 + r] * b[c * 4 + k];
+        out[c * 4 + r] = sum;
+      }
+    }
+    return out;
+  }
+  function mat4Perspective(fovyRad, aspect, near, far) {
+    const f = 1 / Math.tan(fovyRad / 2);
+    const nf = 1 / (near - far);
+    const out = new Float32Array(16);
+    out[0] = f / aspect; out[5] = f; out[10] = (far + near) * nf; out[11] = -1;
+    out[14] = 2 * far * near * nf;
+    return out;
+  }
+  function mat4Translate(x, y, z) {
+    const m = mat4Identity(); m[12] = x; m[13] = y; m[14] = z; return m;
+  }
+  function mat4RotateX(a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    const m = mat4Identity(); m[5] = c; m[6] = s; m[9] = -s; m[10] = c; return m;
+  }
+  function mat4RotateY(a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    const m = mat4Identity(); m[0] = c; m[2] = -s; m[8] = s; m[10] = c; return m;
+  }
+  function mat4RotateZ(a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    const m = mat4Identity(); m[0] = c; m[1] = s; m[4] = -s; m[5] = c; return m;
+  }
+  function mat4Scale(s) {
+    const m = mat4Identity(); m[0] = s; m[5] = s; m[10] = s; return m;
+  }
+
+  // ---- Torus geometry: a parametric mesh, FLAT shaded (each face uses
+  // the analytical surface normal at its centre parametric coordinate,
+  // not a smoothed per-vertex normal) so it reads as a faceted, crystalline
+  // ring rather than a smooth organic donut -- matches the house style's
+  // "crisp straight edges... not soft organic blobs" rule while still
+  // being a genuine torus. Modest segment counts (14 major x 7 minor)
+  // keep the facets bold and legible per the "bold, fewer, clearer" rule,
+  // rather than approximating smoothness with many tiny facets.
+  //
+  // Normals are computed analytically from the parametric surface formula
+  // (not inferred by flipping-away-from-origin like the cube/octahedron
+  // engines do) because that heuristic is WRONG for a torus: the true
+  // outward normal on the inner half of the tube (facing the donut hole)
+  // points TOWARD the origin, not away from it.
+  function torusPos(theta, phi, R, r) {
+    const cx = Math.cos(theta), sx = Math.sin(theta);
+    const cp = Math.cos(phi), sp = Math.sin(phi);
+    return [(R + r * cp) * cx, (R + r * cp) * sx, r * sp];
+  }
+  function torusNormal(theta, phi) {
+    const cx = Math.cos(theta), sx = Math.sin(theta);
+    const cp = Math.cos(phi), sp = Math.sin(phi);
+    return [cp * cx, cp * sx, sp];
+  }
+  function buildTorus(R, r, M, N) {
+    const positions = [], normals = [];
+    const TAU = Math.PI * 2;
+    for (let i = 0; i < M; i++) {
+      for (let j = 0; j < N; j++) {
+        const t0 = (i / M) * TAU, t1 = ((i + 1) / M) * TAU;
+        const p0 = (j / N) * TAU, p1 = ((j + 1) / N) * TAU;
+        const a = torusPos(t0, p0, R, r);
+        const b = torusPos(t1, p0, R, r);
+        const c = torusPos(t1, p1, R, r);
+        const d = torusPos(t0, p1, R, r);
+        const n = torusNormal((t0 + t1) / 2, (p0 + p1) / 2);
+        for (const p of [a, b, c, a, c, d]) { positions.push(...p); normals.push(...n); }
+      }
+    }
+    return { positions: new Float32Array(positions), normals: new Float32Array(normals), count: M * N * 6 };
+  }
+  // Two torus "families" (fat ring vs thin ring) for shape variety across
+  // the 3 fixed rings in the scene -- geometry is built once at startup
+  // and never regenerated, so this has no bearing on per-cycle coverage.
+  const TORI = [
+    buildTorus(1.0, 0.42, 14, 7),
+    buildTorus(1.0, 0.24, 14, 7),
+  ];
+
+  const VERT_SRC = `
+    attribute vec3 aPosition;
+    attribute vec3 aNormal;
+    uniform mat4 uMVP;
+    uniform mat4 uModel;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    uniform vec3 uEye;
+    void main() {
+      vec4 world = uModel * vec4(aPosition, 1.0);
+      vNormal = mat3(uModel) * aNormal;
+      vViewDir = normalize(uEye - world.xyz);
+      gl_Position = uMVP * vec4(aPosition, 1.0);
+    }
+  `;
+  const FRAG_SRC = `
+    precision mediump float;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    uniform vec3 uColor;
+    uniform vec3 uLightDir;
+    void main() {
+      vec3 N = normalize(vNormal);
+      float diff = max(dot(N, normalize(uLightDir)), 0.0);
+      float fresnel = pow(1.0 - max(dot(N, normalize(vViewDir)), 0.0), 2.0);
+      vec3 base = uColor * (0.42 + 0.58 * diff);
+      vec3 rim = uColor * fresnel * 0.5;
+      gl_FragColor = vec4(min(base + rim, vec3(0.86)), 1.0);
+    }
+  `;
+  function compileShader(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error('shader compile: ' + gl.getShaderInfoLog(sh));
+    return sh;
+  }
+
+  let prog, aPosition, aNormal, uMVP, uModel, uColor, uLightDir, uEye, torusBuffers;
+  function initGL() {
+    prog = gl.createProgram();
+    gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, VERT_SRC));
+    gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, FRAG_SRC));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('program link: ' + gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+
+    aPosition = gl.getAttribLocation(prog, 'aPosition');
+    aNormal = gl.getAttribLocation(prog, 'aNormal');
+    uMVP = gl.getUniformLocation(prog, 'uMVP');
+    uModel = gl.getUniformLocation(prog, 'uModel');
+    uColor = gl.getUniformLocation(prog, 'uColor');
+    uLightDir = gl.getUniformLocation(prog, 'uLightDir');
+    uEye = gl.getUniformLocation(prog, 'uEye');
+
+    torusBuffers = TORI.map((t) => {
+      const posBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, t.positions, gl.STATIC_DRAW);
+      const normBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, t.normals, gl.STATIC_DRAW);
+      return { posBuf, normBuf, count: t.count };
+    });
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.viewport(0, 0, W, H);
+  }
+  initGL();
+
+  // ---- Scene: 3 fixed-position tori, each spinning on 2 independent
+  // axes. Position/scale/torus-family are FIXED (not randomised) and
+  // never change after startup -- same lesson as solids3d.html's fixed
+  // ORBIT_R/SCALE and lattice3d.html's fixed grid geometry: randomising
+  // layout swings how much of the frame is covered by lit faces between
+  // reconfigure cycles, which reads as a fake trend to the whiteout-
+  // regression check even though gl.clear() makes true accumulation
+  // impossible. Only spin rates and colour are randomised.
+  //
+  // Deliberately NO whole-scene turntable (unlike solids3d.html/
+  // lattice3d.html): an unbounded world rotation combined with each
+  // ring's own tilt means the compounded viewing angle sweeps through
+  // 360 degrees over time, and a torus's silhouette degenerates to a
+  // thin edge-on sliver at some angle in that sweep no matter how the
+  // per-ring tilt is bounded -- confirmed by actually rendering frames
+  // across the cycle and seeing exactly that (a ring flattened to a rod,
+  // not recognisable as a ring). Dropping the world spin and relying on
+  // each ring's own fast Z-axis spin (around its own hole axis -- always
+  // silhouette-preserving) for motion avoids the problem at the source
+  // instead of trying to bound two compounding rotations.
+  const POS = [[-1.3, 0.5, 0], [1.3, -0.3, -0.4], [0, -1.1, 0.6]];
+  const SCALE = [0.85, 0.7, 0.6];
+  const TORUS_IDX = [0, 1, 0];
+  let rings, hue0;
+  function config() {
+    hue0 = rng() * 360;
+    rings = [];
+    for (let i = 0; i < 3; i++) {
+      rings.push({
+        torusIdx: TORUS_IDX[i],
+        pos: POS[i],
+        scale: SCALE[i],
+        // Fixed base tilt + a BOUNDED (not full-rotation) wobble on top.
+        // Three failure modes found only by actually rendering frames and
+        // looking at them / running validate.js across several seeds, in
+        // order: (1) a first version spun each ring on 2 full continuous
+        // axes and periodically presented completely edge-on (a thin
+        // pill/rod, not recognisable as a ring at all). Fixed by bounding
+        // the tilt to a small oscillation. (2) That fix then failed
+        // validate.js's fast-motion check -- a Z-axis spin is silhouette-
+        // invariant (rotationally symmetric about its own hole axis), so
+        // with only a tiny wobble on top there was almost no frame-to-
+        // frame pixel change for a motion detector to see, even though
+        // something was technically rotating. Fixed by making the wobble
+        // amplitude/rate the primary, larger source of visible motion.
+        // (3) Even with a bigger wobble, 2 of 6 tested seeds still failed
+        // the fast-motion check -- each ring's wobble is a sine wave,
+        // which has near-zero angular velocity at its own peaks/troughs,
+        // and with fully random per-ring phases some seeds happened to
+        // sample a moment where all 3 rings were coincidentally near
+        // their slow points at once. Fixed by explicitly staggering the 3
+        // rings' phases ~120 degrees apart (plus small jitter) instead of
+        // leaving them fully random, guaranteeing at least one ring is
+        // always near peak angular velocity at any sampled moment,
+        // regardless of seed. Verified across the same 6 seeds afterward,
+        // all passing with fastMotion comfortably above its floor.
+        tiltX: (rng() < 0.5 ? -1 : 1) * rand(0.35, 0.55),
+        tiltY: (rng() < 0.5 ? -1 : 1) * rand(0.35, 0.55),
+        wobbleRate: (rng() < 0.5 ? -1 : 1) * rand(0.85, 1.3),
+        wobblePhase: i * ((Math.PI * 2) / 3) + rand(-0.3, 0.3),
+        // Guaranteed minimum magnitude with random sign -- same fix as
+        // every other curated engine here.
+        spinZ: (rng() < 0.5 ? -1 : 1) * rand(0.5, 1.1),
+        colorIdx: i % PAL.length,
+      });
+    }
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+  const dt = 1 / FPS;
+
+  config();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  const EYE = [0, 0, 7.5];
+  const proj = mat4Perspective((45 * Math.PI) / 180, W / H, 0.1, 100);
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt * SPEED;
+
+    if (gl.isContextLost()) return;
+
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    const viewWorld = mat4Translate(-EYE[0], -EYE[1], -EYE[2]);
+
+    const lightAngle = clk * 0.3;
+    gl.uniform3f(uLightDir, Math.cos(lightAngle), 0.6, Math.sin(lightAngle));
+    gl.uniform3f(uEye, EYE[0], EYE[1], EYE[2]);
+
+    for (const rg of rings) {
+      const wobble = Math.sin(clk * rg.wobbleRate + rg.wobblePhase) * 0.6;
+      let model = mat4Translate(rg.pos[0], rg.pos[1], rg.pos[2]);
+      model = mat4Multiply(model, mat4RotateX(rg.tiltX + wobble));
+      model = mat4Multiply(model, mat4RotateY(rg.tiltY - wobble));
+      model = mat4Multiply(model, mat4RotateZ(clk * rg.spinZ));
+      model = mat4Multiply(model, mat4Scale(rg.scale));
+
+      const mvp = mat4Multiply(proj, mat4Multiply(viewWorld, model));
+      gl.uniformMatrix4fv(uMVP, false, mvp);
+      gl.uniformMatrix4fv(uModel, false, model);
+
+      const base = PAL[rg.colorIdx];
+      const hue = ((base[0] + hue0 * 0.05 + clk * 4) % 360 + 360) % 360;
+      const [r, g, b] = hsl2rgb(hue, base[1], Math.min(65, base[2] + 6));
+      gl.uniform3f(uColor, r, g, b);
+
+      const buf = torusBuffers[rg.torusIdx];
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf.posBuf);
+      gl.enableVertexAttribArray(aPosition);
+      gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf.normBuf);
+      gl.enableVertexAttribArray(aNormal);
+      gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, buf.count);
+    }
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; config(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+
+  (async () => {
+    await new Promise((r) => setTimeout(r, 300));
+    const deadline = Date.now() + 1500;
+    while (contextLost && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    window.READY = true;
+  })();
+})();
+</script>
+</body>
+</html>

@@ -157,12 +157,33 @@ function nextInBucket(bucketPool, lastName, seed) {
 // engines, content-sniffed via isWebGLEngine) and a 2D bucket (everything
 // else), each with its OWN independent round-robin cursor so neither bucket
 // can repeat before it fully cycles. Which bucket today's pick comes FROM
-// is a deterministic 65/35-weighted choice from the seed (not true
-// randomness -- keeps this project's "same seed -> same everything"
-// reproducibility convention), favouring 3D on clear majority of days
-// without starving 2D variety entirely. Falls back to whichever bucket is
-// non-empty if the other is (e.g. before any 3D engine existed).
-const P_3D = 0.65;
+// is a deterministic weighted choice from the seed (not true randomness --
+// keeps this project's "same seed -> same everything" reproducibility
+// convention), favouring 3D on clear majority of days without starving 2D
+// variety entirely. Falls back to whichever bucket is non-empty if the
+// other is (e.g. before any 3D engine existed).
+//
+// DESIRED_P_3D (0.65) is a TARGET, not applied blindly -- see
+// effectiveP3D() below for why a fixed target regressed real-world variety
+// once it was actually shipped (2026-08-22 incident, documented in
+// CLAUDE.md): weighting 65% of days toward a bucket that only had 2
+// engines gave one specific file (solids3d) a ~32.5% chance on ANY
+// curated-fallback day, a WORSE single-engine repeat rate than the flat,
+// unweighted round-robin this replaced. The fix is to cap how much total
+// weight a bucket can be given based on how many engines are actually in
+// it, so the weighting is self-correcting as the pool grows (via
+// promoteToCuratedPool() or the daily creative-research routine) instead
+// of requiring a human to notice and manually re-tune a percentage again.
+const DESIRED_P_3D = 0.65;
+// No single engine's expected pick frequency should exceed ~20% -- chosen
+// to be comfortably better than the ~13-way flat round-robin's ~7-8%
+// per-engine rate this project ran before dimension-weighting existed,
+// while still allowing a real bias once a bucket is big enough to support
+// it (e.g. 4+ engines fully supports the full 65% target: 0.65/4 ≈ 16%).
+const MAX_SINGLE_ENGINE_FREQ = 0.20;
+function effectiveP3D(n3D) {
+  return Math.min(DESIRED_P_3D, MAX_SINGLE_ENGINE_FREQ * n3D);
+}
 function curatedOr(reason, seed) {
   const pool = curatedPool();
   if (pool.length === 0) {
@@ -174,7 +195,8 @@ function curatedOr(reason, seed) {
   const pool2D = pool.filter((p) => !isWebGLEngine(p));
   const state = readRotationState();
 
-  const want3D = pool3D.length > 0 && (pool2D.length === 0 || (hashStr(`${seed}:dim`) % 100) < P_3D * 100);
+  const p3D = effectiveP3D(pool3D.length);
+  const want3D = pool3D.length > 0 && (pool2D.length === 0 || (hashStr(`${seed}:dim`) % 100) < p3D * 100);
   const bucketPool = want3D ? pool3D : pool2D;
   const bucketKey = want3D ? 'last3D' : 'last2D';
 

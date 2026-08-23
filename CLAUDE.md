@@ -374,7 +374,12 @@ actually true.
    (real WebGL — see "3D / WebGL engines" above), `lattice3d` (second real
    WebGL engine — a dense fixed-position 3D grid of independently-spinning
    cubes on a single-axis turntable, deliberately a different 3D
-   composition from solids3d's sparse orbiting solids), `spirograph`
+   composition from solids3d's sparse orbiting solids), `torusrings3d`
+   (third real WebGL engine — lit tori/rings with a rounded silhouette,
+   sharing no geometry with solids3d's faceted solids or lattice3d's cube
+   grid; added specifically to widen the 3D bucket after a real
+   over-concentration incident, see "A real regression from the fix
+   above" below), `spirograph`
    (glowing hypotrochoid/epitrochoid curves — a smooth continuous-curve
    texture, distinct from every polygon/tile/ring/lit-solid engine above),
    `arcrings` (bold segmented rotating "radar" rings, distinct from
@@ -501,6 +506,87 @@ sequence, and the old-schema migration was confirmed live (a real
 `lastEngine: "tessellation"` file correctly seeded `last2D` and the very
 next pick was `wireframe`, the correct next-in-order 2D engine after
 tessellation).
+
+### A real regression from the fix above: fixed weighting against a tiny bucket over-concentrated one engine
+
+User complaint 2026-08-22 (with a screenshot of `solids3d.html`'s cube/
+octahedron composition): "shame. same pattern over and over again... do
+the deep research how you can avoid the same pattern repeated." Traced to
+the exact 65/35 dimension-weighting shipped the day before: at the time,
+the 3D bucket held only 2 engines (`solids3d`, `lattice3d`). Splitting a
+fixed 65% weight two ways gave `solids3d` alone roughly a **32.5% chance
+on every single curated-fallback day** — a WORSE single-engine repeat
+rate than the flat, unweighted ~13-engine round-robin this project ran
+*before* dimension-weighting existed at all (~7-8% per engine). Confirmed
+against the actual video in question: that day's real job log showed
+Gemini failing with a genuine runtime error (`Cannot read properties of
+null (reading '1')` in the generated engine), falling back to curated,
+and `curatedOr()` picking `solids3d` from the 3D bucket exactly as the
+math predicted.
+
+**Root cause, in one sentence: a fixed percentage weight applied against
+a bucket too small to support it concentrates exposure on whichever few
+engines happen to be in that bucket** — "more 3D than 2D" and "no engine
+should repeat too often" are two different goals, and satisfying the
+first blindly can actively work against the second. Fixed two ways, not
+just patched for this one instance:
+
+1. **Made the weighting self-correcting** (`effectiveP3D()` in
+   `src/index.js`, `effectiveThemeP3D()` in `src/generate.js`): the 65%
+   target is now a ceiling, capped by `Math.min(desiredP3D,
+   maxSingleEngineFreq * bucketSize)` with `maxSingleEngineFreq = 0.20` —
+   no single engine's expected pick frequency can exceed ~20% regardless
+   of how small its bucket is, and the full 65% target only unlocks once
+   the bucket has enough members to support it (4+, since 0.65/4 ≈ 16%).
+   This self-adjusts as the pool grows (via `promoteToCuratedPool()` or
+   the daily creative-research routine, see below) without needing a
+   human to notice and manually re-tune a percentage again — the exact
+   kind of systemic fix asked for, rather than another one-off patch.
+   Verified: `effectiveP3D(2) = 0.40` (was blindly 0.65), `effectiveP3D(4)
+   = 0.65` (cap no longer binds once the bucket is big enough).
+2. **Grew the 3D bucket immediately** rather than waiting on the slow
+   trickle from the daily research routine: added `torusrings3d.html`, a
+   third real-WebGL curated engine — lit tori (rings), a rounded
+   silhouette sharing no geometry with `solids3d`'s faceted
+   cubes/octahedra or `lattice3d`'s cube grid. With 3 engines in the
+   bucket, `effectiveP3D(3) = 0.60`, giving each engine ~20% instead of
+   the previous 32.5%.
+
+**Building `torusrings3d.html` surfaced three more real bugs, each found
+only by actually rendering frames (or running `validate.js` across
+multiple seeds) and looking at the result, not by reasoning about the
+code in the abstract:**
+- *Unbounded 2-axis tilt + a whole-scene turntable periodically presented
+  a ring completely edge-on* — a thin pill/rod, not recognisable as a
+  ring at all. Root cause: a torus's silhouette genuinely degenerates to
+  a line at 90 degrees of tilt, and an *unbounded* rotation (whether on
+  the ring's own axes or a shared world turntable compounding with them)
+  necessarily sweeps through every possible angle over time, including
+  that one. Fixed by dropping the whole-scene turntable entirely and
+  bounding each ring's own tilt to a fixed base angle plus a small
+  oscillation, so the worst-case combined tilt (base ≤ 0.55 rad + wobble)
+  never approaches the 90-degree edge-on point.
+- *That fix then failed `validate.js`'s fast-motion check* — rotating a
+  torus around its own hole axis is silhouette-invariant (rotationally
+  symmetric by construction), so with only a small tilt-wobble on top
+  there was almost no frame-to-frame pixel change for a motion detector
+  to see, even though the ring was technically spinning. Fixed by making
+  the bounded tilt-wobble itself the primary, larger source of visible
+  motion (amplitude and rate raised substantially) rather than relying on
+  the silhouette-invariant spin.
+- *Even with a bigger wobble, 2 of 6 tested seeds still failed* — each
+  ring's wobble is a sine wave, which has near-zero angular velocity at
+  its own peaks/troughs, and with fully-random per-ring phases some seeds
+  happened to sample the validator's 1.5s test window at a moment where
+  all 3 rings were coincidentally near their slow points simultaneously.
+  Fixed by explicitly staggering the 3 rings' wobble phases ~120 degrees
+  apart (plus small jitter) instead of leaving them fully random,
+  guaranteeing at least one ring is always near peak angular velocity
+  regardless of when the sample lands. Verified: all 6 previously-tested
+  seeds pass afterward (avgSat 49.8-55.4, well above the 22 minimum;
+  fastMotion 5.26-7.94, all above their per-frame floors; projectedRise
+  well under 50; zero near-white pixels; 19.7-24.1min projected full-hour
+  render time).
 
 ### The curated pool grows daily (`promoteToCuratedPool()` in `src/index.js`)
 

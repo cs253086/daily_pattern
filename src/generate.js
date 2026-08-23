@@ -84,8 +84,19 @@ function hashStr(s) {
 // Two independent cursors (one per bucket), 2026-08-19: same dimension-
 // weighting change as curatedOr(), so a Gemini success is also more likely
 // to land on a 3D theme than a 2D one, not just the curated fallback path.
+//
+// DESIRED_THEME_P_3D is a target capped by bucket size, mirroring
+// curatedOr()'s effectiveP3D() fix (2026-08-22) -- see CLAUDE.md for the
+// real incident that made this necessary on the curated-engine side. Not
+// currently binding here (THEME_HINTS_3D has 6 entries; 0.20*6=1.2 > 0.65),
+// but applying the same self-correcting formula prevents this class of bug
+// here too if the 3D theme list is ever pared down.
 const THEME_STATE_PATH = path.join(repoRoot, 'state', 'theme-rotation.json');
-const THEME_P_3D = 0.65;
+const DESIRED_THEME_P_3D = 0.65;
+const MAX_SINGLE_THEME_FREQ = 0.20;
+function effectiveThemeP3D(n3D) {
+  return Math.min(DESIRED_THEME_P_3D, MAX_SINGLE_THEME_FREQ * n3D);
+}
 
 function readThemeIndices() {
   try {
@@ -126,7 +137,8 @@ function writeThemeIndices(next) {
 // curatedOr()).
 function nextThemeHint(date, seed) {
   const { next2D, next3D } = readThemeIndices();
-  const want3D = (hashStr(`${seed ?? date}:theme-dim`) % 100) < THEME_P_3D * 100;
+  const p3D = effectiveThemeP3D(THEME_HINTS_3D.length);
+  const want3D = (hashStr(`${seed ?? date}:theme-dim`) % 100) < p3D * 100;
   const list = want3D ? THEME_HINTS_3D : THEME_HINTS_2D;
   let idx = want3D ? next3D : next2D;
   if (idx === null || idx >= list.length) {
