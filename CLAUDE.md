@@ -1131,19 +1131,32 @@ structure rather than noise: `kaleidoscope` rotSym6 = 0.859 and mirrorLR =
 mirrorLR = 0.995 (its documented mirror-symmetric seed + symmetric-rule
 design); `tessellation` highest periodY = 0.764 (a tiling).
 
-**Measured result across the 16-engine pool** (`node
+**Original measured result across the 16-engine pool** (`node
 scripts/analyze-pool.js`): exactly **one** genuine near-duplicate pair —
 `auto-2026-08-12-radial-mandala-built-from-straight-line` ↔
-`kaleidoscope` at distance 0.546, a Gemini-promoted engine that duplicates
-a hand-written one. It is a clear outlier (next-closest pair is 0.674, p10
-across all 120 pairs is 0.861, median 1.263), which is why the novelty
-gate threshold is 0.60: it catches that pair and nothing else.
+`kaleidoscope` at distance 0.546, a Gemini-promoted engine that duplicated
+a hand-written one. It was a clear outlier (next-closest pair 0.674, p10
+across all 120 pairs 0.861, median 1.263), which is why the novelty gate
+threshold is 0.60. That duplicate file was removed the same day (see
+"Remove near-duplicate engine" below) once the measurement identified it,
+and the gate was added to `promoteToCuratedPool()` so the next one can't
+get in the same way.
+
+**Re-measured after removal, 15-engine pool**: nearest pair is now 0.676
+(`solids3d` ↔ `starburst`), and every file is its own singleton group at
+threshold 0.55-0.65 — 15 files → 15 groups. `state/engine-fingerprints.json`
+(committed, regenerate with `node scripts/analyze-pool.js` whenever the
+pool changes) holds these vectors and is what `noveltyDistance()` in
+`src/index.js` reads at promotion time, so a production run only
+fingerprints the one new candidate rather than re-rendering the whole pool.
 
 Archetype count is threshold-dependent, so quote the curve rather than a
-single number: 16 files → 16 groups at 0.50, **15 at 0.55–0.65**, 13 at
-0.70, 10 at 0.75, 7 at 0.80, 3 at 1.00. Read as: at fine discrimination
-nearly every engine is distinguishable; at coarse "squint" perception the
-pool collapses to a handful of families.
+single number (this curve is from the original 16-file measurement; re-run
+`analyze-pool.js` for the current pool's exact numbers): 16 files → 16
+groups at 0.50, 15 at 0.55–0.65, 13 at 0.70, 10 at 0.75, 7 at 0.80, 3 at
+1.00. Read as: at fine discrimination nearly every engine is
+distinguishable; at coarse "squint" perception the pool collapses to a
+handful of families.
 
 **Caveat worth remembering:** `composer.html` picks LAYOUT×SHAPE once per
 video *from the seed*, so fingerprinting it at 2 seeds samples only 2 of
