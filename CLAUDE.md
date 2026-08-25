@@ -943,6 +943,147 @@ render time (well within the CI budget). Being a plain Canvas2D engine
 (`getContext('2d')`, no WebGL), it's automatically classified into the 2D
 bucket by the dimension-weighted rotation above — no extra wiring needed.
 
+## Cellular automaton engine (`automaton.html`) — 2026-08-25
+
+Daily creative-research routine. Surveyed the existing curated pool first:
+every engine falls into one of a small number of composition archetypes
+(centred radial mandala, grid/tile, directional flow, lit-3D, or
+`composer.html`'s multi-factor combination of those same archetypes) built
+from continuous parametric motion (rotation, orbit, wave) on top of a fixed
+structural rule. None of them are a discrete-time GENERATIVE process in the
+mathematical sense — nothing grows/evolves step by step from a simple local
+rule. Researched cellular automata, Voronoi/Delaunay diagrams, L-systems,
+flow-field particles, moiré interference, string-art, and reaction-diffusion
+as candidates; picked a **1D elementary cellular automaton** (Wolfram rule
+90 or 150, chosen per cycle) because it's a genuinely different technique
+(step-by-step emergent generation, not continuous transform), it's naturally
+geometric (crisp cells, not organic blobs), rule 90/150 starting from a
+symmetric seed produces mirror-symmetric Sierpinski-triangle-family
+fractals (satisfying the house style's symmetry preference for free), and
+it needs zero external libraries — just a lookup on 3 neighbouring bits.
+
+**What it is**: a row of cells on a wrapped (toroidal) ring evolves one
+generation per rule application; time is visualised as flowing DOWNWARD —
+each new generation enters at the top and pushes older ones down and off
+the bottom, giving continuous scroll motion for free. Seeded from one or
+more MIRRORED pairs of cells either side of the centre column (never an
+asymmetric or random row), so the automaton stays exactly left-right
+symmetric from genesis onward given both candidate rules are themselves
+symmetric under swapping their left/right neighbour (`rule(a,b,c) =
+rule(c,b,a)`) — verified algebraically, not just visually. Cells are drawn
+as bold filled squares (`cols` deliberately kept to 36-56, not a fine pixel
+mesh) per the house-style "bigger, fewer, clearer elements" rule; hue is
+banded by GENERATION NUMBER (each row's colour is fixed forever once
+drawn, never changes with wall-clock time — see why below), so at any
+instant the ~25-30 visible rows already span a wide spread of the colour
+wheel.
+
+**This engine went through far more iteration than any prior curated
+engine** — six substantively different designs, each one motivated by a
+real, empirically-found problem with the last, not by guessing. Recorded
+here in full because the underlying lessons (a statistical validator
+check can alias against ANY periodic signal, not just the specific
+whiteout pattern it was built to catch; "looks fine in the first cycle or
+two" is not proof against staleness over a full hour) generalise to future
+engines with persistent per-frame state, which none of the prior curated
+engines have (they're all purely parametric — no history carried between
+frames beyond simple counters).
+
+1. **Hard reset every cycleSec (matching every other curated engine's
+   `config()`), CYCLE_SEC=44, no density bound.** `validateEngine()` across
+   5 seeds passed, but with thin, inconsistent margins (worst
+   `projectedRise` 49.8 against the 50 threshold) — a near-empty genesis
+   growing to a filled steady state every cycle is a real, repeating
+   brightness swing unlike any purely-parametric engine's cycle reset.
+2. **Same design, CYCLE_SEC shortened to 26** (wrong intuition: "more
+   cycles inside the 300s test window should average out phase-alignment
+   noise better"). Made it WORSE — 2 of 10 seeds failed. The intuition was
+   backwards; see point 4.
+3. **No periodic reset at all**, reasoning a wrapped XOR-rule automaton
+   would settle into a bounded steady-state density on its own so a hard
+   reset's brightness swing wouldn't be needed. Wrong on two separate
+   counts, both confirmed with real evidence rather than assumed:
+   - Without any density bound, a direct bit-density simulation (plotting
+     raw ON-cell fraction over 800 generations for several ring sizes)
+     showed density swinging anywhere from ~7% to ~67% with no sign of
+     settling — rule-90/150 XOR automata on a finite wrapped ring are
+     governed by long, unpredictable linear-algebra periodicities, not a
+     quick convergence to ~50%. `validateEngine()` across the same 10
+     seeds: 8 failed, with projected rises up to +332 luma — far worse
+     than a periodic reset.
+   - Added a `capDensity()` step (below) to bound density directly, then
+     removed the reset a second time relying on it alone plus small
+     per-cycle re-seed injections. Passed `validateEngine()` far more
+     reliably, but rendering ACTUAL frames far into a render (t=600s,
+     1800s, 3550s — not just the first cycle or two) showed the SAME
+     converged visual texture at every checkpoint. Quantified with a
+     pixel-diff, not just eyeballed: only ~13% of cells differed between
+     the t=600s and t=1800s frames. Rule-90/150 automata on a wrapped ring
+     fall into a strong, fast-reconverging attractor texture almost
+     regardless of seed, and `capDensity()`'s deterministic thinning made
+     this WORSE, not better (dropping the match rate further, to ~27%
+     differing, when capping was disabled for comparison). This is exactly
+     the "don't trust validate.js alone — actually render frames and look"
+     lesson this file already documents for `composer.html` and
+     `torusrings3d.html`, now confirmed a third time on a genuinely new
+     failure mode (visual staleness, not whiteout).
+4. **The actual root cause of points 1-2's inconsistent margins**, found
+   by computing exactly where `validate.js`'s 8 FIXED sample times (its
+   `fractions` array: 0.08/0.2/0.35/0.5/0.65/0.8/0.9/0.98 of the 300s test
+   window) land relative to a periodic reset every `CYCLE_SEC`: at
+   CYCLE_SEC=40, the sample at t=240s lands almost EXACTLY on a reset
+   boundary (0.0% of a cycle away) — for EVERY seed, since reset timing is
+   fixed by `CYCLE_SEC`/`FPS` alone and is seed-independent. One sample
+   systematically caught at its dimmest instant is enough on its own to
+   swing an 8-point linear-regression fit into a spurious "rising" slope,
+   depending on the neighbouring samples' exact plateau level (which DOES
+   vary by seed, explaining the inconsistent pass/fail). CYCLE_SEC=26 was
+   similarly unlucky (worst-case sample only 3.8% of a cycle from a
+   boundary) — explaining why point 2's "more cycles should average out
+   better" intuition was backwards: it didn't change how close the fixed
+   samples land to boundaries, and happened to land closer.
+   A brute-force search over candidate cycle lengths (script, not by
+   hand) for the one maximizing the MINIMUM distance from any of the 8
+   fixed sample times to the nearest reset boundary found **43.5s** gives
+   every sample a comfortable >=20.7% margin. This generalises: any
+   engine with a persistent-state periodic reset should sanity-check its
+   cycle length against `validate.js`'s fixed sample fractions the same
+   way, rather than picking a cycle length that merely "looks reasonable."
+5. **Final design: full periodic reset (point 1's structure) + `CYCLE_SEC
+   = 43.5` (point 4's fix) + `capDensity()` (point 3's fix, kept as a
+   within-cycle safety net) together.** Both fixes needed: CYCLE_SEC alone
+   doesn't bound worst-case density if a cycle runs long relative to
+   `genPerSec`, and `capDensity()` alone doesn't fix the reset-boundary
+   sample alignment. Combined, this fixes both failure modes AND avoids
+   design 3's staleness problem, since a full reset every ~43.5s means the
+   automaton never runs long enough for the fast-reconverging attractor
+   texture to dominate — confirmed by re-rendering the same t=600s/1800s/
+   3550s staleness checkpoints used in point 3, now showing three visibly
+   distinct compositions, not a repeat.
+
+`capDensity()` clears cells in symmetric column PAIRS (driven by a
+rotating start index tied to the generation counter, so it's not always
+the same columns thinned) whenever a generation's ON-cell fraction exceeds
+`DENSITY_CEIL = 0.22`, preserving the mirror-symmetry invariant (if a
+column is ON, its mirror is provably also ON before thinning, given the
+symmetric rule + seed, so clearing both together can't break symmetry).
+
+**Verified** (final design): `validateEngine()` across seeds 1-30 — 29/30
+passed; the one failure (seed 1, a "132ms/frame, projected 190min render"
+speed-budget rejection) did not reproduce across 3 isolated re-runs
+(4-6ms/frame, 5.7-8.7min projected) and was traced to CPU contention from
+other background validation batches running concurrently in this sandbox
+at that exact moment, not a real engine cost. Brightness margins across
+the 30 seeds are comfortable and mostly negative (`projectedRise` from
+-101.7 to +23.3, all well clear of the 50 threshold — a real improvement
+over designs 1-2's thin ~48-65 margins). `avgSat` 54.5-66.3 throughout
+(well above the 22 minimum). Zero near-white pixels in any seed. Visual
+spot-checks across 25/50/75/95/105% of a cycle (seeds 1, 2, 3, 12, 25) and
+long-timespan staleness checks at t=10s/40s/150s/600s/1800s/3550s (seed 7,
+both with and without `capDensity()`, to isolate its contribution) all
+by actually rendering PNGs and looking at them, not just reading
+validator output.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

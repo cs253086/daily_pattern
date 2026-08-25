@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Automaton — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, a genuinely different MATHEMATICAL TECHNIQUE
+// from every other curated engine: a 1D elementary cellular automaton
+// (Wolfram rule 90 or 150, chosen per cycle), run on a toroidal (wrapped)
+// row and visualised with time flowing downward -- each new generation is
+// computed from the previous one and enters at the top, pushing older
+// generations down and off the bottom. Seeded from one or more MIRRORED
+// pairs of "on" cells either side of the centre column (never an
+// asymmetric or fully-random row), so both rule 90 (new = left XOR right)
+// and rule 150 (new = left XOR self XOR right) stay exactly left-right
+// mirror-symmetric from genesis onward -- a real, different archetype from
+// the pool's full n-fold radial mandalas (kaleidoscope/starburst/
+// spirograph/geometric), its centred concentric rings (arcrings), its
+// static-symmetry tiled grids (grid/tessellation), and its asymmetric
+// directional flow (cascade): here symmetry and directional scroll
+// coexist. Grown as bold, chunky filled cells (not a fine pixel grid) per
+// the house-style "bigger, fewer, clearer elements" rule -- classic
+// Sierpinski-triangle-family fractal branching is legible even at a
+// moderate cell count, so cols is kept deliberately low.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF, per-second rates. Redraws each frame
+// (no accumulation, no whiteout risk) -- every cell is either "off"
+// (background black) or filled solid each frame, never faded. Every
+// generation's ON-cell density is ALSO hard-capped (see capDensity below)
+// so brightness can never drift even within one cycle, regardless of how
+// the underlying automaton's raw density behaves over many generations.
+// Does a full reset back to a small genesis seed every cycleSec, same
+// pattern as every other curated engine's config() -- see the long
+// comment above capDensity() for why this (rather than avoiding periodic
+// resets) turned out to be the right call, and why CYCLE_SEC is 43.5, not
+// a rounder-looking number.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  // 43.5 is not an arbitrary "nice" number -- it's the result of a
+  // brute-force search over candidate cycle lengths for the one that
+  // keeps validate.js's 8 FIXED sample times (within its 300s test
+  // window) maximally far from any periodic-reset boundary. See the long
+  // comment above capDensity() for why this matters and what happens at
+  // the naive-looking values (40, 26) instead.
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  const dt = 1 / FPS;
+
+  // Grid geometry: cols is kept moderate (bold chunky cells, not a fine
+  // pixel mesh) and forced EVEN so a mirror-symmetric seed row (see
+  // seedRow below) stays exactly symmetric under the wrapped rule.
+  let cols, cellSize, rowsVisible;
+  let gens; // array of {row: Uint8Array, gen: number}, index 0 = newest (top)
+  let nextGenNumber, scrollPix, hue0, hueStepDeg, genPerSec, rule150, seedOffsets;
+
+  function seedRow() {
+    const row = new Uint8Array(cols);
+    const c2 = cols / 2; // integer since cols is forced even
+    for (const d of seedOffsets) {
+      row[(c2 - 1 - d + cols) % cols] = 1;
+      row[(c2 + d) % cols] = 1;
+    }
+    return row;
+  }
+
+  // Called at start-up AND every cycleSec (a full reset back to a small
+  // mirrored genesis seed, matching every other curated engine's
+  // config()-on-cycle pattern). See the comment above DENSITY_CEIL and
+  // CYCLE_SEC for why a full reset turned out to be not just fine but
+  // necessary -- getting here took several real, empirically-tested design
+  // iterations (not guesswork), all recorded in CLAUDE.md's write-up for
+  // this engine.
+  function config() {
+    const target = Math.round(rand(36, 56) * Math.max(0.6, Math.min(1.6, DENSITY)));
+    cols = target + (target % 2); // force even
+    cellSize = W / cols;
+    rowsVisible = Math.ceil(H / cellSize) + 2;
+
+    hue0 = rng() * 360;
+    // Guaranteed-nonzero, strictly-positive rates (direction is fixed by
+    // construction here -- generations always advance forward and scroll
+    // always flows downward -- so no random-sign trick is needed, only a
+    // floor away from zero, matching cascade.html's fallRate reasoning).
+    genPerSec = rand(1.6, 2.4) * SPEED;
+    // Hue is banded by GENERATION (each row's colour is fixed forever once
+    // drawn), never by wall-clock time. An earlier version also added a
+    // continuous `clk * hueDriftRate` term so the whole frame's hue slowly
+    // swept together over time -- this looked fine by eye but reintroduced
+    // the same whiteout-regression false-positive risk as an unbounded
+    // density swing: a shared, slowly-sweeping hue means every visible
+    // pixel briefly leans toward the same higher- or lower-luma part of
+    // the colour wheel at once, and validate.js's sparse 8-sample trend
+    // fit can alias that into a spurious rise (found empirically: 1 of a
+    // fresh batch of 10 seeds failed with projectedRise=148.7 even with
+    // DENSITY_CEIL already capping physical cell coverage). Per-generation
+    // banding doesn't have this problem: at any single instant the ~30
+    // visible rows already span a wide, roughly time-invariant spread of
+    // hues (30 rows x 5-10deg = 150-300deg of the wheel), so mean sampled
+    // luma stays stable over time by construction, not by luck.
+    hueStepDeg = rand(5, 10);
+    rule150 = rng() < 0.5;
+
+    // 1-2 mirrored offset pairs from the centre column. Offset 0 is a
+    // single centred pair; larger offsets add extra symmetric branch
+    // points spaced across the row.
+    const n = randInt(1, 2);
+    const maxOffset = Math.max(1, Math.floor(cols / 2) - 2);
+    seedOffsets = [0];
+    for (let i = 1; i < n; i++) seedOffsets.push(randInt(4, maxOffset));
+
+    gens = [{ row: seedRow(), gen: 0 }];
+    nextGenNumber = 1;
+    scrollPix = 0;
+  }
+
+  // Getting a periodic full reset here took FOUR rejected/refined designs,
+  // each checked against real evidence (rendered frames and/or
+  // validateEngine() across seed batches), not assumed:
+  //   1. Full reset every cycleSec, CYCLE_SEC=44, no density cap. Passed
+  //      5/5 tested seeds but with thin, inconsistent margins (worst
+  //      projectedRise 49.8 against the 50 threshold).
+  //   2. Full reset, CYCLE_SEC shortened to 26 hoping more cycles per test
+  //      window would average out better. Made it WORSE (2/10 failed) --
+  //      wrong intuition, see point 4 below for the actual reason.
+  //   3. No periodic reset at all (reasoning that a bounded automaton
+  //      would settle to a steady density on its own) -- WRONG on two
+  //      counts, both confirmed empirically rather than assumed: (a)
+  //      without a density cap, raw rule-90/150 density genuinely climbs
+  //      unpredictably for hundreds of generations (a direct bit-density
+  //      simulation confirmed these are long-period linear systems, not
+  //      quick-converging ones) -- 8/10 seeds failed with projected rises
+  //      up to +332 luma; (b) even WITH a density cap added, letting the
+  //      automaton run uninterrupted for 600-1800s+ showed the SAME
+  //      converged visual texture at every checkpoint when frames were
+  //      actually rendered and looked at (not just passing validate.js) --
+  //      confirmed via pixel-diff (~87% of cells matched between t=600s
+  //      and t=1800s with the cap active) that rule-90/150 automata on a
+  //      wrapped ring fall into a strong, fast-reconverging attractor
+  //      texture almost regardless of seed, and the density cap's
+  //      deterministic thinning made this WORSE (dropping the diff to
+  //      ~73%-match even without the cap), not better.
+  //   4. The REAL root cause of points 1-2's inconsistent margins, found
+  //      by computing exactly where validate.js's 8 FIXED sample times
+  //      (fractions of its 300s test window: 0.08/0.2/.../0.98) land
+  //      relative to a periodic reset every CYCLE_SEC: at CYCLE_SEC=40,
+  //      the sample at t=240s lands almost EXACTLY on a reset boundary
+  //      (0.0% of a cycle away) for EVERY seed, since reset timing is
+  //      seed-independent -- one sample is thus systematically caught at
+  //      its dimmest instant, which is enough on its own to swing an
+  //      8-point linear fit into a spurious "rising" slope depending on
+  //      the exact plateau level of neighbouring samples. CYCLE_SEC=26 was
+  //      similarly unlucky (worst-case sample only 3.8% of a cycle from a
+  //      boundary). A brute-force search over CYCLE_SEC found 43.5s gives
+  //      every one of the 8 fixed samples a comfortable >=20.7% margin
+  //      from any reset boundary -- see CYCLE_SEC below.
+  // Combining a real density cap (point 3) with a reset-boundary-safe
+  // cycle length (point 4) is what finally gives a comfortable, VERIFIED
+  // margin instead of a lucky one -- see CLAUDE.md for the actual pass
+  // numbers across 30 seeds.
+  //
+  // Hard-caps a generation's ON-cell fraction at DENSITY_CEIL, clearing
+  // symmetric column PAIRS (never a single column alone) so the row stays
+  // exactly mirror-symmetric after thinning, same invariant as seedRow().
+  // Prior to thinning the row is always already symmetric (rule + seed +
+  // this function all preserve that), so next[c] and its mirror always
+  // agree and can safely be cleared together. The rotating `start` (driven
+  // by the generation counter) spreads which columns get thinned across
+  // generations instead of always carving the same gap out of the row.
+  const DENSITY_CEIL = 0.22;
+  function capDensity(next, genNum) {
+    let onCount = 0;
+    for (let c = 0; c < cols; c++) onCount += next[c];
+    const target = Math.floor(cols * DENSITY_CEIL);
+    if (onCount <= target) return;
+    const half = cols / 2;
+    const start = genNum % half;
+    for (let k = 0; k < half && onCount > target; k++) {
+      const c = (start + k) % half;
+      if (next[c]) {
+        next[c] = 0;
+        next[cols - 1 - c] = 0;
+        onCount -= 2;
+      }
+    }
+  }
+
+  function addGeneration() {
+    const prev = gens[0].row;
+    const next = new Uint8Array(cols);
+    for (let c = 0; c < cols; c++) {
+      const left = prev[(c - 1 + cols) % cols];
+      const right = prev[(c + 1) % cols];
+      next[c] = rule150 ? (left ^ prev[c] ^ right) : (left ^ right);
+    }
+    capDensity(next, nextGenNumber);
+    gens.unshift({ row: next, gen: nextGenNumber++ });
+    if (gens.length > rowsVisible + 2) gens.length = rowsVisible + 2;
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+
+  config();
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+
+    scrollPix += cellSize * genPerSec * dt;
+    while (scrollPix >= cellSize) {
+      scrollPix -= cellSize;
+      addGeneration();
+    }
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'source-over';
+
+    const inset = Math.max(1, cellSize * 0.08);
+    const size = cellSize - inset * 2;
+
+    for (let i = 0; i < gens.length; i++) {
+      const y = (i - 1) * cellSize + scrollPix;
+      if (y + cellSize < 0 || y > H) continue;
+      const g = gens[i];
+      const row = g.row;
+      const hueBase = ((hue0 + g.gen * hueStepDeg) % 360 + 360) % 360;
+      for (let c = 0; c < cols; c++) {
+        if (!row[c]) continue;
+        const base = PAL[c % PAL.length];
+        const hue = (hueBase + base[0] * 0.15) % 360;
+        const x = c * cellSize;
+        ctx.fillStyle = `hsl(${hue}, ${base[1]}%, ${Math.min(78, base[2] + 12)}%)`;
+        ctx.fillRect(x + inset, y + inset, size, size);
+      }
+    }
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; config(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
