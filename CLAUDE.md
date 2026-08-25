@@ -1164,6 +1164,135 @@ its 12 combinations — it contributes more archetypes than its single row
 suggests. Any future pool analysis should fingerprint `composer` across
 enough seeds to cover its combos.
 
+## Quasicrystal / Penrose-tiling engine (`quasicrystal.html`) — 2026-08-25
+
+Second daily creative-research firing on the same day, this time under a
+stricter brief: draw from something genuinely RANDOM found on the web (not
+a pre-planned technique), and pass a new mandatory **novelty gate**
+(`src/fingerprint.js`, added earlier the same day — see "Visual
+fingerprinting" above) before shipping, not just `validate.js`.
+
+**Research trail**: surveyed the pool first (15 engines at the time —
+radial mandalas, periodic grid/tile engines, directional flow, lit-3D,
+`automaton.html`'s cellular automaton, `composer.html`'s multi-factor
+combinator). Picked a category via the task's own randomising method
+(minute-of-firing mod category-count), landed on "obscure mathematical
+object / crystal system / physical phenomenon", then WebSearched openly
+within it rather than pre-deciding — this surfaced **quasicrystals and
+Penrose tiling**: aperiodic tessellations with "forbidden" 5-fold/10-fold
+rotational symmetry (impossible for an ordinary periodic crystal), built
+from a real substitution/deflation algorithm on golden-ratio-scaled
+"Robinson triangles". This is a genuinely different construction
+PRINCIPLE from everything else in the pool: not a continuous parametric
+transform, not a mirrored-wedge kaleidoscope, not automaton.html's 1D
+cellular automaton — a recursive geometric substitution system with
+aperiodic-but-locally-repetitive structure. Sources:
+[Nature](https://www.nature.com/articles/316050a0),
+[PNAS](https://www.pnas.org/doi/10.1073/pnas.93.25.14271),
+[Rosetta Code](https://rosettacode.org/wiki/Penrose_tiling),
+[apaleyes/penrose-tiling](https://github.com/apaleyes/penrose-tiling)
+(the last one supplied a verified, working reference implementation of
+the exact Robinson-triangle split formulas, fetched and checked BEFORE
+writing any code — getting a subdivision formula subtly wrong produces a
+tiling with gaps/overlaps that still "looks plausible" at a glance, not an
+obviously-broken image, so guessing from memory alone was too risky here).
+
+**What it is**: the classic 10-triangle "sun" seed (apex at centre,
+alternating chirality every 36°) recursively subdivided via 4 oriented
+Robinson-triangle classes (ThinLeft/ThinRight/ThickLeft/ThickRight),
+scaled by the golden ratio conjugate each level. Subdivision always
+repartitions the SAME fixed decagon area, so the outer silhouette never
+changes shape, only interior detail — combined with computing the
+triangle list ONCE per video (not per frame, not even per cycle — see
+below) and only applying a rotation transform every frame, this engine is
+structurally whiteout-proof with no persistent per-frame state at all
+(closer to spirograph.html's "compute once, transform per frame" pattern
+than to automaton.html's stateful generation).
+
+**Three real bugs found only by actually rendering frames / running
+validateEngine() across seed batches, not by reasoning about the code**:
+
+1. **A hard colour seam from a wrapped-atan2 linear hue sweep.** First
+   version coloured each triangle by `base_hue + hue0 + angFrac*130` where
+   `angFrac` was `atan2(...)/(2*PI)` wrapped to [0,1) — this has an
+   inherent sawtooth discontinuity where `angFrac` jumps from ~1 back to 0,
+   which showed up as a hard, jarring straight-line colour seam cutting
+   across the whole rotating disk in rendered PNGs (invisible from reading
+   the formula alone). Fixed by switching to `40 * sin(5 * angle)` — smooth
+   and periodic by construction (no wrap discontinuity), and using 5x the
+   raw angle ties the colour ripple to the tiling's own 5-fold symmetry
+   instead of an arbitrary frequency. The result is a genuinely more
+   attractive smooth 10-lobe rainbow ripple, not just a bug fix.
+2. **Randomised subdivision depth swung stroke coverage, hence brightness,
+   between cycles.** Depth was originally re-randomised (`randInt(4,5)`)
+   every `cycleSec` reconfigure. Subdivision partitions a FIXED area, so
+   depth doesn't change total fill coverage — but the stroke lines drawn
+   per triangle EDGE do scale with triangle count, so a deeper subdivision
+   means proportionally more (darker) stroke ink. This is the exact
+   "starburst" pitfall CLAUDE.md already documents (randomising star count
+   there swung additive-overlap coverage the same way) recurring in a new
+   engine. `validateEngine()` across 5 seeds showed `projectedRise`
+   swinging from -118 to +203 against the 50 threshold. Fixed at the
+   source: depth is now a function of `DENSITY` only, computed once,
+   never re-rolled per cycle.
+3. **A per-cycle random hue0 jump is a real, not aliased, brightness
+   swing.** Even after fixing bug 2, `validateEngine()` still failed with
+   `projectedRise` up to +327.6. Root cause: `hue0` (the base hue for the
+   whole disk) was re-rolled every cycle alongside the rotation reset.
+   HSL hue itself carries very different luma even at identical
+   saturation/lightness (yellow reads far brighter than blue in any
+   standard luma formula), so a fresh random hue0 every ~38s is a genuine
+   optical brightness swing, not a validator-sampling artifact — the exact
+   same mechanism CLAUDE.md documents for automaton.html's rejected
+   `clk * hueDriftRate` continuous drift term, just manifesting as a
+   per-cycle jump instead of continuous sweep. Fixed by splitting the
+   engine into `initTiling()` (triangle list + colour scheme, called ONCE
+   for the whole video) and `reconfigureRotation()` (rotation angle/rate
+   only, called every cycleSec — coverage- and luma-neutral by
+   construction, since a rotation transform doesn't change how much of the
+   frame is lit). The per-triangle `sin(5*angle)` spread from bug 1 still
+   provides plenty of colour richness at any single instant; it just can't
+   create a *temporal* trend anymore since it's spatially fixed.
+
+**A fourth finding, not a bug but a real validator-metric limitation**:
+even with genuinely fast rotation (confirmed via a temporary debug hook
+logging the actual angle — 43 degrees over validate.js's 1.5s fast-motion
+sample window), `fastMotion` sometimes still read as "too slow to be
+exciting". Root cause: Penrose tilings are aperiodic but built from a
+small set of endlessly RECURRING local motifs, so a rotation landing near
+another nearby patch's orientation can look deceptively self-similar to a
+plain per-pixel luma diff even though the disk demonstrably moved. Not
+fully fixable by making the check smarter without editing `validate.js`
+(out of scope for a curated-engine change), so mitigated at the engine
+level: biased `rotRate` toward the faster half of the "lively pace"
+4-15s-per-rotation band (now 0.9-1.5 rad/s, full rotation in ~4-7s rather
+than the previous 0.4-0.9 rad/s/7-16s range) so even an unlucky
+near-self-similar landing still displaces edges enough to register.
+
+**Novelty gate** (mandatory per today's task, using `fingerprintEngine`/
+`zscoreMatrix`/`distance` from `src/fingerprint.js` directly, not just
+`validate.js`): measured against all 15 existing engines, nearest
+neighbour is `lattice3d` at distance **0.795** — comfortably clear of the
+0.60 threshold and close to the pool's own median pair distance (1.263,
+per the fingerprinting section above). Re-measured after the bug-3 fix
+(colour/rotation logic changed) to make sure the fix didn't accidentally
+homogenise it with something else: still 0.795, effectively unchanged.
+
+**Verified**: `validateEngine()` across seeds 1-10, 10/10 passed with
+comfortable margins — `projectedRise` -7.5 to +9.5 (vs. the 50 threshold),
+`avgSat` 72-92 (vs. the 22 minimum), zero near-white pixels,
+`fastMotion` comfortably above its floor on every seed,
+`projectedHourRenderMin` 27-32min (well inside the CI budget). Visual
+spot-checks across 25/50/75/95/105% of a cycle at 6 different seeds,
+looking at actual rendered PNGs, confirmed: a correct gap-free aperiodic
+tiling (no overlaps, no missing regions — the strongest sign the
+Robinson-triangle split formulas were transcribed correctly), a smooth
+rainbow colour ripple with no seam, continuous rigid rotation with a
+clean per-cycle angle/rate reset (matching the same "reassign angle+rate,
+never reset the shared clock" convention already used by
+`arcrings.html`/`cascade.html`), and consistently vivid/bold/legible
+output across 6 different palette and depth combinations.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Quasicrystal — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine): quasicrystals and Penrose tiling (see
+// CLAUDE.md's dated write-up for the actual search trail). A Penrose P3
+// rhombus tiling is an APERIODIC tessellation with "forbidden" 5-fold/
+// 10-fold rotational symmetry -- no translational repeat anywhere, unlike
+// every periodic grid/tile engine already in this pool (grid.html,
+// tessellation.html), and built from a real substitution/deflation
+// algorithm (a golden-ratio recursive subdivision of "Robinson triangles"),
+// not a hand-drawn motif -- a genuinely different construction PRINCIPLE
+// from this pool's other techniques (continuous parametric transforms,
+// mirrored-wedge kaleidoscopes, or automaton.html's 1D cellular-automaton
+// generation). Its 5/10-fold symmetry is also structurally distinct from
+// every kaleidoscope-family engine here (kaleidoscope/starburst/spirograph
+// all use even-fold mirror symmetry from wedge reflection).
+//
+// Robinson-triangle subdivision (4 oriented classes: ThinLeft, ThinRight,
+// ThickLeft, ThickRight -- thin apex 36 deg, thick apex 108 deg) verified
+// against a real, working reference implementation before writing this
+// (see CLAUDE.md) rather than reconstructed from memory alone, since a
+// wrong split formula would silently produce a broken (gappy/overlapping)
+// tiling that still "looks plausible" at a glance. Seeded as the classic
+// 10-triangle "sun" wheel (apex at centre, alternating chirality every
+// 36 degrees) so the initial patch is exactly 10-fold symmetric; each
+// subdivision preserves the outer decagon boundary while recursively
+// refining the interior, so the overall silhouette never changes shape,
+// only detail -- no whiteout/reset risk at all, since nothing accumulates
+// across frames: the triangle list and colour scheme are computed ONCE for
+// the whole video (same "heavy compute once, cheap transform every frame"
+// pattern as spirograph.html's curve points -- see initTiling() for why
+// this is now ONCE, not per-cycle), and every frame just clears to black
+// and redraws the same list under a rotation transform that resets every
+// cycleSec (see reconfigureRotation()).
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF, per-second rotation rate. Redraws each
+// frame (no accumulation, no whiteout risk).
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 38);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  const cx = W / 2, cy = H / 2;
+  const minDim = Math.min(W, H);
+  const dt = 1 / FPS;
+
+  // Golden ratio conjugate (1/phi = phi-1), the scale factor every
+  // Robinson-triangle split point uses.
+  const PHI_INV = (Math.sqrt(5) - 1) / 2;
+  const pointAt = (p, q, t) => [p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])];
+
+  // Each triangle: [kind, v1, v2, v3] where kind is 0=ThinLeft, 1=ThinRight,
+  // 2=ThickLeft, 3=ThickRight. Split rules verified against a working
+  // reference implementation (see file header) -- vertex order and which
+  // edge each split point lies on matters: getting this wrong produces a
+  // tiling with gaps or overlaps, not just "slightly different colours".
+  function splitOne(tri) {
+    const [kind, v1, v2, v3] = tri;
+    if (kind === 0) { // ThinLeft
+      const p13 = pointAt(v1, v3, PHI_INV);
+      return [[0, v2, v3, p13], [2, p13, v1, v2]];
+    }
+    if (kind === 1) { // ThinRight
+      const p12 = pointAt(v1, v2, PHI_INV);
+      return [[1, v3, p12, v2], [3, p12, v3, v1]];
+    }
+    if (kind === 2) { // ThickLeft
+      const p32 = pointAt(v3, v2, PHI_INV);
+      const p31 = pointAt(v3, v1, PHI_INV);
+      return [[3, p31, p32, v3], [1, p32, p31, v1], [2, p32, v1, v2]];
+    }
+    // ThickRight
+    const p21 = pointAt(v2, v1, PHI_INV);
+    const p23 = pointAt(v2, v3, PHI_INV);
+    return [[3, p23, v3, v1], [0, p23, v1, p21], [2, p21, v2, p23]];
+  }
+
+  // Classic 10-triangle "sun" seed: apex at the centre, base vertices on a
+  // circle of radius R, alternating chirality every 36 degrees so the
+  // initial patch is exactly 10-fold symmetric.
+  function seedWheel(R) {
+    const tris = [];
+    for (let i = 0; i < 10; i++) {
+      const a1 = i * (Math.PI / 5);
+      const a2 = (i + 1) * (Math.PI / 5);
+      const v1 = [R * Math.cos(a2), R * Math.sin(a2)];
+      const v2 = [R * Math.cos(a1), R * Math.sin(a1)];
+      tris.push([i % 2 === 0 ? 1 : 0, [0, 0], v1, v2]);
+    }
+    return tris;
+  }
+
+  let triangles, hue0, thinIdx, thickIdx, rotAngle0, rotRate;
+
+  // Called ONCE. The triangle list and colour scheme (hue0, thinIdx,
+  // thickIdx) never change again after this -- see reconfigureRotation()
+  // below for why. Depth is a function of DENSITY only, never randomised:
+  // subdivision always partitions the SAME fixed decagon area, but the
+  // STROKE lines (drawn once per triangle edge) cover more total area at
+  // higher depth simply because there are more, smaller triangles -- a
+  // randomised depth was a real, coverage-affecting parameter, exactly the
+  // "starburst" pitfall CLAUDE.md documents (randomising star count there
+  // swung additive-overlap coverage the same way). Kept moderate (not
+  // deeper) on purpose too: house style wants bold, legible shapes, not
+  // confetti, and very fine triangles at validate.js's small 480x270 test
+  // canvas read as near-uniform noise to a motion detector.
+  function initTiling() {
+    const R = minDim * 0.49;
+    const depth = Math.max(3, Math.min(6, Math.round(4 * Math.max(0.8, Math.min(1.3, DENSITY)))));
+    let tris = seedWheel(R);
+    for (let d = 0; d < depth; d++) {
+      const next = [];
+      for (const t of tris) next.push(...splitOne(t));
+      tris = next;
+    }
+    triangles = tris;
+
+    // hue0/thinIdx/thickIdx are picked ONCE per video, not re-rolled every
+    // cycle. An earlier version re-rolled them in the same per-cycle
+    // function as the rotation reset, reasoning it was just "more variety,
+    // same as every other curated engine's config()". That was wrong: HSL
+    // hue itself carries very different luma even at identical
+    // saturation/lightness (yellow reads far brighter than blue), so a
+    // fresh random hue0 every ~38s is a real, not aliased, frame-average
+    // brightness swing -- the exact same mechanism CLAUDE.md documents for
+    // automaton.html's rejected `clk * hueDriftRate` term ("a shared,
+    // slowly-sweeping hue means every visible pixel leans toward the same
+    // higher- or lower-luma part of the colour wheel at once"), just as a
+    // per-cycle jump instead of a continuous drift. Confirmed empirically:
+    // validateEngine() failed with projectedRise up to +327.6 even AFTER
+    // fixing the depth-randomisation bug above, because this second,
+    // independent luma-swinging source was still active. Fixed by picking
+    // the colour scheme once and relying on the per-triangle
+    // sin(5*angle) spatial spread (see renderFrame) for richness instead
+    // -- that spread is constant over time, so it can't create a temporal
+    // trend, only a fixed (and pleasant) rainbow ripple.
+    hue0 = rng() * 360;
+    thinIdx = randInt(0, PAL.length - 1);
+    thickIdx = (thinIdx + randInt(2, PAL.length - 2)) % PAL.length;
+  }
+
+  // Called at start-up AND every cycleSec. Coverage-neutral by
+  // construction (a rotation transform doesn't change how much of the
+  // frame is lit), so this is the only thing that resets per cycle.
+  function reconfigureRotation() {
+    rotAngle0 = rng() * Math.PI * 2;
+    // Guaranteed-nonzero magnitude with random sign, biased toward the
+    // faster half of the "lively pace" 4-15s/full-rotation band (full
+    // rotation here in roughly 4-7s) rather than the whole range. Found
+    // empirically that a real 43-degree rotation over validate.js's 1.5s
+    // fast-motion window still sometimes read as "too slow to read as
+    // exciting" -- Penrose tilings are built from a small set of endlessly
+    // RECURRING local motifs (that's what aperiodic-but-locally-repetitive
+    // means), so a rotation landing near another nearby patch's orientation
+    // can look deceptively similar to a plain per-pixel diff even though
+    // the disk demonstrably moved (confirmed via a temporary debug hook
+    // logging the actual rotation angle, not guessed). A faster base rate
+    // gives every sampled window a larger absolute sweep, so even an
+    // unlucky near-self-similar landing still displaces edges enough to
+    // register.
+    rotRate = (rng() < 0.5 ? -1 : 1) * rand(0.9, 1.5) * SPEED;
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  initTiling();
+  reconfigureRotation();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(rotAngle0 + clk * rotRate);
+    ctx.lineWidth = Math.max(1, minDim / 720);
+    ctx.lineJoin = 'round';
+
+    for (const [kind, v1, v2, v3] of triangles) {
+      const isThin = kind === 0 || kind === 1;
+      const base = PAL[isThin ? thinIdx : thickIdx];
+      // A smooth periodic function of angle (never a linear sweep of a
+      // wrapped atan2 value) -- an earlier version used angFrac*130 where
+      // angFrac wrapped 1->0 at one specific angle, which showed up as a
+      // hard, jarring colour seam cutting across the disk in rendered
+      // frames (found only by actually looking at the PNG, not from the
+      // formula alone). sin() is continuous across the wrap by
+      // construction, and using 5x the angle ties the colour ripple to the
+      // tiling's own 5-fold symmetry instead of an arbitrary frequency.
+      const ang = Math.atan2((v1[1] + v2[1] + v3[1]) / 3, (v1[0] + v2[0] + v3[0]) / 3);
+      const hue = ((base[0] + hue0 + 40 * Math.sin(5 * ang)) % 360 + 360) % 360;
+      const light = isThin ? Math.min(80, base[2] + 10) : Math.max(30, base[2] - 8);
+      ctx.fillStyle = `hsl(${hue}, ${base[1]}%, ${light}%)`;
+      ctx.strokeStyle = `hsl(${hue}, ${base[1]}%, ${Math.max(8, light - 30)}%)`;
+
+      ctx.beginPath();
+      ctx.moveTo(v1[0], v1[1]);
+      ctx.lineTo(v2[0], v2[1]);
+      ctx.lineTo(v3[0], v3[1]);
+      ctx.closePath();
+      ctx.fill();
+
+      // Stroke only v1-v2 and v1-v3 (matching the reference implementation)
+      // -- v2-v3 is the shared long edge between two triangles that make up
+      // one Penrose rhombus, so leaving it unstroked lets each rhombus read
+      // as one solid tile instead of two visibly-split triangles.
+      ctx.beginPath();
+      ctx.moveTo(v1[0], v1[1]);
+      ctx.lineTo(v2[0], v2[1]);
+      ctx.moveTo(v1[0], v1[1]);
+      ctx.lineTo(v3[0], v3[1]);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureRotation(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
