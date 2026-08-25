@@ -1084,6 +1084,73 @@ both with and without `capDensity()`, to isolate its contribution) all
 by actually rendering PNGs and looking at them, not just reading
 validator output.
 
+## Visual fingerprinting (`src/fingerprint.js`) — 2026-08-25
+
+User observation that turned out to be exactly right: *"I think you don't
+have capability to determine whether pattern is repeated."* Confirmed by
+inspection before building anything — `validate.js` grepped for
+`compare|similar|distance|hash|previous|history` returns **zero matches**,
+and the only state persisted about past output is two filenames
+(`engine-rotation.json`), two list indices (`theme-rotation.json`), and
+prose (`creative-research-log.json`). Nothing anywhere recorded what a
+video *looked like*.
+
+So all three anti-repeat mechanisms were blind to the image: filename
+round-robin (two different files rendering the same centred mandala
+satisfy it completely), theme-index round-robin (blind to what Gemini
+actually drew), and the "Archetype clustering" analysis above — which was
+**my own eyeballing written down as prose**, not a measurement, never
+re-run, and not part of the pipeline. `validate.js` scores each engine in
+ISOLATION against absolute thresholds, so a near-clone of an existing
+engine passes it cleanly. In practice the detector of repetition was the
+user watching YouTube.
+
+**Descriptor design.** Two choices driven by this project's own failure
+history, not convention:
+- **Colour-blind.** Curated engines are recoloured daily from the NASA
+  APOD palette, so including hue would let a recolour mask a structural
+  repeat — precisely the failure being targeted. Luminance only.
+- **Composition, not pixels.** A plain perceptual hash (aHash/dHash/pHash)
+  reports "different" for the same mandala at a different rotation or
+  cycle phase — the wrong invariance here. Features instead measure
+  rotational symmetry orders 2–8 (shift-correlation of a polar
+  resampling — this is literally what makes something read as a
+  "mandala"), mirror symmetry, radial mass profile, angular unevenness,
+  gradient-orientation histogram, lattice periodicity, edge density, and
+  lit coverage. These survive rotation and phase.
+
+Distances use z-scored vectors against the corpus's own mean/std, so
+unrelated raw units (a correlation vs. an edge fraction) can't let one
+feature dominate.
+
+**Validation — the descriptor independently rediscovered known design
+facts it was never told about**, which is the real evidence it measures
+structure rather than noise: `kaleidoscope` rotSym6 = 0.859 and mirrorLR =
+0.999 (it is a mandala); `cascade` rotSym6 = 0.002 with angularUneven =
+0.876 (the deliberately non-radial directional engine); `automaton`
+mirrorLR = 0.995 (its documented mirror-symmetric seed + symmetric-rule
+design); `tessellation` highest periodY = 0.764 (a tiling).
+
+**Measured result across the 16-engine pool** (`node
+scripts/analyze-pool.js`): exactly **one** genuine near-duplicate pair —
+`auto-2026-08-12-radial-mandala-built-from-straight-line` ↔
+`kaleidoscope` at distance 0.546, a Gemini-promoted engine that duplicates
+a hand-written one. It is a clear outlier (next-closest pair is 0.674, p10
+across all 120 pairs is 0.861, median 1.263), which is why the novelty
+gate threshold is 0.60: it catches that pair and nothing else.
+
+Archetype count is threshold-dependent, so quote the curve rather than a
+single number: 16 files → 16 groups at 0.50, **15 at 0.55–0.65**, 13 at
+0.70, 10 at 0.75, 7 at 0.80, 3 at 1.00. Read as: at fine discrimination
+nearly every engine is distinguishable; at coarse "squint" perception the
+pool collapses to a handful of families.
+
+**Caveat worth remembering:** `composer.html` picks LAYOUT×SHAPE once per
+video *from the seed*, so fingerprinting it at 2 seeds samples only 2 of
+its 12 combinations — it contributes more archetypes than its single row
+suggests. Any future pool analysis should fingerprint `composer` across
+enough seeds to cover its combos.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
