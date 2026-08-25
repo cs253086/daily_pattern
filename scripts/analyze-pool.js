@@ -77,6 +77,20 @@ for (const g of groups) {
   console.log(`  [${g.length}] ${g.join(', ')}`);
 }
 
+// Persist fingerprints so the production promotion gate (noveltyDistance()
+// in src/index.js) only has to fingerprint the ONE new candidate instead of
+// re-rendering the whole pool on every daily run. Committed to the repo, so
+// re-run this script whenever engines are added or removed.
+const cachePath = path.join(repoRoot, 'state', 'engine-fingerprints.json');
+const vectorMap = {};
+names.forEach((n, i) => { vectorMap[n] = vectors[i].map((v) => Number(v.toFixed(6))); });
+writeFileSync(cachePath, `${JSON.stringify({
+  featureNames: FEATURE_NAMES,
+  updatedAt: new Date().toISOString(),
+  vectors: vectorMap,
+}, null, 2)}\n`);
+console.log(`\n[analyze] wrote fingerprint cache -> state/engine-fingerprints.json (${names.length} engines)`);
+
 if (args.json) {
   writeFileSync(args.json, JSON.stringify({
     featureNames: FEATURE_NAMES, names, vectors, threshold: THRESHOLD,

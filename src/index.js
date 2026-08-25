@@ -23,6 +23,7 @@ import { uploadAll } from './upload.js';
 import { generateEngine } from './generate.js';
 import { validateEngine } from './validate.js';
 import { dailyImagePalette, encodeColors, encodeStructure } from './palette.js';
+import { fingerprintEngine, zscoreMatrix, distance } from './fingerprint.js';
 import { dailyStockTrack } from './stockMusic.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -348,6 +349,47 @@ async function promoteToCuratedPool(enginePath, themeHint, date) {
   return destPath;
 }
 
+// Novelty gate on promotion (2026-08-25). promoteToCuratedPool() used to
+// admit anything that passed validate.js -- but validate.js scores an engine
+// in ISOLATION against absolute thresholds and has no cross-engine
+// comparison at all, so a Gemini engine that merely re-renders an existing
+// curated composition passed cleanly and became a permanent pool member.
+// That is not hypothetical: auto-2026-08-12-radial-mandala-built-from-
+// straight-line was admitted this way and measured 0.546 from
+// kaleidoscope -- a near-duplicate, and the closest pair in the whole pool
+// (next-closest unrelated pair 0.674, median 1.263). It was removed and this
+// gate added, because deleting the one file does nothing to stop the next
+// one. Same lesson as the earlier "too white" incident: when a promoted
+// engine turns out bad, the fix belongs in the gate so it can't recur for
+// ANY engine.
+//
+// Reads precomputed fingerprints from state/engine-fingerprints.json
+// (refresh with `node scripts/analyze-pool.js`) so a production run only
+// has to fingerprint the ONE new candidate (~20s) rather than re-render the
+// whole pool.
+//
+// FAILS CLOSED: if the cache is missing/unusable or fingerprinting throws,
+// promotion is skipped rather than allowed. Promotion is entirely optional
+// -- the day's video still renders and publishes either way -- so declining
+// to grow the pool is strictly cheaper than admitting an unverified engine.
+const FINGERPRINT_CACHE_PATH = path.join(repoRoot, 'state', 'engine-fingerprints.json');
+const MIN_NOVELTY_DISTANCE = 0.60;
+
+async function noveltyDistance(enginePath) {
+  const cache = JSON.parse(readFileSync(FINGERPRINT_CACHE_PATH, 'utf8'));
+  const names = Object.keys(cache.vectors || {});
+  if (names.length < 3) throw new Error(`fingerprint cache has only ${names.length} entries`);
+  const candidate = await fingerprintEngine(enginePath);
+  const { z } = zscoreMatrix([...names.map((n) => cache.vectors[n]), candidate]);
+  const cz = z[z.length - 1];
+  let nearest = null, best = Infinity;
+  for (let i = 0; i < names.length; i++) {
+    const d = distance(cz, z[i]);
+    if (d < best) { best = d; nearest = names[i]; }
+  }
+  return { nearest, distance: best };
+}
+
 async function main() {
   const cli = parseArgs(process.argv.slice(2));
   const dryRun = cli['no-upload'] === true || process.env.DRY_RUN === '1';
@@ -369,9 +411,20 @@ async function main() {
   const promoteEnabled = process.env.PROMOTE_ENGINES !== '0' && cli['no-promote'] !== true;
   if (!dryRun && promoteEnabled && source.startsWith('gemini')) {
     try {
-      await promoteToCuratedPool(engine, themeHint, date);
+      // Novelty gate first -- see noveltyDistance() for why validate.js
+      // passing is not sufficient grounds to admit an engine permanently.
+      const nov = await noveltyDistance(engine);
+      if (nov.distance < MIN_NOVELTY_DISTANCE) {
+        console.warn(`[index] NOT promoting: too similar to ${nov.nearest} `
+          + `(novelty ${nov.distance.toFixed(3)} < ${MIN_NOVELTY_DISTANCE}). `
+          + `Today's video still ships; the pool just doesn't gain a near-duplicate.`);
+      } else {
+        console.log(`[index] novelty ok: ${nov.distance.toFixed(3)} from nearest (${nov.nearest}).`);
+        await promoteToCuratedPool(engine, themeHint, date);
+      }
     } catch (e) {
-      console.warn(`[index] could not promote engine to curated pool: ${e.message}`);
+      // Fail closed -- skip promotion rather than admit an unverified engine.
+      console.warn(`[index] skipping promotion (novelty check unavailable): ${e.message}`);
     }
   }
 
