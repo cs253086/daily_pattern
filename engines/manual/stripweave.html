@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Strip Weave — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine): Kente cloth, the strip-woven textile
+// tradition of the Akan/Ewe peoples of West Africa (see CLAUDE.md's dated
+// write-up for the search trail). Research turned up a specific structural
+// principle worth extracting -- NOT a generic over/under thread weave
+// (true of any woven fabric, not distinctively Kente), but the thing that
+// actually defines Kente specifically: cloth assembled from separate
+// NARROW STRIPS, each woven independently with its OWN repeating geometric
+// motif rhythm (zigzags/diamonds/blocks), then sewn together side by side
+// -- "the strips are sewn together lengthways to purposely create definite
+// patterns", per the research. This engine renders exactly that: N
+// vertical strips, each carrying one of a small vocabulary of motifs in
+// its own two-colour scheme, continuously scrolling downward at its own
+// slightly-jittered rate (as if being fed off parallel looms) -- a
+// genuinely different compositional principle from every other engine in
+// this pool: not a centred mandala, not a single uniform grid/tile rule
+// (grid.html/tessellation.html), not one shape falling in phase-staggered
+// columns (cascade.html) -- a heterogeneous juxtaposition of DIFFERENT
+// motifs side by side in one frame, which none of those are.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF, per-second rates. Every strip is
+// always 100% opaque (motifs paint their full background, never leave
+// black gaps), so this is structurally whiteout-proof the same way as
+// every other clear-and-redraw engine here -- there is nothing to
+// accumulate, since each frame is a fresh render of a continuously
+// scrolling but otherwise fixed pattern.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 36);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+  const hsl = (h, s, l) => `hsl(${((h % 360) + 360) % 360}, ${s}%, ${l}%)`;
+
+  const dt = 1 / FPS;
+  const MOTIFS = ['blocks', 'diamond', 'chevron'];
+
+  // Strip count/width is a function of DENSITY only, fixed once for the
+  // whole video -- same lesson learned twice already this week
+  // (automaton.html, quasicrystal.html): a geometry/coverage parameter
+  // that gets re-randomised every cycle creates a real frame-average
+  // brightness swing between cycles that validate.js's sparse 8-sample
+  // trend fit can misread as a monotonic rise, even when every individual
+  // cycle looks fine on its own. Kept moderate (not many, thin strips) on
+  // purpose too: house style wants bold, legible shapes.
+  let N, stripW, strips;
+  function initStrips() {
+    N = Math.max(5, Math.min(12, Math.round(8 * Math.max(0.7, Math.min(1.4, DENSITY)))));
+    stripW = W / N;
+    strips = [];
+    for (let i = 0; i < N; i++) {
+      const motif = MOTIFS[randInt(0, MOTIFS.length - 1)];
+      const baseA = PAL[i % PAL.length];
+      // colB is a DIFFERENT palette entry (not just a lightness/hue nudge
+      // of colA), so adjacent motif colours read as genuinely two-tone
+      // like real Kente thread combinations, not a single hue's shades.
+      const bIdx = (i + randInt(2, PAL.length - 2)) % PAL.length;
+      const baseB = PAL[bIdx];
+      strips.push({
+        motif,
+        colA: hsl(baseA[0], baseA[1], baseA[2]),
+        colB: hsl(baseB[0], baseB[1], Math.min(78, baseB[2] + 10)),
+        // Period relative to strip width so motifs stay proportionate
+        // regardless of N. Phase and rate jitter give each strip its own
+        // independent rhythm -- "parallel looms", not one shared pattern.
+        period: stripW * rand(1.5, 2.3),
+        phase: rand(0, 10000),
+        rateMul: rand(0.82, 1.18),
+      });
+    }
+  }
+
+  // Called at start-up AND every cycleSec. Only touches scroll phase/rate
+  // -- coverage-neutral by construction (a scrolling periodic pattern has
+  // the same total ink coverage at every phase), so this is safe to reset
+  // freely, same reasoning as quasicrystal.html's reconfigureRotation().
+  let scrollBase0, scrollRate;
+  function reconfigureScroll() {
+    scrollBase0 = rand(0, 10000);
+    // Guaranteed-nonzero, strictly positive (direction fixed downward --
+    // "fabric feeding off a loom" -- matching cascade.html's fallRate
+    // reasoning: only speed varies, not direction).
+    scrollRate = stripW * rand(0.5, 0.85) * SPEED;
+  }
+
+  function drawBlocks(x, w, yTop, period, colA, colB) {
+    ctx.fillStyle = colA; ctx.fillRect(x, yTop, w, period / 2);
+    ctx.fillStyle = colB; ctx.fillRect(x, yTop + period / 2, w, period / 2);
+  }
+  function drawDiamond(x, w, yTop, period, colBg, colFg) {
+    ctx.fillStyle = colBg; ctx.fillRect(x, yTop, w, period);
+    const dcx = x + w / 2, dcy = yTop + period / 2;
+    const hw = w * 0.36, hh = period * 0.36;
+    ctx.fillStyle = colFg;
+    ctx.beginPath();
+    ctx.moveTo(dcx, dcy - hh);
+    ctx.lineTo(dcx + hw, dcy);
+    ctx.lineTo(dcx, dcy + hh);
+    ctx.lineTo(dcx - hw, dcy);
+    ctx.closePath();
+    ctx.fill();
+  }
+  function drawChevron(x, w, yTop, period, colBg, colFg) {
+    ctx.fillStyle = colBg; ctx.fillRect(x, yTop, w, period);
+    const th = period * 0.3;
+    const midY = yTop + period * 0.5;
+    ctx.fillStyle = colFg;
+    ctx.beginPath();
+    ctx.moveTo(x, yTop);
+    ctx.lineTo(x + w / 2, midY);
+    ctx.lineTo(x + w, yTop);
+    ctx.lineTo(x + w, yTop + th);
+    ctx.lineTo(x + w / 2, midY + th);
+    ctx.lineTo(x, yTop + th);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  initStrips();
+  reconfigureScroll();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    const globalOffset = scrollBase0 + clk * scrollRate;
+
+    for (let i = 0; i < N; i++) {
+      const s = strips[i];
+      const x = i * stripW;
+      const period = s.period;
+      const shift = (((globalOffset * s.rateMul) + s.phase) % period + period) % period;
+      const segStart = Math.floor((-shift) / period) - 1;
+      const segEnd = Math.ceil((H - shift) / period) + 1;
+      for (let seg = segStart; seg <= segEnd; seg++) {
+        const yTop = seg * period + shift;
+        if (s.motif === 'blocks') drawBlocks(x, stripW, yTop, period, s.colA, s.colB);
+        else if (s.motif === 'diamond') drawDiamond(x, stripW, yTop, period, s.colB, s.colA);
+        else drawChevron(x, stripW, yTop, period, s.colB, s.colA);
+      }
+      // Thin dark separator between adjacent strips -- crisp "individual
+      // strips sewn together" definition, house-style straight edges.
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+      ctx.lineWidth = Math.max(1, stripW / 60);
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, H);
+      ctx.stroke();
+    }
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureScroll(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

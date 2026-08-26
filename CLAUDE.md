@@ -1293,6 +1293,95 @@ never reset the shared clock" convention already used by
 `arcrings.html`/`cascade.html`), and consistently vivid/bold/legible
 output across 6 different palette and depth combinations.
 
+## Strip-weave engine (`stripweave.html`) — 2026-08-26
+
+Daily creative-research routine, first firing of a new day. Randomised the
+research category the same way as the previous day's firing (firing-time
+minute mod category-count over the task's own seed list), landing on
+"traditional textile/tiling/ornament tradition from a randomly chosen
+culture" — a different category from the prior day's "obscure mathematical
+object" pick (`quasicrystal.html`), so no repeated inspiration source.
+Open-ended search within that category (not a pre-decided culture) turned
+up **Kente cloth**, the strip-woven textile tradition of the Akan/Ewe
+peoples of West Africa.
+
+**Extracting a structural principle, not the obvious one.** The first
+instinct for "woven textile" is a generic over/under thread interlace
+(true of literally any woven fabric — plain weave, twill, basket weave —
+not distinctively Kente). Reading further surfaced the actual
+Kente-specific structural fact: cloth assembled from **separate narrow
+strips**, each woven independently on its own narrow loom with its own
+repeating geometric motif rhythm (zigzags, diamonds, checkerboards), then
+sewn together side by side — "the strips are sewn together lengthways to
+purposely create definite patterns" (research source). That's the
+principle worth rendering: a **heterogeneous juxtaposition of different
+motifs side by side in one frame**, which nothing else in this pool does —
+grid.html/tessellation.html apply one uniform rule across the whole
+canvas, cascade.html phase-staggers copies of the *same* falling shape.
+Sources:
+[Timothy S. Y. Lam Museum of Anthropology](https://lammuseum.wfu.edu/2023/02/ghana-weave-a-kente-cloth/),
+[Craft Atlas](https://craftatlas.co/crafts/kente),
+[Minneapolis Institute of Art](https://new.artsmia.org/programs/teachers-and-students/teaching-the-arts/artwork-in-focus/asante-kente-cloth).
+
+**What it is**: N vertical strips spanning the full canvas height, each
+assigned (once per video) one of three motifs — solid alternating blocks,
+diamonds, or chevrons — and its own two-colour scheme drawn from the
+palette table (a second, genuinely different palette entry for the accent
+colour, not just a lightness nudge of the first, so adjacent strips read
+as distinct thread combinations). Every strip's motif tiles seamlessly and
+is always 100% opaque (the "background" colour fills the full segment
+before the accent shape is drawn on top), so there is never a black gap to
+accumulate into — structurally whiteout-proof the same way as every other
+clear-and-redraw engine here, with no persistent per-frame state at all.
+Each strip scrolls continuously downward (as if being fed off its own
+parallel loom) at a shared base rate with a small per-strip jitter
+(0.82-1.18x) and its own fixed phase offset, so strips visibly move at
+independently different rhythms rather than in lockstep — reinforcing the
+"separate strips" read the same way `composer.html`'s directional layout
+uses shared-per-column colour to reinforce "these belong to one stream",
+just inverted here (independent phase reinforces *separateness* between
+strips instead of *unity* within one).
+
+**Applied the last two engines' hardest-won lesson from the start, instead
+of re-discovering it the slow way.** Both `automaton.html` and
+`quasicrystal.html` shipped only after multiple rounds of discovering (the
+expensive way, via `validateEngine()` failures) that any geometry or
+colour-scheme parameter re-randomised every `cycleSec` creates a real,
+not-aliased frame-average brightness swing between cycles if it changes
+total ink coverage OR shifts the overall hue distribution. Built this
+engine with that lesson already applied from the first draft: strip count,
+per-strip motif, and per-strip colours are all fixed ONCE in `initStrips()`
+(never re-rolled), and the only thing `cycleSec` resets is scroll
+phase/rate in `reconfigureScroll()` — coverage-neutral by construction,
+since a scrolling *periodic* pattern has identical total ink coverage at
+every phase. Also relied on scrolling itself (rather than a hue-based
+effect) for all per-frame motion, sidestepping the HSL-hue-affects-luma
+trap entirely rather than needing to route around it.
+
+**Verified**: `validateEngine()` across seeds 1-10 — **10/10 passed on the
+first attempt**, no iteration needed (unlike automaton's six rounds or
+quasicrystal's four) — real evidence the fix-once-per-video pattern above
+is now a reliable default for new engines, not just a one-off patch.
+Margins comfortable throughout: `projectedRise` -10.8 to +8.1 (vs. the 50
+threshold), `avgSat` 79.3-90.1 (vs. the 22 minimum), zero near-white
+pixels, `fastMotion` comfortably above its floor on every seed,
+`projectedHourRenderMin` 3.7-34.2min (well inside the CI budget — the
+seed-to-seed spread here is puppeteer/sandbox scheduling noise on this
+very cheap-to-render engine, not a real cost difference, per the same
+CPU-contention pattern already documented for automaton.html's one flaky
+speed reading). Visual spot-checks across 25/50/75/95/105% of a cycle at 3
+seeds confirmed bold, vivid, immediately-legible strips with visible
+independent scroll motion between checkpoints and a clean, non-jarring
+phase reset at the cycle boundary.
+
+**Novelty gate**: measured against all 16 existing engines using
+`fingerprintEngine`/`zscoreMatrix`/`distance` from `src/fingerprint.js`
+directly. Nearest neighbour is `tessellation` at distance **1.773** —
+not just clear of the 0.60 threshold but comfortably above the pool's own
+*median* pair distance (1.263, per the fingerprinting section above),
+confirming this is a genuinely distinct archetype rather than a
+borderline case.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

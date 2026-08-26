@@ -17,5 +17,16 @@
     "seedsVerified": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     "nearestNeighbour": "lattice3d",
     "nearestDistance": 0.795
+  },
+  {
+    "date": "2026-08-26",
+    "inspirationSource": "Kente cloth, the strip-woven textile tradition of the Akan/Ewe peoples of West Africa, found via open web search within the randomly-picked category 'traditional textile/tiling/ornament tradition from a randomly chosen culture' (category chosen via the firing time's minute mod category-count, not pre-decided; a different category from the prior day's pick so no repeated research angle). https://lammuseum.wfu.edu/2023/02/ghana-weave-a-kente-cloth/ ; https://craftatlas.co/crafts/kente ; https://new.artsmia.org/programs/teachers-and-students/teaching-the-arts/artwork-in-focus/asante-kente-cloth",
+    "idea": "Extracted the Kente-SPECIFIC structural principle (not the generic 'any woven fabric has an over/under thread interlace' fact): cloth assembled from separate narrow strips, each woven independently with its OWN repeating geometric motif rhythm (blocks/diamonds/chevrons), then sewn together side by side. Rendered as N vertical strips, each fixed once per video to one motif + two-colour scheme, continuously scrolling downward at its own jittered rate (independent rhythms, like parallel looms) -- a heterogeneous juxtaposition of DIFFERENT motifs in one frame, distinct from every uniform-rule grid/tile engine or same-shape-repeated directional engine already in the pool.",
+    "engineName": "stripweave",
+    "outcome": "shipped",
+    "reason": "Applied the whiteout/brightness-swing lesson learned the hard way on the previous two engines (automaton, quasicrystal) from the very first draft instead of rediscovering it: strip count, per-strip motif, and per-strip colours are all fixed ONCE in initStrips() (never re-rolled per cycle, since a randomised coverage/colour-scheme parameter is exactly what caused both prior engines' validateEngine() failures), and cycleSec only resets scroll phase/rate in reconfigureScroll() -- coverage-neutral by construction, since a scrolling periodic pattern has identical total ink coverage at every phase. Also used scrolling (not a hue-based effect) for all per-frame motion, sidestepping the HSL-hue-affects-luma trap entirely. Result: validateEngine() 10/10 across seeds 1-10 passed on the FIRST attempt, no iteration rounds needed (vs six for automaton, four for quasicrystal) -- real evidence the fix-once-per-video pattern is now a reliable default. Margins comfortable throughout (projectedRise -10.8 to +8.1 vs the 50 threshold, avgSat 79.3-90.1 vs the 22 minimum, zero near-white pixels, projectedHourRenderMin 3.7-34.2min). Visual spot-checks across 25/50/75/95/105% of a cycle at 3 seeds confirmed bold, vivid, immediately-legible strips with clear independent motion and a clean cycle-boundary reset. Novelty gate measured against all 16 existing engines: nearest neighbour tessellation at distance 1.773, comfortably above even the pool's own median pair distance (1.263).",
+    "seedsVerified": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    "nearestNeighbour": "tessellation",
+    "nearestDistance": 1.773
   }
 ]
