@@ -1382,6 +1382,127 @@ not just clear of the 0.60 threshold but comfortably above the pool's own
 confirming this is a genuinely distinct archetype rather than a
 borderline case.
 
+## Chladni-figure / cymatics engine (`chladni.html`) — 2026-08-27
+
+Daily creative-research routine. Randomised category selection (firing-time
+minute mod category-count, same method as the previous two firings) landed
+on "random featured image" — but this turned out to be impractical in this
+sandbox: Wikimedia Commons is blocked by the network egress policy the
+same way `en.wikipedia.org` already was (confirmed, not assumed), and
+WebSearch alone couldn't surface a specific, concrete, well-documented
+subject to extract a structural principle from (results were generic
+"beautiful photo" lists, not something with an underlying formula). Rather
+than force a weak fit, moved to the *next* candidate from the task's own
+category list — "random natural structure" — which hadn't been used yet
+and is rich in concrete, well-documented physical structures. Open search
+within it surfaced several candidates (mudcrack Y-junction networks,
+phyllotaxis spiral lattices, soap-film minimal surfaces); picked
+**cymatics / Chladni figures** — the nodal-line patterns that emerge when
+a vibrating plate is combined with fine sand, which collects along the
+lines where the plate's standing-wave vibration cancels to zero. A
+genuinely different construction principle from everything else in the
+pool: not a substitution/subdivision system (`quasicrystal.html`), not a
+discrete cellular-automaton generation (`automaton.html`), not a rigid
+transform of a fixed shape — an **implicit curve** (the zero-set of a wave
+interference function), sampled on a grid rather than drawn as an explicit
+path. Sources:
+[Plateau's laws](https://en.wikipedia.org/wiki/Plateau%27s_laws),
+[Mudcrack](https://en.wikipedia.org/wiki/Mudcrack) (background research
+that led to the final pick, not the technique used).
+
+**What it is**: the standard visualisation-grade square-plate Chladni
+formula, `mode(m,n)(u,v) = cos(m*pi*u)*cos(n*pi*v) - cos(n*pi*u)*cos(m*pi*v)`
+for `u,v` in `[-1,1]` — a widely used formula for generating recognisable
+nodal patterns (not a lab-exact eigenmode derivation, which wasn't
+necessary for a visualisation). Two distinct `(m,n)` mode pairs are picked
+once per video and continuously cross-faded via a rotating angle
+(`f = cos(theta)*modeA + sin(theta)*modeB`), smoothly morphing the nodal
+pattern between the two and everything in between, echoing how real
+Chladni demonstrations sweep the driving frequency and watch the sand
+reorganise. Grid points near `f=0` are drawn as bold filled squares (not a
+fine mesh — see the first bug below) rather than traced as continuous
+marching-squares contours, both for implementation safety and because it
+reads as more physically authentic (real Chladni sand collects as
+particles along the nodal lines, not a smooth drawn curve).
+
+**Three real bugs found only by rendering frames and running
+validateEngine() across seed batches, not by reasoning about the code**:
+
+1. **First version's grid was far too fine for the house style.** Initial
+   cell sizing (`minDim/78`) produced tiny, scattered single-pixel-ish
+   dots that read as noise/confetti, not "bold, few, clear" shapes.
+   Confirmed only by actually rendering and looking (the numbers alone
+   looked reasonable). Fixed by roughly doubling cell size (`minDim/42`),
+   filling each cell almost completely (`dotSize = cellSize*0.88`, up from
+   `0.42`), and widening the acceptance band so adjacent hit-cells connect
+   into visible chains rather than isolated specks.
+2. **A real algebraic degeneracy: `mode(n,m)` is exactly `-mode(m,n)`.**
+   Swapping a mode pair's indices just negates the whole expression, so if
+   the mode-pair picker ever selected `(n,m)` as the second mode when
+   `(m,n)` was the first, `f = cos(theta)*modeA + sin(theta)*modeB`
+   collapsed to `modeA` times a single time-varying SCALAR — meaning the
+   zero-set (where the nodal lines actually are) never moved at all,
+   regardless of theta. `validateEngine()` caught this unambiguously as
+   "little/no motion between frames (max diff 0.00)" on 2 of 10 seeds, not
+   a borderline case. Fixed by explicitly excluding the swapped pair, not
+   just the identical one, when picking modeB.
+3. **A real (not aliased) brightness swing from letting the "how mixed is
+   the current cross-fade" state vary total lit coverage.** A near-pure
+   single mode has structurally less total nodal-line length than a fully
+   mixed state, so a fixed `|f| < THRESH` cutoff let coverage genuinely
+   swing as theta swept its cycle. Even though the oscillation is
+   periodic with dozens of full periods inside validate.js's 300s test
+   window (which should statistically average out per the automaton.html/
+   quasicrystal.html lesson about many-periods-vs-aliasing), 3 of 10 seeds
+   still showed a real trend (`projectedRise` up to +191.7) — 8 sparse
+   samples still carry enough variance to occasionally catch a large
+   swing badly. Fixed at the source, the same way `automaton.html`'s
+   `capDensity()` bounds density regardless of the automaton's own raw
+   behaviour: rank ALL grid cells' `|f|` each frame and light up exactly
+   the lowest `TARGET_FRAC` (16%) of them, so lit AREA never varies —
+   only which specific cells (i.e. the pattern's shape) do.
+
+**A fourth finding, a real trade-off rather than a bug**: the
+`TARGET_FRAC` fix above, while fully solving problem 3, was measured
+(not assumed) to also damp frame-to-frame pixel churn — a rank/percentile
+selection is inherently more stable than a raw value cutoff, since it
+tends to keep a consistent "core" of lowest-`|f|` cells across a wide
+theta range. Raising the cross-fade rate well past what "many periods fit
+the test window" alone called for (0.8-1.4 rad/s, full period only
+~2.2-3.9s) still left 4-5 of 10 seeds failing "too slow to read as
+exciting". Rather than fight the percentile selection's own stability
+further, added an independent, already-proven motion source instead of
+tuning the same lever harder: a genuine rigid rotation of the whole
+rendered plate, the same technique `quasicrystal.html` already validated
+as reliable, layered on top of the mode cross-fade. This displaces every
+lit pixel by a large, unambiguous amount every frame regardless of which
+specific cells the percentile threshold happens to select, decoupling the
+motion-detection fix from the brightness fix entirely.
+
+**Verified** (final design): `validateEngine()` across seeds 1-10 —
+**10/10 passed** after the four fixes above. Margins comfortable:
+`projectedRise` -13.4 to +33.1 (vs. the 50 threshold), `avgSat` 65.4-76.8
+(vs. the 22 minimum), zero near-white pixels, `fastMotion` comfortably
+above its floor on every seed (15-23 vs. floors of 4.7-6.1),
+`projectedHourRenderMin` 6.0-8.2min (well inside the CI budget). Visual
+spot-checks across 25/50/75/95/105% of a cycle at 5 seeds confirmed bold,
+clearly-connected nodal-line patterns (diamonds, X-crossings, radial
+star-bursts depending on the mode pair) with visible independent morphing
+and rotation between checkpoints, and vivid, distinct palettes per seed.
+
+**Novelty gate**: measured against all 17 existing engines (the
+fingerprint cache was one commit behind — missing `stripweave.html` —
+so it was fingerprinted fresh alongside the candidate rather than trusting
+a stale cache) using `fingerprintEngine`/`zscoreMatrix`/`distance` from
+`src/fingerprint.js`. Nearest neighbour is `arcrings` at distance
+**1.113** — comfortably clear of the 0.60 threshold (roughly double it),
+though below the pool's own median pair distance (1.263): the added rigid
+rotation likely reads as somewhat similar in raw composition terms to
+`arcrings`' rotating segments, even though the underlying technique
+(implicit wave-interference sampling vs. explicit rotating arcs) is
+completely different. Still a clear, comfortable pass, not a borderline
+case.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
