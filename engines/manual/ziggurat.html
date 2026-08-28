@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ziggurat — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine): Art Deco's STEPPED/ZIGGURAT motif (see
+// CLAUDE.md's dated write-up for the search trail) -- tiered, setback
+// silhouettes (skyscraper setbacks, temple ziggurats, cinema-facade
+// staircase arches), one of the movement's core geometric vocabulary
+// items alongside sunbursts and chevrons. Deliberately picked the STEPPED
+// motif over the other two: sunburst rays would read too close to
+// arcrings.html/geometric.html's existing radial-line engines, and
+// chevrons already appear as one of stripweave.html's per-strip motifs --
+// but nothing in this pool has a SOLID STAIRCASE silhouette (a shape
+// whose outline literally steps inward tier by tier), which reads as a
+// genuinely different silhouette archetype from every smooth-curve,
+// thin-stroke, or filled-polygon engine here.
+//
+// What it is: N wedges arranged radially (a rosette), each wedge built as
+// a stack of T annular "step" tiers -- every tier is a filled annular
+// sector, narrower in angle than the tier below it, so the wedge's
+// silhouette staircases inward as it rises outward from the centre,
+// exactly like a ziggurat's setback profile viewed in plan around a
+// circle. Tier count and wedge count are fixed once per video (function
+// of DENSITY only); the only thing that changes over time is a rigid
+// rotation of the whole rosette, so total covered area never varies --
+// structurally whiteout-proof and coverage-stable by construction, the
+// same "compute the shape once, only transform per frame" pattern
+// spirograph.html/quasicrystal.html already established as safe.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF, per-second rotation rate. Redraws each
+// frame (no accumulation, no whiteout risk).
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 37);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  const cx = W / 2, cy = H / 2;
+  const minDim = Math.min(W, H);
+  const dt = 1 / FPS;
+
+  // Wedge count (N) and tier count (T) are functions of DENSITY only,
+  // fixed once for the whole video -- the exact "coverage/geometry
+  // parameter must not vary per cycle" lesson CLAUDE.md now documents for
+  // four prior engines in a row: re-randomising how many wedges or tiers
+  // exist would change total covered area between cycles, swinging
+  // average frame brightness the same way a randomised subdivision depth
+  // or automaton density did.
+  let N, T, wedges, hue0;
+  function initRosette() {
+    N = Math.max(6, Math.min(14, Math.round(10 * Math.max(0.7, Math.min(1.4, DENSITY)))));
+    T = Math.max(3, Math.min(7, Math.round(5 * Math.max(0.7, Math.min(1.4, DENSITY)))));
+
+    const rOuter = minDim * 0.47;
+    const rInner = rOuter * rand(0.12, 0.2);
+    const tierHeight = (rOuter - rInner) / T;
+    const gapFrac = 0.16;
+    const wedgeW = (Math.PI * 2 / N) * (1 - gapFrac);
+
+    hue0 = rng() * 360;
+    wedges = [];
+    for (let k = 0; k < N; k++) {
+      const a0 = (k / N) * Math.PI * 2;
+      const tiers = [];
+      // Taper each tier by its PHYSICAL (screen-space) half-width, not by
+      // angle alone -- a real bug found only by rendering and looking:
+      // shrinking angular width linearly by tier still let visual width
+      // GROW outward, since arc length is angle*radius and radius grows
+      // faster than a linear angular taper shrinks, so the wedges fanned
+      // out like flower petals instead of tapering like a ziggurat.
+      // Fixed by computing the target physical half-width at each tier
+      // (linearly shrinking to 35% of the base width by the outermost
+      // tier) and converting that back to an angular half-width using
+      // THAT tier's own radius, so the taper is genuine in on-screen
+      // pixels regardless of how far out the tier sits.
+      const baseHalfW = (wedgeW / 2) * rInner;
+      for (let t = 0; t < T; t++) {
+        const r0 = rInner + t * tierHeight;
+        const r1 = rInner + (t + 1) * tierHeight;
+        const rMid = (r0 + r1) / 2;
+        const frac = T > 1 ? t / (T - 1) : 0;
+        const halfW = baseHalfW * (1 - 0.65 * frac);
+        const halfAngle = halfW / rMid;
+        const midA = a0 + wedgeW / 2;
+        tiers.push({ r0, r1, a0: midA - halfAngle, a1: midA + halfAngle });
+      }
+      wedges.push({ tiers, baseIdx: k % PAL.length });
+    }
+  }
+
+  // Called at start-up AND every cycleSec. Only rotation resets --
+  // coverage-neutral by construction (a rotation transform doesn't change
+  // how much of the frame is lit), same reasoning as quasicrystal.html's
+  // reconfigureRotation() and chladni.html's rigid-rotation addition.
+  let rotAngle0, rotRate;
+  function reconfigureRotation() {
+    rotAngle0 = rand(0, Math.PI * 2);
+    // A real, exact (not just approximate) self-similarity risk that
+    // arcrings.html/quasicrystal.html don't have: this rosette has EXACT
+    // N-fold rotational symmetry (all N wedges are identical), so if the
+    // rotation angle swept during validate.js's 1.5s fast-motion window
+    // happens to land near an integer multiple of the sector angle
+    // (2*PI/N), the "before" and "after" frames are indistinguishable --
+    // not just visually similar like a Penrose tiling's local motif
+    // recurrence, but a mathematically EXACT symmetry of the shape.
+    // Found empirically: an independent-of-N rate range (0.7-1.2 rad/s)
+    // failed 1 of 10 seeds with fastMotion barely under its floor, because
+    // for this pool's default N=10 that range happened to straddle the
+    // 2-sector resonance point (~0.838 rad/s). Fixed by tying the rate
+    // explicitly to N instead of picking it independently: target
+    // ~1.3-1.7 sectors of rotation over a 1.5s window (centred on 1.5,
+    // maximally far from the resonant 1x and 2x sector points), which by
+    // construction can never land on an exact multiple of the sector
+    // angle regardless of what N this video happens to have.
+    const sectorAngle = (Math.PI * 2) / N;
+    const sectorsPerWindow = rand(1.3, 1.7);
+    rotRate = (rng() < 0.5 ? -1 : 1) * (sectorsPerWindow * sectorAngle / 1.5) * SPEED;
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  initRosette();
+  reconfigureRotation();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(rotAngle0 + clk * rotRate);
+
+    for (const wedge of wedges) {
+      const base = PAL[wedge.baseIdx];
+      for (let t = 0; t < wedge.tiers.length; t++) {
+        const tier = wedge.tiers[t];
+        // Lightness gradient outward per tier -- spatial (structural), not
+        // time-based, so it adds richness without ever creating a
+        // temporal luma trend (same reasoning as quasicrystal.html's
+        // per-triangle sin(5*angle) fix and chladni.html's spatial hue
+        // ripple).
+        const light = Math.min(80, base[2] + t * 5);
+        const hue = ((base[0] + hue0) % 360 + 360) % 360;
+        ctx.fillStyle = `hsl(${hue}, ${base[1]}%, ${light}%)`;
+        ctx.beginPath();
+        ctx.arc(0, 0, tier.r1, tier.a0, tier.a1);
+        ctx.arc(0, 0, tier.r0, tier.a1, tier.a0, true);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    ctx.restore();
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureRotation(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

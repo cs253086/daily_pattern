@@ -1503,6 +1503,101 @@ rotation likely reads as somewhat similar in raw composition terms to
 completely different. Still a clear, comfortable pass, not a borderline
 case.
 
+## Art Deco stepped/ziggurat engine (`ziggurat.html`) — 2026-08-28
+
+Daily creative-research routine. Randomised category selection landed on
+"random natural structure" (used the previous day) and "random Wikipedia
+article" (impractical -- Wikipedia is blocked) in that order, so moved to
+the one category not yet tried in this project: "random architectural or
+typographic movement". A first search on Swiss/International Typographic
+Style grid systems felt too close to `grid.html`'s existing mathematical-
+grid archetype, so searched further and landed on **Art Deco's
+stepped/ziggurat motif** -- tiered, setback silhouettes (skyscraper
+setbacks, temple ziggurats, cinema-facade staircase arches), one of the
+movement's three core geometric vocabulary items alongside sunbursts and
+chevrons. Deliberately picked the stepped motif over the other two:
+sunburst rays would read too close to `arcrings.html`/`geometric.html`'s
+existing radial-line engines, and chevrons already appear as one of
+`stripweave.html`'s per-strip motifs. Sources:
+[illustrarch](https://illustrarch.com/articles/34588-art-deco-geometric-designs.html),
+[awedeco](https://awedeco.com/zigzag-patterns-in-art-deco/).
+
+**What it is**: N wedges arranged radially (a rosette), each wedge built
+as a stack of T annular "step" tiers -- every tier is a filled annular
+sector, narrower than the tier below it, so the wedge's silhouette
+staircases inward as it rises outward from the centre, exactly like a
+ziggurat's setback profile viewed in plan around a circle. This is a
+genuinely different silhouette from every other radial engine in the
+pool: solid, tapering, notched STEPS, not thin arcs (`arcrings.html`),
+thin spoke lines (`geometric.html`), mirrored point-stamps
+(`kaleidoscope.html`), or nested star outlines (`starburst.html`). Wedge
+count and tier count are fixed once per video (function of `DENSITY`
+only, never re-randomised per cycle); the only thing that changes over
+time is a rigid rotation of the whole rosette, so total covered area
+never varies -- structurally whiteout-proof and coverage-stable by
+construction, the same pattern `quasicrystal.html`/`chladni.html`
+established as safe.
+
+**Two real bugs found only by rendering frames and running
+validateEngine() across seed batches, not by reasoning about the code**:
+
+1. **Tapering by ANGLE alone made the wedges widen outward instead of
+   narrowing.** First version shrank each tier's angular half-width
+   linearly by tier index. That looked, when actually rendered, like
+   flower petals fanning OUT rather than a ziggurat narrowing in --
+   because arc length is angle times radius, and radius grows across the
+   T tiers faster than a linear angular taper shrinks, so the physical
+   (on-screen) width of outer tiers was actually LARGER than inner ones
+   despite the angular span being smaller. Fixed by tapering the
+   PHYSICAL half-width directly (linearly shrinking to 35% of the base
+   width by the outermost tier) and converting back to an angular
+   half-width using that tier's own radius, so the on-screen taper is
+   genuine regardless of how far out a tier sits.
+2. **Exact N-fold rotational symmetry created a real (not approximate)
+   self-similarity risk for the fast-motion check.** All N wedges are
+   identical, so rotating the whole rosette by any exact multiple of the
+   sector angle (`2*PI/N`) produces a frame indistinguishable from the
+   unrotated one -- a stronger, EXACT version of the "local motif
+   recurrence" issue `quasicrystal.html` already documents for Penrose
+   tilings (which are only approximately self-similar). An
+   independent-of-N rotation rate (0.7-1.2 rad/s) failed 1 of 10 seeds
+   because for this pool's default `DENSITY` (giving N=10, sector angle
+   36 degrees) that range happened to straddle the exact 2-sector
+   resonance point (~0.838 rad/s) at validate.js's 1.5s fast-motion
+   sample window. Fixed by tying the rotation rate explicitly to N
+   instead of picking it independently: target 1.3-1.7 sectors of
+   rotation over the 1.5s window (centred on 1.5, maximally far from the
+   resonant 1x and 2x sector points), which by construction can never
+   land on an exact multiple of the sector angle regardless of which N a
+   given video happens to have.
+
+**Verified**: `validateEngine()` across seeds 1-30 (10 in the initial
+batch, 20 more afterward for extra confidence given the resonance bug was
+seed-dependent by nature) — **30/30 passed** after both fixes. Margins
+comfortable throughout: `projectedRise` -11.0 to +10.2 (vs. the 50
+threshold, and tight even by this pool's standards -- the coverage-stable
+rotate-only design leaves almost no swing at all), `avgSat` 61.7-73.7
+(vs. the 22 minimum), zero near-white pixels, `fastMotion` comfortably
+above its floor on every seed (13.6-24.9 vs. floors of 3.8-5.7),
+`projectedHourRenderMin` 2.8-7.1min (well inside the CI budget). Visual
+spot-checks across 25/50/75/95/105% of a cycle at 3 seeds confirmed bold,
+vivid, clearly-stepped tapering wedges with visible tier notches, a clean
+non-jarring rotation reset at the cycle boundary, and no artifacts from
+either fix.
+
+**Novelty gate**: measured against all 20 existing engines (the
+committed fingerprint cache was several commits behind -- missing
+`chladni.html`, `stripweave.html`, and a Gemini-promoted
+`auto-2026-08-27-...` 3D engine -- so all three were fingerprinted fresh
+alongside the candidate) using `fingerprintEngine`/`zscoreMatrix`/
+`distance` from `src/fingerprint.js`. Nearest neighbour is `spirograph`
+at distance **1.059** — comfortably clear of the 0.60 threshold. Notably,
+`arcrings` (the engine this design was originally most worried about
+resembling, given both are radial/segmented) came out at 1.215, confirming
+the solid tapering-staircase silhouette really does read as structurally
+distinct from arcrings' thin rotating arc segments, not just superficially
+different.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
