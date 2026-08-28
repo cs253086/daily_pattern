@@ -793,6 +793,70 @@ directional/flowing vs. lit-3D), not just engine count -- a bigger pool
 of engines that all share one composition doesn't actually fix perceived
 repetitiveness.
 
+### Gemini's theme-hint pool now grows from the daily research routine, instead of staying fixed
+
+User complaint 2026-08-28, correctly identifying a real gap: "that means a
+pattern is repeated over and over again. the theme hint should be found on
+web/somewhere else and it should be a new theme." Until this point,
+`THEME_HINTS_2D`/`THEME_HINTS_3D` in `src/generate.js` were small, fixed,
+hand-written lists (20 and 6 entries) that `nextThemeHint()` round-robins
+through -- correct rotation logic, but a fixed list of 20-26 items
+necessarily starts repeating verbatim after 20-26 uses no matter how good
+the round-robin is. This is the exact same underlying problem already
+fixed for the curated-engine pool (see "Archetype clustering" and the
+dimension-weighting sections above), just not yet applied to Gemini's
+creative-direction input.
+
+**Why the fix isn't "make `generate.js` call WebSearch itself"**:
+`generate.js` runs as a plain Node script inside the GitHub Actions job --
+a REST call to the Gemini API, not an agentic Claude session. It has no
+web-search capability at all and adding one would mean a new external
+search-API dependency, a new secret, and a new failure mode in the
+unattended daily pipeline, just to duplicate something that already
+exists elsewhere in this project.
+
+**Fix**: `growingThemeHints(dimension)` reads
+`state/creative-research-log.json` -- the same log the daily
+creative-research routine (see "Daily creative pattern research" routine
+docs / the Quasicrystal, Strip-weave, Chladni, etc. write-ups above)
+already writes to after searching something genuinely random on the web,
+extracting a structural idea from it, and passing the mandatory novelty
+gate. Only `outcome: "shipped"` entries are pulled in (a skipped entry
+failed verification or novelty, so it's not something worth handing to
+Gemini as inspiration); each entry's `idea` text is classified 2D vs 3D by
+content-sniffing its actual `engines/manual/<engineName>.html` for a WebGL
+context (the same `isWebGLEngine()` convention `curatedOr()` already uses
+in `src/index.js`), not by guessing from the text. The result is appended
+after the original hand-written list, so `nextThemeHint()`'s existing
+numeric-index cursor stays valid as the log grows -- append-only growth
+never reorders earlier entries, unlike `curatedPool()`'s alphabetically-
+sorted directory listing, so this doesn't need `curatedOr()`'s
+name-based-cursor workaround.
+
+This means every day the research routine successfully ships a new
+curated engine, Gemini's own theme-hint pool *also* grows by one entry
+automatically -- both halves of "avoid repeating patterns" (which
+discrete engine gets picked, and what creative direction Gemini is given)
+now grow from the same real, web-sourced, novelty-verified source instead
+of one of them staying a static list forever.
+
+`effectiveThemeP3D()`'s self-correcting cap (see the dimension-weighting
+section above) was updated to read the GROWN 3D list's length each call,
+not the original hardcoded 6, so the weighting keeps self-correcting as
+3D-classified ideas get added too.
+
+Verified: with the 5 real log entries present at the time of this fix
+(automaton, quasicrystal, stripweave, chladni, ziggurat -- all Canvas2D,
+none WebGL), `growingThemeHints('2D')` correctly grew from 20 to 25
+entries including all 5 real idea descriptions verbatim, and
+`growingThemeHints('3D')` correctly stayed at 6 (none of the 5 shipped
+engines use WebGL, confirmed by the same content-sniff the function
+itself uses). Ran `nextThemeHint()` 20 times against production state
+(temporarily exported, state file backed up and restored after, same
+verification pattern used throughout this project) and confirmed it
+correctly draws from across the grown list without erroring or skipping
+entries.
+
 ### Standing requirement: every video should look new, not just non-repeating
 
 User-stated durable rule (not a one-off fix): each day's video should read

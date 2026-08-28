@@ -63,6 +63,57 @@ const THEME_HINTS_3D = [
   'lit 3D crystalline cluster of faceted gems refracting a slowly rotating light',
 ];
 
+// Growing theme pool (2026-08-28). THEME_HINTS_2D/3D above are a small,
+// fixed, hand-written seed list -- 20 and 6 entries respectively -- which
+// necessarily starts repeating after 20-26 uses regardless of how good the
+// round-robin is. Real user complaint: "the theme hint should be found on
+// web/somewhere else... a new theme," correctly pointing out that cycling a
+// fixed list is not meaningfully different from the exact "same pattern
+// over and over" problem already fixed on the curated-engine-pool side.
+//
+// Fix: grow the candidate list from state/creative-research-log.json --
+// the SAME log the daily creative-research routine already writes to after
+// searching something genuinely random on the web, extracting a structural
+// idea from it, and novelty-gating the result (see CLAUDE.md's
+// "Quasicrystal" and "Strip-weave" sections). Reusing those already-proven,
+// already-web-sourced idea descriptions as Gemini theme hints was the
+// obvious next step: it grows this pool at the same rate the curated pool
+// grows, with zero new infrastructure, and -- critically -- it can't be
+// done by having *this* file call WebSearch itself, because generate.js
+// runs as a plain Node script inside the GitHub Actions job (a REST call to
+// the Gemini API), not an agentic Claude session; only the separate
+// research routine actually has web-search access.
+//
+// Only SHIPPED entries are pulled in (not skipped/abandoned ones) --
+// skipped means the idea failed verification or the novelty gate, and
+// feeding Gemini a known-bad or known-duplicate idea would be pointless at
+// best. Each entry is classified 2D vs 3D by content-sniffing its actual
+// engine file for a WebGL context (same isWebGLEngine() convention as
+// curatedOr() in src/index.js), not by guessing from the idea text.
+//
+// Growth is append-only and read fresh on every call, so a numeric cursor
+// into this list stays valid as the log grows (new entries only ever
+// extend the tail) -- no need for curatedOr()'s name-based-cursor
+// workaround, since nothing here ever reorders.
+const RESEARCH_LOG_PATH = path.join(repoRoot, 'state', 'creative-research-log.json');
+function growingThemeHints(dimension) {
+  const base = dimension === '3D' ? THEME_HINTS_3D : THEME_HINTS_2D;
+  const extra = [];
+  try {
+    const log = JSON.parse(readFileSync(RESEARCH_LOG_PATH, 'utf8'));
+    for (const entry of log) {
+      if (entry.outcome !== 'shipped' || !entry.idea || !entry.engineName) continue;
+      let is3D = false;
+      try {
+        const html = readFileSync(path.join(repoRoot, 'engines', 'manual', `${entry.engineName}.html`), 'utf8');
+        is3D = /getContext\(\s*['"]webgl2?['"]/.test(html);
+      } catch { continue; } // engine file gone/renamed -- skip rather than guess
+      if ((dimension === '3D') === is3D) extra.push(entry.idea);
+    }
+  } catch { /* no log yet (fresh checkout, or routine hasn't shipped anything) -- base list alone is fine */ }
+  return [...base, ...extra];
+}
+
 function hashStr(s) {
   let h = 2166136261 >>> 0;
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
@@ -137,9 +188,11 @@ function writeThemeIndices(next) {
 // curatedOr()).
 function nextThemeHint(date, seed) {
   const { next2D, next3D } = readThemeIndices();
-  const p3D = effectiveThemeP3D(THEME_HINTS_3D.length);
+  const hints3D = growingThemeHints('3D');
+  const hints2D = growingThemeHints('2D');
+  const p3D = effectiveThemeP3D(hints3D.length);
   const want3D = (hashStr(`${seed ?? date}:theme-dim`) % 100) < p3D * 100;
-  const list = want3D ? THEME_HINTS_3D : THEME_HINTS_2D;
+  const list = want3D ? hints3D : hints2D;
   let idx = want3D ? next3D : next2D;
   if (idx === null || idx >= list.length) {
     idx = hashStr(String(date)) % list.length;
