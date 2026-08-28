@@ -942,6 +942,106 @@ from the repo. Could not exercise the Gemini path live in this sandbox (no
 related change in this project) — the real theme text will only be
 visible in a production job log the next time Gemini actually runs.
 
+### Multi-source daily image (`src/imageSources.js`) — 2026-08-29
+
+User request, same day as the image-theme redesign above: "can you search
+some websites that have tons of beautiful different images that can be
+excellent themes of the patterns?" — NASA APOD alone is one photo a day,
+always space imagery; more/different source breadth means more/different
+day-to-day inspiration. Investigated five candidates before building
+anything (same discipline as the Freesound/Pixabay-music decision:
+provider choice verified against real docs via WebSearch, not assumed),
+scored against this project's own established safety bar for an
+unattended, no-human-review pipeline — CC0 / zero-attribution-required
+licensing preferred, same reasoning that picked CC0-only for music over
+CC-BY:
+
+- **Pixabay** — CC0 Content License, no attribution required. Verified
+  response shape (`hits[].tags`/`webformatURL`/`largeImageURL`/`user`)
+  against a real documented example.
+- **The Met Open Access** — CC0 for `isPublicDomain` objects, no API key
+  at all. Field names are long-stable and extremely widely documented, but
+  a byte-exact live example could not be fetched in this sandbox
+  (`metmuseum.github.io` is blocked here, same policy as every other
+  external host in this project) — implemented defensively (see below).
+- **Smithsonian Open Access** — CC0, but this session's own research
+  surfaced a real, unresolved doubt: one secondary source claimed the
+  search API's default response doesn't reliably include a usable image
+  URL. Rather than skip it or guess blindly, implemented the same way
+  every other unverified integration in this project is (Freesound, NASA):
+  try several plausible response paths, fail closed to `null`
+  (non-fatal) if none pan out, log a breadcrumb so a wrong guess is
+  diagnosable from a real job log instead of a silent no-op forever.
+- **Pexels** — similarly permissive, not implemented this round (user
+  chose "rotate across all CC0 sources" when offered NASA+Pixabay,
+  NASA+Pixabay+Met, or NASA+Pixabay+Met+Smithsonian as options; Pexels
+  wasn't among the offered choices). Worth considering if more breadth is
+  wanted later.
+- **Unsplash** — ranked out: its API Terms *mandate* crediting the
+  photographer and Unsplash on every use, unlike the other four. That's
+  exactly the "easy to get subtly wrong at scale, in a pipeline nobody
+  reviews" risk this project already rejected once for music (CC-BY
+  → CC0-only). Doable (the credit-line mechanism already exists for the
+  NASA image and music track), just a real compliance obligation the
+  other four sources don't carry, so it lost out given a choice was on
+  the table.
+
+**Design**: all four providers (NASA APOD + the three new ones) return the
+identical raw shape — `{imageUrl, title, explanation, source}` — and are
+run through the exact same pixel-extraction pipeline
+(`extractImageData()`, exported from `src/palette.js` for reuse) to
+produce the exact same final shape `dailyImagePalette()` already produced
+on its own. Nothing downstream (`imageThemeHint()` in `generate.js`, the
+curated-engine recolor logic in `index.js`, the credit line in
+`metadata.js`, which already read `imageCredit.source`/`.title`
+generically) needed to change to support the new sources — they were
+already provider-agnostic by construction.
+
+**Rotation**: which provider is tried first each day is a persisted
+round-robin (`state/image-source-rotation.json`), the exact same
+convention as `state/engine-rotation.json` — guarantees no source repeats
+until all four have had a turn, instead of a date-hash pick that can
+coincidentally cluster (the same bug class fixed for curated engines and,
+until today, Gemini's theme list). If the chosen provider fails — missing
+API key, network error, no usable image in its response — the other three
+are tried in rotation order before giving up for the day, so one
+unconfigured or down source can't silently zero out image-derived
+inspiration on its scheduled days; the persisted cursor still advances to
+the ORIGINALLY chosen provider regardless of which one ultimately
+succeeded, so tomorrow's fairness isn't affected by today's fallback.
+Each provider also rotates through its own pool of SEARCH QUERY TERMS
+(`PIXABAY_QUERIES`/`MET_QUERIES`/`SMITHSONIAN_QUERIES`) — these are NOT a
+repeat of the just-removed theme-hint-list mistake: they only steer which
+corner of a huge catalogue gets queried each day, not the creative content
+itself (the actual image, and everything derived from it, is still
+genuinely different every day), the same reasoning already established
+for Freesound's music query pool.
+
+**New secrets** (both optional/non-fatal, same contract as every other
+API key in this project): `PIXABAY_API_KEY` (free, register at
+pixabay.com), `SMITHSONIAN_API_KEY` (free, register at api.data.gov). The
+Met needs no key. Wired into `.github/workflows/daily.yml` next to
+`NASA_API_KEY`. Without a given key, that source just gets skipped on its
+turn in the rotation — never a hard failure.
+
+**Verified**: `node src/imageSources.js` (this sandbox has no working
+route to `pixabay.com`/`collectionapi.metmuseum.org`/`api.si.edu`/
+`api.nasa.gov`, all blocked by the same egress policy as every other
+external host used in this project) correctly logged each source being
+skipped/failing in turn and returned `null` cleanly rather than throwing.
+Ran `dailyImage()` directly across 8 synthetic consecutive dates and
+confirmed a clean repeating 4-cycle round-robin
+(`apod → pixabay → met → smithsonian → apod → …`) with no immediate
+repeats. Ran a full local dry-run (`DRY_RUN=1 DURATION=8 node
+src/index.js`) end to end and confirmed the whole pipeline still degrades
+gracefully to the curated fallback exactly as before. Could not exercise
+any of the three new providers against their real APIs in this sandbox —
+the same standing limitation as NASA/Freesound/YouTube — so Pixabay's and
+the Met's exact behavior (and in particular whether the Smithsonian
+provider's guessed response-field paths are actually correct) can only be
+confirmed from a real production job log the next time this runs with the
+new keys configured.
+
 ### Standing requirement: every video should look new, not just non-repeating
 
 User-stated durable rule (not a one-off fix): each day's video should read

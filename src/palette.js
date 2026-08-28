@@ -20,8 +20,10 @@ import puppeteer from 'puppeteer';
 function todayUTC() { return new Date().toISOString().slice(0, 10); }
 
 // fetch with a hard timeout so an unattended cron can't hang on a slow/dead
-// image host. Aborts and rejects after `ms`.
-async function fetchWithTimeout(url, { ms = 10000, ...opts } = {}) {
+// image host. Aborts and rejects after `ms`. Exported so src/imageSources.js
+// (Pixabay/Met/Smithsonian) reuses the same safety net instead of a second
+// copy.
+export async function fetchWithTimeout(url, { ms = 10000, ...opts } = {}) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), ms);
   try {
@@ -54,7 +56,7 @@ async function toDataUrl(src) {
 // is what lets generate.js's imageThemeHint() derive a genuinely different
 // creative theme every day straight from real web content, instead of
 // round-robining a fixed hand-written list -- see generate.js for why.
-async function fetchApod({ date, apiKey }) {
+export async function fetchApod({ date, apiKey }) {
   const key = apiKey || 'DEMO_KEY';
   const url = `https://api.nasa.gov/planetary/apod?api_key=${encodeURIComponent(key)}&date=${date}`;
   let res;
@@ -170,7 +172,11 @@ async function extractPalette(imageOrUrl, { count = 5, size = 96 } = {}) {
 // network fetch/decode for what would otherwise be two near-identical
 // passes over the same image. Pass gridW/gridH = 0 to skip structure
 // extraction (palette only).
-async function extractImageData(imageOrUrl, {
+// Exported so src/imageSources.js's other providers (Pixabay/Met/
+// Smithsonian) reuse this exact extraction path instead of a second copy --
+// every provider ends up with the identical {colors, structure, gridW,
+// gridH} shape regardless of where the source image came from.
+export async function extractImageData(imageOrUrl, {
   paletteCount = 5, paletteSize = 96, gridW = 8, gridH = 5,
 } = {}) {
   let dataUrl;

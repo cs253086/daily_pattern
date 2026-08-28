@@ -67,10 +67,19 @@ jobs:
           YT_PRIVACY: ${{ secrets.YT_PRIVACY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
-          # Optional: NASA API key for the "image of the day" palette (curated
-          # engines get recoloured from that day's Astronomy Picture of the Day).
-          # Blank falls back to DEMO_KEY. Set IMAGE_PALETTE=0 to disable entirely.
+          # Optional: "image of the day" (src/imageSources.js) drives BOTH
+          # Gemini's daily creative theme and curated-engine recolouring.
+          # Rotates across four CC0/no-attribution-required sources so it's
+          # not just space imagery -- NASA APOD (falls back to DEMO_KEY if
+          # NASA_API_KEY is blank), Pixabay, The Met Open Access (keyless),
+          # and Smithsonian Open Access. Each source is independently
+          # optional and non-fatal: a missing key just means that source is
+          # skipped on its turn in the rotation (the others still get used
+          # on their own days). Set IMAGE_PALETTE=0 to disable the whole
+          # feature.
           NASA_API_KEY: ${{ secrets.NASA_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          SMITHSONIAN_API_KEY: ${{ secrets.SMITHSONIAN_API_KEY }}
           IMAGE_PALETTE: ${{ vars.IMAGE_PALETTE }}
           # Background music: a real license-free track fetched from
           # Freesound.org (src/stockMusic.js), restricted to CC0-licensed
@@ -91,30 +100,35 @@ jobs:
           DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '' }}
         run: node src/index.js
 
-      # curatedOr() (src/index.js) writes state/engine-rotation.json whenever
-      # it makes a pick, so the curated-engine pool round-robins (no repeats
+      # curatedOr() (src/index.js) writes state/engine-rotation.json, and
+      # dailyImage() (src/imageSources.js) writes
+      # state/image-source-rotation.json, whenever each makes a pick, so
+      # both the curated-engine pool and the daily image-source choice
+      # (NASA APOD / Pixabay / Met / Smithsonian) round-robin (no repeats
       # until the whole pool has cycled) instead of relying on a date-hash
       # pick that can coincidentally repeat or cluster similar choices on
-      # nearby dates. Gemini's theme no longer uses any rotation state at all
-      # (2026-08-29): it's derived fresh each day from that day's real NASA
-      # photo (imageThemeHint() in src/generate.js), which is different
-      # content every day by construction, so there's no list to persist a
-      # cursor into. Separately, promoteToCuratedPool()
-      # (src/index.js) copies today's approved Gemini engine into
-      # engines/manual/ so the curated pool itself grows over time. Persist
-      # both back to the repo so the next run sees them. Runs even if the
-      # render/upload step failed, since the rotation decisions and any
-      # promotion happen before render -- an unrelated later failure (e.g.
-      # an upload error) doesn't reflect on an engine that already passed
-      # the same quality gate used for today's actual video. [skip ci]
-      # avoids re-triggering any push-based workflow.
+      # nearby dates. Gemini's theme itself no longer uses any separate
+      # rotation state (2026-08-29): it's derived fresh each day from
+      # whichever image the rotation above picked (imageThemeHint() in
+      # src/generate.js), which is different content every day by
+      # construction, so there's no list to persist a cursor into.
+      # Separately, promoteToCuratedPool() (src/index.js) copies today's
+      # approved Gemini engine into engines/manual/ so the curated pool
+      # itself grows over time. `git add state/` (not individual filenames)
+      # picks up all of these -- and any future state file under state/ --
+      # automatically. Persist back to the repo so the next run sees them.
+      # Runs even if the render/upload step failed, since the rotation
+      # decisions and any promotion happen before render -- an unrelated
+      # later failure (e.g. an upload error) doesn't reflect on an engine
+      # that already passed the same quality gate used for today's actual
+      # video. [skip ci] avoids re-triggering any push-based workflow.
       #
       # Skipped on dry_run (2026-08-28 fix): a manual dry_run=true dispatch
       # is explicitly a throwaway test, but curatedOr()'s round-robin cursor
-      # is advanced as a side effect of just CHOOSING an engine, regardless
-      # of dry_run -- so without this guard,
-      # every test dispatch was silently consuming a real "don't repeat
-      # until the bucket cycles" slot from production rotation state.
+      # (and now dailyImage()'s) is advanced as a side effect of just
+      # CHOOSING an engine/image, regardless of dry_run -- so without this
+      # guard, every test dispatch was silently consuming a real "don't
+      # repeat until the bucket cycles" slot from production rotation state.
       # Confirmed happening for real: a dry_run test run committed
       # state/engine-rotation.json, moving the live 3D-bucket cursor to
       # solids3d, which then genuinely was that bucket's next real pick.

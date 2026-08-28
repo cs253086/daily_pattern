@@ -22,7 +22,8 @@ import { buildMetadata } from './metadata.js';
 import { uploadAll } from './upload.js';
 import { generateEngine } from './generate.js';
 import { validateEngine } from './validate.js';
-import { dailyImagePalette, encodeColors, encodeStructure } from './palette.js';
+import { encodeColors, encodeStructure } from './palette.js';
+import { dailyImage } from './imageSources.js';
 import { fingerprintEngine, zscoreMatrix, distance } from './fingerprint.js';
 import { dailyStockTrack } from './stockMusic.js';
 
@@ -395,21 +396,24 @@ async function main() {
 
   console.log(`[index] === daily run ${new Date().toISOString()} ===`);
 
-  // Fetch today's NASA APOD image ONCE, up front -- it now drives BOTH
-  // Gemini's creative theme (imageThemeHint() in generate.js, replacing the
-  // old round-robin theme-hint list -- see CLAUDE.md/generate.js for why)
-  // and curated-engine recoloring below, instead of being fetched twice for
-  // two separate purposes. Non-fatal: imageInfo stays null on any failure
-  // and both consumers degrade gracefully (Gemini falls back to a generic
-  // "invent your own" instruction; curated engines keep their built-in
-  // palette).
+  // Fetch today's image ONCE, up front, from whichever source the daily
+  // rotation picks (NASA APOD / Pixabay / The Met / Smithsonian -- see
+  // src/imageSources.js) -- it now drives BOTH Gemini's creative theme
+  // (imageThemeHint() in generate.js, replacing the old round-robin
+  // theme-hint list -- see CLAUDE.md/generate.js for why) and curated-
+  // engine recoloring below, instead of being fetched twice for two
+  // separate purposes. Non-fatal: imageInfo stays null on any/every
+  // source's failure and both consumers degrade gracefully (Gemini falls
+  // back to a generic "invent your own" instruction; curated engines keep
+  // their built-in palette).
   const wantImage = process.env.IMAGE_PALETTE !== '0' && cli['no-image'] !== true;
   let imageInfo = null;
   if (wantImage) {
     try {
       const dateStr = new Date().toISOString().slice(0, 10);
-      imageInfo = await dailyImagePalette({ date: dateStr });
-      if (!imageInfo) console.log('[index] no image available today (APOD not an image, or fetch failed).');
+      const seedForImage = cli.seed ?? (process.env.SEED || defaultSeedStr());
+      imageInfo = await dailyImage({ date: dateStr, seed: seedForImage });
+      if (!imageInfo) console.log('[index] no image available today (every source failed or is unconfigured).');
     } catch (e) {
       console.warn(`[index] image fetch skipped: ${e.message}`);
     }
