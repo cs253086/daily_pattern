@@ -7,201 +7,94 @@
 //   env: GEMINI_API_KEY (required), GEMINI_MODEL (default gemini-2.0-flash)
 
 import { mkdir, writeFile } from 'node:fs/promises';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeImageMood } from './palette.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 
-// Aesthetic nudges so each day leans toward a different look. Picked
-// deterministically from the date so a given day is reproducible. The channel
-// aims for a GEOMETRIC aesthetic — crisp shapes, straight edges, symmetry,
-// lattices, tessellations — so the list is geometry-forward (a few organic
-// options remain for variety).
-// Split into a 2D bucket and a genuine-3D bucket (real WebGL, lit solid
-// geometry with a depth buffer -- see the "3D / WEBGL" prompt section
-// below) rather than one flat list, so theme selection can be weighted
-// toward 3D (see nextThemeHint below) the same way src/index.js's
-// curatedOr() weights the curated-engine fallback pool -- user request
-// 2026-08-19, "generate more 3d patterns than 2d patterns". Note
-// "rotating 3D wireframe polytope" stays in the 2D bucket even though it
-// says "3D" in its text: it's a flat projection of edges onto a Canvas2D
-// canvas (like wireframe.html), not real per-pixel lit depth, so it
-// doesn't get the same weighting boost as the genuinely-3D WebGL hints.
-const THEME_HINTS_2D = [
-  // Geometric core (crisp edges, defined shapes, symmetry)
-  'concentric rotating regular polygons nesting into a hypnotic vortex',
-  'recursive geometric tessellation of triangles and hexagons slowly rotating',
-  'sacred-geometry lattice: overlapping circles and polygons (flower-of-life style)',
-  'wireframe geometric tunnel flythrough with crisp glowing edges',
-  'rotating 3D wireframe polytope with luminous edges (Stars/Polyhedra style)',
-  'op-art grid of squares that rotate and scale in waves',
-  'isometric cube lattice shifting and rippling',
-  'Truchet tiles forming maze-like geometric paths',
-  'nested rotating star polygons (pentagrams / octagrams) with neon edges',
-  'radial mandala built from straight-line geometry and mirrored wedges',
-  'concentric polygon rings pulsing with phase offsets',
-  'Penrose-style aperiodic tiling slowly recolouring',
-  'spirograph / hypotrocloid line-art in clean glowing strokes',
-  'grid of rotating triangles forming moiré interference',
-  'geometric kaleidoscope of mirrored straight-edged shards',
-  'orbiting polygons tracing crisp geometric spirograph paths',
-  // A few organic options for variety
-  'blooming fractal petals opening and closing',
-  'flowing plasma fields with soft additive glow',
-  'metaballs gently merging and splitting',
-  'flow field where thousands of fine lines follow noise currents',
-];
-// Genuine 3D (lit solid geometry with real depth, not a flat projection).
-const THEME_HINTS_3D = [
-  'lit 3D polyhedra orbiting each other with real depth and per-face shading',
-  'extruded 3D isometric lattice of glowing faceted blocks',
-  'rotating 3D lit torus-and-ring structures with directional lighting',
-  'field of small lit 3D solids drifting through real perspective depth',
-  'a dense grid/lattice of small lit 3D cubes at fixed positions, each spinning independently, camera slowly turning like a turntable',
-  'lit 3D crystalline cluster of faceted gems refracting a slowly rotating light',
-];
-
-// Growing theme pool (2026-08-28). THEME_HINTS_2D/3D above are a small,
-// fixed, hand-written seed list -- 20 and 6 entries respectively -- which
-// necessarily starts repeating after 20-26 uses regardless of how good the
-// round-robin is. Real user complaint: "the theme hint should be found on
-// web/somewhere else... a new theme," correctly pointing out that cycling a
-// fixed list is not meaningfully different from the exact "same pattern
-// over and over" problem already fixed on the curated-engine-pool side.
+// Theme sourcing (2026-08-29 redesign). Previously this file picked a theme
+// by round-robining a fixed, hand-written list of ~20-26 English phrases
+// (THEME_HINTS_2D/3D). User complaint, verbatim: "I really don't like round
+// robin them list. WE SHOULD NOT HAVE them list at all. A theme should be
+// somehow picked from images from web or somewhere else." Correct call: a
+// round-robin over ANY fixed list -- however large, however often it grows
+// -- necessarily starts repeating verbatim once the list is exhausted, and
+// "grows daily from research" (the previous fix) only pushed that ceiling
+// out, it didn't remove it.
 //
-// Fix: grow the candidate list from state/creative-research-log.json --
-// the SAME log the daily creative-research routine already writes to after
-// searching something genuinely random on the web, extracting a structural
-// idea from it, and novelty-gating the result (see CLAUDE.md's
-// "Quasicrystal" and "Strip-weave" sections). Reusing those already-proven,
-// already-web-sourced idea descriptions as Gemini theme hints was the
-// obvious next step: it grows this pool at the same rate the curated pool
-// grows, with zero new infrastructure, and -- critically -- it can't be
-// done by having *this* file call WebSearch itself, because generate.js
-// runs as a plain Node script inside the GitHub Actions job (a REST call to
-// the Gemini API), not an agentic Claude session; only the separate
-// research routine actually has web-search access.
+// Fix: derive the theme from that day's actual real photograph instead of
+// any hand-written catalogue -- reusing the NASA Astronomy Picture of the
+// Day integration this project already has (src/palette.js), which is
+// fetched once per day, is legally safe (public domain, credited), and is
+// already deterministic per date. imageInfo (title + explanation + the
+// already-extracted colour palette + luminance grid) is fetched ONCE in
+// src/index.js's main(), before chooseEngine() runs, and threaded through
+// to generateEngine() here -- see imageThemeHint() below. Because the
+// photo is genuinely different content every single day (not a fixed
+// pool), there is no ceiling to run into, and no list to maintain, grow,
+// or rotate at all.
 //
-// Only SHIPPED entries are pulled in (not skipped/abandoned ones) --
-// skipped means the idea failed verification or the novelty gate, and
-// feeding Gemini a known-bad or known-duplicate idea would be pointless at
-// best. Each entry is classified 2D vs 3D by content-sniffing its actual
-// engine file for a WebGL context (same isWebGLEngine() convention as
-// curatedOr() in src/index.js), not by guessing from the idea text.
-//
-// Growth is append-only and read fresh on every call, so a numeric cursor
-// into this list stays valid as the log grows (new entries only ever
-// extend the tail) -- no need for curatedOr()'s name-based-cursor
-// workaround, since nothing here ever reorders.
-const RESEARCH_LOG_PATH = path.join(repoRoot, 'state', 'creative-research-log.json');
-function growingThemeHints(dimension) {
-  const base = dimension === '3D' ? THEME_HINTS_3D : THEME_HINTS_2D;
-  const extra = [];
-  try {
-    const log = JSON.parse(readFileSync(RESEARCH_LOG_PATH, 'utf8'));
-    for (const entry of log) {
-      if (entry.outcome !== 'shipped' || !entry.idea || !entry.engineName) continue;
-      let is3D = false;
-      try {
-        const html = readFileSync(path.join(repoRoot, 'engines', 'manual', `${entry.engineName}.html`), 'utf8');
-        is3D = /getContext\(\s*['"]webgl2?['"]/.test(html);
-      } catch { continue; } // engine file gone/renamed -- skip rather than guess
-      if ((dimension === '3D') === is3D) extra.push(entry.idea);
-    }
-  } catch { /* no log yet (fresh checkout, or routine hasn't shipped anything) -- base list alone is fine */ }
-  return [...base, ...extra];
-}
-
+// Why not have this file call WebSearch itself instead: generate.js runs
+// as a plain Node script inside the GitHub Actions job (a REST call to the
+// Gemini API), not an agentic Claude session -- it has no web-search
+// capability, and adding one would mean a new external search API, a new
+// secret, and a new failure mode just to duplicate what the NASA
+// integration already does reliably.
 function hashStr(s) {
   let h = 2166136261 >>> 0;
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
   return h >>> 0;
 }
 
-// Persisted rotation cursors for THEME_HINTS_2D / THEME_HINTS_3D, mirroring
-// curatedOr()'s fix in src/index.js for the exact same bug class: a
-// date-hash pick (hashStr(date) % list.length) can coincidentally repeat or
-// cluster similar themes on nearby dates, and doesn't know or care what
-// theme was used yesterday. A real complaint: consecutive days picked
-// "concentric rotating regular polygons... vortex" and "recursive geometric
-// tessellation of triangles and hexagons... rotating" -- different hints,
-// but conceptually close, and with no memory of recent history there's
-// nothing steering it toward the *unused* parts of the list first. A true
-// round-robin guarantees every hint is used once before any repeats,
-// maximising day-to-day variety the same way the curated-engine fix does.
+// Compose today's creative-direction text from the already-fetched NASA
+// image (or a generic invent-your-own fallback when no image was
+// available -- API down, non-image APOD, IMAGE_PALETTE=0, etc). Pure
+// function of imageInfo: no state, no rotation, so a repair call naturally
+// gets the identical theme back just by being given the same imageInfo,
+// with no special reuse plumbing needed (there is no cursor left to
+// accidentally advance twice).
 //
-// Two independent cursors (one per bucket), 2026-08-19: same dimension-
-// weighting change as curatedOr(), so a Gemini success is also more likely
-// to land on a 3D theme than a 2D one, not just the curated fallback path.
-//
-// DESIRED_THEME_P_3D is a target capped by bucket size, mirroring
-// curatedOr()'s effectiveP3D() fix (2026-08-22) -- see CLAUDE.md for the
-// real incident that made this necessary on the curated-engine side. Not
-// currently binding here (THEME_HINTS_3D has 6 entries; 0.20*6=1.2 > 0.65),
-// but applying the same self-correcting formula prevents this class of bug
-// here too if the 3D theme list is ever pared down.
-const THEME_STATE_PATH = path.join(repoRoot, 'state', 'theme-rotation.json');
-const DESIRED_THEME_P_3D = 0.65;
-const MAX_SINGLE_THEME_FREQ = 0.20;
-function effectiveThemeP3D(n3D) {
-  return Math.min(DESIRED_THEME_P_3D, MAX_SINGLE_THEME_FREQ * n3D);
-}
-
-function readThemeIndices() {
-  try {
-    const data = JSON.parse(readFileSync(THEME_STATE_PATH, 'utf8'));
-    // Old schema (single flat `nextIndex` against the pre-split list): no
-    // clean way to map a flat index onto the new two-list split, so just
-    // bootstrap both cursors fresh from the date-hash below, same
-    // graceful-degradation pattern used for missing/corrupt state
-    // elsewhere in this project.
-    if (Number.isInteger(data.next2D) || Number.isInteger(data.next3D)) {
-      return {
-        next2D: Number.isInteger(data.next2D) ? data.next2D : null,
-        next3D: Number.isInteger(data.next3D) ? data.next3D : null,
-      };
-    }
-  } catch { /* missing or corrupt state file -- caller bootstraps instead */ }
-  return { next2D: null, next3D: null };
-}
-
-function writeThemeIndices(next) {
-  try {
-    mkdirSync(path.dirname(THEME_STATE_PATH), { recursive: true });
-    writeFileSync(
-      THEME_STATE_PATH,
-      `${JSON.stringify({ ...next, updatedAt: new Date().toISOString() }, null, 2)}\n`,
-    );
-  } catch (e) {
-    console.warn(`[generate] could not persist theme rotation state: ${e.message}`);
+// Returns { label, text }: `label` is a short human-readable tag (the
+// image's own title, e.g. "The Sky Turns Above Paranal") used for logging
+// and the promoted-engine filename slug; `text` is the longer sentence
+// actually spliced into the Gemini prompt. Explicitly instructs an
+// ABSTRACT interpretation (color family / mood / light-dark composition),
+// not a literal depiction -- this is an ambient geometric screensaver, not
+// astrophotography, and the house style already forbids recognisable
+// objects/text on canvas.
+export function imageThemeHint(imageInfo) {
+  if (!imageInfo || !imageInfo.title) {
+    return {
+      label: 'no-photo-inspiration',
+      text: 'No photographic inspiration was available today (the image fetch failed, was unavailable, or is disabled). Invent an original abstract geometric concept from your own knowledge of mathematics, nature, or architecture -- avoid defaulting to a generic mandala or grid; make a genuinely distinct structural choice.',
+    };
   }
+  const { title, explanation, colors, structure } = imageInfo;
+  const mood = describeImageMood(colors, structure);
+  const snippet = (explanation || '').replace(/\s+/g, ' ').trim().slice(0, 220);
+  const truncated = explanation && explanation.length > 220 ? '…' : '';
+  return {
+    label: title,
+    text: `Draw abstract inspiration from today's real photograph, NASA's Astronomy Picture of the Day, titled "${title}"${snippet ? `: ${snippet}${truncated}` : '.'} Visually the photo reads as ${mood.colorFamily} tones, ${mood.brightness}, with ${mood.contrast}. Do NOT depict the photo literally (no recognisable stars-as-dots, planets, nebula shapes, or text) -- instead translate its colour family, mood, and light/dark composition into an ORIGINAL abstract geometric pattern built from shapes, symmetry, tiling, or lit 3D structure.`,
+  };
 }
 
-// Pick the next theme in round-robin order and advance the persisted
-// cursor for whichever bucket (2D/3D) this pick came from. Which bucket is
-// chosen from is a deterministic 65/35-weighted pick from seed+date (not
-// true randomness -- keeps this project's "same seed -> same everything"
-// reproducibility convention). Bootstraps from the date-hash if a bucket's
-// cursor is missing/corrupt (fresh checkout safety net, same pattern as
-// curatedOr()).
-function nextThemeHint(date, seed) {
-  const { next2D, next3D } = readThemeIndices();
-  const hints3D = growingThemeHints('3D');
-  const hints2D = growingThemeHints('2D');
-  const p3D = effectiveThemeP3D(hints3D.length);
-  const want3D = (hashStr(`${seed ?? date}:theme-dim`) % 100) < p3D * 100;
-  const list = want3D ? hints3D : hints2D;
-  let idx = want3D ? next3D : next2D;
-  if (idx === null || idx >= list.length) {
-    idx = hashStr(String(date)) % list.length;
-  }
-  writeThemeIndices({
-    next2D: want3D ? next2D : (idx + 1) % list.length,
-    next3D: want3D ? (idx + 1) % list.length : next3D,
-  });
-  return list[idx];
+// Whether today's engine should be genuine lit 3D WebGL vs Canvas2D. This
+// used to be implicit in which theme-hint bucket got picked (see the
+// removed THEME_HINTS_3D list); now that theme content comes from a photo
+// and carries no inherent dimension, the "more 3D than 2D" requirement
+// (user request 2026-08-19) is instead a small, purely mechanical,
+// content-independent decision -- a seed-hashed weighted coin flip, same
+// determinism convention as everywhere else in this project. No bucket-
+// size self-correction cap is needed here (unlike curatedOr()'s
+// effectiveP3D()): that cap existed because a small FILE pool could get
+// over-concentrated on one engine; Gemini can invent a fresh 3D engine
+// every time, so there's no small pool to over-concentrate on.
+const DESIRED_P_3D = 0.65;
+function wantWebGL3D(seed) {
+  return (hashStr(`${seed}:dim`) % 100) < DESIRED_P_3D * 100;
 }
 
 function todayUTC() {
@@ -210,8 +103,8 @@ function todayUTC() {
 
 // Wrap the base prompt with the previous (failed) attempt and the validator's
 // reasons so Gemini can produce a corrected file in one more shot.
-export function buildRepairPrompt({ seed, date, themeHint, previousHtml, reasons }) {
-  const base = buildPrompt({ seed, date, themeHint });
+export function buildRepairPrompt({ seed, date, themeHint, wantWebGL, previousHtml, reasons }) {
+  const base = buildPrompt({ seed, date, themeHint, wantWebGL });
   const trimmed = previousHtml.length > 18000
     ? previousHtml.slice(0, 9000) + '\n\n<!-- ...truncated... -->\n\n' + previousHtml.slice(-6000)
     : previousHtml;
@@ -228,7 +121,7 @@ ${trimmed}
 --- PREVIOUS ATTEMPT END ---`;
 }
 
-export function buildPrompt({ seed, date, themeHint }) {
+export function buildPrompt({ seed, date, themeHint, wantWebGL }) {
   return `You are generating ONE self-contained HTML file: a generative-art "screensaver" engine.
 It will be rendered HEADLESSLY, frame by frame, into a long ambient video. There is no human watching it run live.
 
@@ -268,8 +161,8 @@ Output ONLY the raw HTML document. Start with <!DOCTYPE html>. No markdown, no c
 - If you use particles, cap at a few thousand TOTAL and update/draw them in a single pass with simple math (sin/cos, vector add). NOT a flock with O(n^2) interactions per frame.
 - WebGL is allowed if it's faster, but software rendering means most simple Canvas2D approaches will be faster than overengineered WebGL.
 
-=== 3D / WEBGL (OPTIONAL, encouraged sometimes for variety) ===
-Raw WebGL for genuine lit 3D geometry is fully supported by this renderer and is a good choice for some fraction of days: real per-pixel lighting and a depth buffer read as a meaningfully different, more three-dimensional look than a flat Canvas2D scene, which is valuable for day-to-day variety. You must write raw WebGL yourself (creating your own shaders, program, buffers, and a small hand-written 4x4 matrix helper) since no external 3D library can be loaded -- no network access is allowed, so nothing like three.js is available. If today's theme suggests real 3D structure (solids, lattices, depth, orbiting shapes), prefer WebGL; otherwise Canvas2D is fine as usual.
+=== 3D / WEBGL ===
+${wantWebGL ? `FOR TODAY SPECIFICALLY, YOU MUST BUILD A GENUINE LIT 3D WEBGL ENGINE, not a flat Canvas2D scene. Raw WebGL for genuine lit 3D geometry is fully supported by this renderer: real per-pixel lighting and a depth buffer read as a meaningfully different, more three-dimensional look than Canvas2D, which is required today for day-to-day variety. You must write raw WebGL yourself (creating your own shaders, program, buffers, and a small hand-written 4x4 matrix helper) since no external 3D library can be loaded -- no network access is allowed, so nothing like three.js is available.` : 'FOR TODAY SPECIFICALLY, use Canvas2D (not WebGL) -- see the creative direction below for what to build instead.'}
 If you do use WebGL, three renderer-specific requirements are CRITICAL:
 1. Create the context requesting preserveDrawingBuffer as true. Without this the headless capture pipeline reads back an already-cleared blank buffer and the whole video will be black.
 2. Headless software WebGL in this environment has been observed to occasionally fire a spurious context-lost event within the first fraction of a second after the context is created, even for completely correct code -- roughly half the time, and never observed to recur later once past the first couple of frames. Handle this at startup, before setting window.READY to true: listen for the context-lost event and call preventDefault on it (required for the context to become restorable), listen for the context-restored event and re-create every GL resource from scratch when it fires, and wait a short delay (a few hundred milliseconds is enough) after creating the context before declaring READY, so a possible early loss has time to fire and be recovered rather than silently rendering on a dead context.
@@ -277,7 +170,7 @@ If you do use WebGL, three renderer-specific requirements are CRITICAL:
 One more thing worth knowing: a real per-pixel lighting model naturally makes the same scene look brighter or dimmer depending on which faces point toward the camera and light, and how much objects overlap and occlude each other. If you randomise things like orbit radius, object scale, or object count every time the scene resets, that alone can swing the average frame brightness enough to look like a fake trend to the automated brightness check, even though nothing is actually accumulating. Keep values that affect how much of the frame is covered (object scale, orbit radius, camera distance) fixed or only mildly varied instead; randomise rotation rates, orbit speed, phase offsets, and colors -- those add plenty of variety without swinging overall coverage. Keep total geometry modest (well under a thousand triangles) for the performance budget above.
 
 === CREATIVE DIRECTION FOR TODAY (${date}) ===
-Seed: ${seed}. Lean into this aesthetic: ${themeHint}.
+Seed: ${seed}. ${themeHint}
 HOUSE STYLE: favour a GEOMETRIC look — crisp straight edges, defined shapes, polygons, lattices, tessellations, and radial/mirror symmetry — over soft organic blobs. Luminous glowing EDGES on black, not fuzzy clouds. (If the theme above is organic, still keep clean structure and symmetry.) Above all: VIVID AND CLEAR, always — saturated colors, bold legible shapes. This is a standing channel requirement, not optional flavor.
 Make it genuinely distinct from a generic particle demo. Derive STRUCTURE, COLOR PALETTE, COUNTS, and MOTION RATES from the seeded PRNG so the seed produces real variety — two different seeds should look noticeably different, not just recolored.
 
@@ -377,17 +270,20 @@ export async function generateEngine(opts = {}) {
   const date = opts.date || todayUTC();
   const seed = opts.seed ?? date.replace(/-/g, '');
   const outDir = opts.outDir || path.join(repoRoot, 'engines', 'auto');
-  // A repair call MUST reuse the same themeHint as the original attempt
-  // (the caller passes it explicitly -- see chooseEngine() in src/index.js)
-  // rather than picking a new one here, or a repair would silently switch
-  // creative direction mid-repair. Only a fresh (non-repair) call without an
-  // explicit themeHint advances the rotation.
-  const themeHint = opts.themeHint || nextThemeHint(date, seed);
+  // Theme and dimension are pure functions of imageInfo/seed (see
+  // imageThemeHint()/wantWebGL3D() above) -- a repair call passing the same
+  // imageInfo (src/index.js's chooseEngine() always does) naturally gets
+  // the identical creative direction back, with no stateful cursor to
+  // accidentally advance twice on a repair.
+  const theme = imageThemeHint(opts.imageInfo);
+  const wantWebGL = wantWebGL3D(seed);
 
   const prompt = opts.repair
-    ? buildRepairPrompt({ seed, date, themeHint, previousHtml: opts.repair.previousHtml, reasons: opts.repair.reasons })
-    : buildPrompt({ seed, date, themeHint });
-  console.log(`[generate] model=${model} date=${date} theme="${themeHint}"${opts.repair ? ' (repair)' : ''}`);
+    ? buildRepairPrompt({
+      seed, date, themeHint: theme.text, wantWebGL, previousHtml: opts.repair.previousHtml, reasons: opts.repair.reasons,
+    })
+    : buildPrompt({ seed, date, themeHint: theme.text, wantWebGL });
+  console.log(`[generate] model=${model} date=${date} theme="${theme.label}" dimension=${wantWebGL ? '3D' : '2D'}${opts.repair ? ' (repair)' : ''}`);
 
   const raw = await callGemini({ apiKey, model, prompt });
   const html = extractHtml(raw);
@@ -407,7 +303,9 @@ export async function generateEngine(opts = {}) {
   await writeFile(outPath, html, 'utf8');
   console.log(`[generate] wrote ${outPath} (${html.length} bytes)`);
 
-  return { path: outPath, model, themeHint, date, seed: String(seed) };
+  return {
+    path: outPath, model, themeHint: theme.label, wantWebGL, date, seed: String(seed),
+  };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -214,7 +214,7 @@ function curatedOr(reason, seed) {
 //      Gemini for today's engine and run it through the quality gate — on any
 //      failure, fall back to Bloom;
 //   3. otherwise, Bloom.
-async function chooseEngine(cli) {
+async function chooseEngine(cli, imageInfo) {
   const seed = cli.seed ?? (process.env.SEED || defaultSeedStr());
 
   if (cli.engine) {
@@ -232,7 +232,7 @@ async function chooseEngine(cli) {
   }
 
   const validateOpts = { seed: Number(String(seed).replace(/\D/g, '')) || 1 };
-  const genOpts = { seed };
+  const genOpts = { seed, imageInfo };
 
   try {
     const gen = await generateEngine(genOpts);
@@ -246,18 +246,17 @@ async function chooseEngine(cli) {
     }
 
     // One repair attempt: hand the validator's reasons + the previous file
-    // back to Gemini and ask for a fix.
+    // back to Gemini and ask for a fix. imageInfo (via genOpts) is the same
+    // object as the first attempt, so generateEngine() derives the
+    // identical theme/dimension again -- no special reuse needed, since
+    // both are now pure functions of imageInfo/seed rather than a
+    // stateful rotation cursor.
     console.warn(`[index] first attempt failed: ${result.reasons.join('; ')}`);
     await logEngineSnippet('first attempt', gen.path);
     console.log('[index] asking Gemini to repair…');
     const previousHtml = await readFile(gen.path, 'utf8');
     const gen2 = await generateEngine({
       ...genOpts,
-      // Reuse the exact same theme as the original attempt -- generateEngine
-      // would otherwise independently pick a new one for this second call,
-      // switching creative direction mid-repair instead of just fixing the
-      // reported problems.
-      themeHint: gen.themeHint,
       repair: { previousHtml, reasons: result.reasons },
     });
     result = await validateEngine(gen2.path, validateOpts);
@@ -396,7 +395,27 @@ async function main() {
 
   console.log(`[index] === daily run ${new Date().toISOString()} ===`);
 
-  const { engine, source, themeHint, date } = await chooseEngine(cli);
+  // Fetch today's NASA APOD image ONCE, up front -- it now drives BOTH
+  // Gemini's creative theme (imageThemeHint() in generate.js, replacing the
+  // old round-robin theme-hint list -- see CLAUDE.md/generate.js for why)
+  // and curated-engine recoloring below, instead of being fetched twice for
+  // two separate purposes. Non-fatal: imageInfo stays null on any failure
+  // and both consumers degrade gracefully (Gemini falls back to a generic
+  // "invent your own" instruction; curated engines keep their built-in
+  // palette).
+  const wantImage = process.env.IMAGE_PALETTE !== '0' && cli['no-image'] !== true;
+  let imageInfo = null;
+  if (wantImage) {
+    try {
+      const dateStr = new Date().toISOString().slice(0, 10);
+      imageInfo = await dailyImagePalette({ date: dateStr });
+      if (!imageInfo) console.log('[index] no image available today (APOD not an image, or fetch failed).');
+    } catch (e) {
+      console.warn(`[index] image fetch skipped: ${e.message}`);
+    }
+  }
+
+  const { engine, source, themeHint, date } = await chooseEngine(cli, imageInfo);
   const engineName = path.basename(engine, '.html');
 
   // Resolve config once so render + metadata agree on seed/duration.
@@ -428,36 +447,26 @@ async function main() {
     }
   }
 
-  // Optional "image of the day" palette (NASA APOD). Only for curated engines —
-  // Gemini engines generate their own colours. Enabled when IMAGE_PALETTE!=0
-  // and not an AI engine. Any failure is non-fatal (engine uses its own palette).
+  // Recolor curated engines from the same already-fetched NASA image (see
+  // the fetch near the top of main()). Only for curated engines -- Gemini
+  // engines generate their own colours. An explicit --colors/COLORS
+  // override always wins.
   const renderCli = { ...cli, engine };
   let imageCredit = null;
-  const wantImagePalette = process.env.IMAGE_PALETTE !== '0'
-    && cli['no-image'] !== true
-    && !source.startsWith('gemini')
-    && !cli.colors && !process.env.COLORS;
-  if (wantImagePalette) {
-    try {
-      const dateStr = new Date().toISOString().slice(0, 10);
-      const pal = await dailyImagePalette({ date: dateStr });
-      if (pal && pal.colors) {
-        renderCli.colors = encodeColors(pal.colors);
-        imageCredit = pal;
-        console.log(`[index] recolouring ${engineName} from ${pal.source}: "${pal.title}" (${pal.colors.length} colours)`);
-        // Structure (a low-res luminance grid sampled from the same image)
-        // is only meaningful to engines that read the `lum` param
-        // (currently composer.html) -- harmless no-op extra URL param for
-        // every other engine, which just ignores params it doesn't know.
-        if (pal.structure) {
-          renderCli.lum = encodeStructure(pal.structure, pal.gridW, pal.gridH);
-        }
-      } else {
-        console.log('[index] no image palette today; using engine default palette.');
-      }
-    } catch (e) {
-      console.warn(`[index] image palette skipped: ${e.message}`);
+  const wantRecolor = imageInfo && !source.startsWith('gemini') && !cli.colors && !process.env.COLORS;
+  if (wantRecolor) {
+    renderCli.colors = encodeColors(imageInfo.colors);
+    imageCredit = imageInfo;
+    console.log(`[index] recolouring ${engineName} from ${imageInfo.source}: "${imageInfo.title}" (${imageInfo.colors.length} colours)`);
+    // Structure (a low-res luminance grid sampled from the same image) is
+    // only meaningful to engines that read the `lum` param (currently
+    // composer.html) -- harmless no-op extra URL param for every other
+    // engine, which just ignores params it doesn't know.
+    if (imageInfo.structure) {
+      renderCli.lum = encodeStructure(imageInfo.structure, imageInfo.gridW, imageInfo.gridH);
     }
+  } else if (!imageInfo) {
+    console.log('[index] no image palette today; using engine default palette.');
   }
 
   // Optional license-free (CC0) background music, fetched from Freesound.org

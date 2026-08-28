@@ -857,6 +857,91 @@ verification pattern used throughout this project) and confirmed it
 correctly draws from across the grown list without erroring or skipping
 entries.
 
+### Superseded, 2026-08-29: Gemini's theme is now derived from an image, not any list at all
+
+User feedback on the "growing theme pool" fix directly above, verbatim:
+"I really don't like round robin them list. WE SHOULD NOT HAVE them list at
+all. A theme should be somehow picked from images from web or somewhere
+else." Correct call, and a level deeper than the previous fix: a
+round-robin over ANY fixed list — however large, however often it grows —
+still has a ceiling it eventually repeats past. Growing the list from the
+research log pushed that ceiling out; it didn't remove it, and the user
+was right to reject the whole shape of the fix rather than just its size.
+
+**Fix**: `THEME_HINTS_2D`, `THEME_HINTS_3D`, `growingThemeHints()`,
+`nextThemeHint()`, `effectiveThemeP3D()`, and `state/theme-rotation.json`
+are all removed. Gemini's theme is now `imageThemeHint()` in
+`src/generate.js`, composed from that day's actual NASA Astronomy Picture
+of the Day — the same integration `src/palette.js` already used for
+curated-engine recoloring, now fetched ONCE up front in `src/index.js`'s
+`main()` (before `chooseEngine()`, so both Gemini and the curated-recolor
+path share one fetch instead of two) and threaded through. `fetchApod()`
+now also captures NASA's own `explanation` field (real free-text about
+that day's photo, not just the `title`), and a new `describeImageMood()`
+in `palette.js` derives a few objective descriptors — dominant colour
+family, brightness class, contrast class — directly from the already-
+extracted palette/luminance-grid data, no extra image pass. The composed
+theme text explicitly instructs an ABSTRACT interpretation (translate
+colour family / mood / light-dark composition into geometry) and forbids
+depicting the photo literally (no stars-as-dots, planets, nebula shapes,
+text) — this is an ambient screensaver engine, not astrophotography, and
+the house style already bans recognisable objects on canvas.
+
+Because a real photograph is genuinely different content every single
+day — not a fixed pool being cycled — there is no ceiling to run into and
+nothing to grow, maintain, or round-robin at all. `imageThemeHint()` is a
+pure function of `imageInfo`, which also simplified `chooseEngine()`'s
+repair path: the old code had to explicitly thread `themeHint: gen.themeHint`
+through the repair call so a second Gemini attempt wouldn't silently pick a
+NEW theme mid-repair (a real bug once already, see the "Standing
+requirement" section below). With a pure function of the same `imageInfo`
+object passed to both calls, that reuse is now automatic — no cursor
+exists to advance twice, so the special-case plumbing was deleted rather
+than fixed again.
+
+**On days with no image** (APOD fetch fails, that date's APOD is a video
+not an image, `IMAGE_PALETTE=0`, network blocked): `imageThemeHint(null)`
+returns a generic "invent an original abstract geometric concept... avoid
+defaulting to a generic mandala or grid" instruction — still zero fixed
+list, just a content-neutral fallback for the (non-fatal, same as every
+other NASA-integration failure mode in this project) case where there's no
+photo to draw from that day.
+
+**The "generate more 3D than 2D" requirement (2026-08-19) had been
+implicit in which theme-hint bucket got picked** — that mechanism is gone
+along with the list, so it was replaced with an explicit, purely
+mechanical, content-independent decision: `wantWebGL3D(seed)`, a
+seed-hashed weighted coin flip (~65% true, same target as before) spliced
+directly into the prompt's "3D / WEBGL" section as a hard instruction
+("FOR TODAY SPECIFICALLY, YOU MUST BUILD A GENUINE LIT 3D WEBGL ENGINE" vs.
+"use Canvas2D"), independent of whatever the photo's theme text says.
+Unlike `curatedOr()`'s `effectiveP3D()`, no bucket-size self-correction cap
+is needed here: that cap existed specifically because a small FILE pool
+could get over-concentrated on one engine (the `solids3d` incident, see
+above) — Gemini can invent a fresh 3D engine from scratch every time, so
+there's no small discrete pool to over-concentrate on.
+
+**Verified**: called `imageThemeHint()`/`buildPrompt()`/`buildRepairPrompt()`
+directly (not just `node --check`, per this file's own template-literal
+gotcha above) with both a synthetic image object and `null` — confirmed
+the no-image fallback text, confirmed a real image object's title/
+explanation/mood all appear correctly in the composed text, confirmed
+`buildPrompt()`'s output still contains every expected section header and
+ends exactly where expected for both `wantWebGL: true` and `false`, and
+confirmed `buildRepairPrompt()` still appends the REPAIR CONTEXT block
+correctly. Verified `wantWebGL3D`'s hash distribution: 64.6% true over
+2000 synthetic seeds (target 65%). Ran a full local dry-run end-to-end
+(`DRY_RUN=1 DURATION=10 node src/index.js`, no `GEMINI_API_KEY` set in
+this sandbox): the NASA fetch correctly returned null (this sandbox
+blocks `api.nasa.gov`, same known constraint as always), logged "no image
+available today", and the curated fallback path rendered a real video
+exactly as before — confirming the restructured single-fetch flow didn't
+break the non-Gemini path. Deleted the now-dead `state/theme-rotation.json`
+from the repo. Could not exercise the Gemini path live in this sandbox (no
+`GEMINI_API_KEY` here, same standing constraint as every prior Gemini-
+related change in this project) — the real theme text will only be
+visible in a production job log the next time Gemini actually runs.
+
 ### Standing requirement: every video should look new, not just non-repeating
 
 User-stated durable rule (not a one-off fix): each day's video should read

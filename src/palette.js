@@ -49,7 +49,11 @@ async function toDataUrl(src) {
   return `data:${ct};base64,${buf.toString('base64')}`;
 }
 
-// Fetch APOD metadata for a date; return { imageUrl, title } or null.
+// Fetch APOD metadata for a date; return { imageUrl, title, explanation } or
+// null. `explanation` (NASA's own free-text write-up of that day's photo)
+// is what lets generate.js's imageThemeHint() derive a genuinely different
+// creative theme every day straight from real web content, instead of
+// round-robining a fixed hand-written list -- see generate.js for why.
 async function fetchApod({ date, apiKey }) {
   const key = apiKey || 'DEMO_KEY';
   const url = `https://api.nasa.gov/planetary/apod?api_key=${encodeURIComponent(key)}&date=${date}`;
@@ -73,7 +77,7 @@ async function fetchApod({ date, apiKey }) {
   // Prefer the standard-res url over hdurl (smaller download, plenty for palette).
   const imageUrl = j.url || j.hdurl;
   if (!imageUrl) return null;
-  return { imageUrl, title: j.title || '' };
+  return { imageUrl, title: j.title || '', explanation: j.explanation || '' };
 }
 
 // In-page: draw the loaded <img> into a small canvas and return raw RGBA bytes.
@@ -207,6 +211,41 @@ async function extractImageData(imageOrUrl, {
   }
 }
 
+// Turn an extracted palette + luminance grid into a few objective,
+// human-readable mood descriptors -- used by generate.js's imageThemeHint()
+// to describe today's real photo to Gemini in words, without listing any
+// fixed catalogue of themes. Computed directly from data already extracted
+// for the palette/structure (no extra image pass).
+const HUE_FAMILIES = [
+  [15, 'red'], [45, 'orange'], [65, 'gold/amber'], [80, 'yellow'], [160, 'green'],
+  [195, 'teal/cyan'], [255, 'blue'], [290, 'violet'], [330, 'magenta/pink'], [360, 'red'],
+];
+function hueFamily(h) {
+  const n = ((h % 360) + 360) % 360;
+  for (const [max, name] of HUE_FAMILIES) if (n <= max) return name;
+  return 'red';
+}
+
+export function describeImageMood(colors, structure) {
+  const dom = colors && colors[0] ? hueFamily(colors[0][0]) : 'muted';
+  const secondary = [...new Set((colors || []).slice(1, 3).map((c) => hueFamily(c[0])))]
+    .filter((h) => h !== dom);
+  const colorFamily = secondary.length ? `${dom} with hints of ${secondary.join(' and ')}` : dom;
+
+  let brightness = 'evenly balanced light and dark';
+  let contrast = 'moderate contrast';
+  if (structure && structure.length) {
+    const mean = structure.reduce((a, b) => a + b, 0) / structure.length;
+    const variance = structure.reduce((a, b) => a + (b - mean) ** 2, 0) / structure.length;
+    const sd = Math.sqrt(variance);
+    brightness = mean < 30 ? 'mostly dark with bright highlights'
+      : mean > 65 ? 'predominantly bright/light'
+        : 'evenly balanced light and dark';
+    contrast = sd > 25 ? 'strong, high-contrast light/dark structure' : 'soft, low-contrast tonal structure';
+  }
+  return { colorFamily, brightness, contrast };
+}
+
 // Encode a palette as a URL param the engines understand: "h,s,l;h,s,l;...".
 export function encodeColors(pal) {
   return pal.map((c) => c.map((n) => Math.round(n)).join(',')).join(';');
@@ -234,6 +273,7 @@ export async function dailyImagePalette({ date = todayUTC(), apiKey = process.en
       gridW: r.gridW,
       gridH: r.gridH,
       title: apod.title,
+      explanation: apod.explanation,
       imageUrl: apod.imageUrl,
       source: 'NASA APOD',
     };

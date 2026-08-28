@@ -3,9 +3,11 @@
 // shipped -- a capability nothing here had before (2026-08-25).
 //
 // Why this exists: every anti-repeat mechanism in this project until now was
-// blind to pixels. curatedOr() rotates by FILENAME, nextThemeHint() rotates by
-// an INDEX into a text list, and validate.js scores each engine in ISOLATION
-// against absolute thresholds (brightness/saturation/motion) -- it never
+// blind to pixels. curatedOr() rotates by FILENAME, Gemini's theme is derived
+// from that day's real NASA photo (imageThemeHint() in generate.js -- no
+// fixed list to rotate at all, see CLAUDE.md), and validate.js scores each
+// engine in ISOLATION against absolute thresholds (brightness/saturation/
+// motion) -- it never
 // compares engine A to engine B. So two structurally different files that both
 // render a centred radial mandala (kaleidoscope / starburst / spirograph, a
 // real case documented in CLAUDE.md's "Archetype clustering" section) satisfy

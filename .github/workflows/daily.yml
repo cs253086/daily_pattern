@@ -91,12 +91,15 @@ jobs:
           DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '' }}
         run: node src/index.js
 
-      # curatedOr() (src/index.js) and nextThemeHint() (src/generate.js) each
-      # write their own file under state/ whenever they make a pick, so both
-      # the curated-engine pool and the Gemini theme list round-robin (no
-      # repeats until the whole list has cycled) instead of relying on a
-      # date-hash pick that can coincidentally repeat or cluster similar
-      # choices on nearby dates. Separately, promoteToCuratedPool()
+      # curatedOr() (src/index.js) writes state/engine-rotation.json whenever
+      # it makes a pick, so the curated-engine pool round-robins (no repeats
+      # until the whole pool has cycled) instead of relying on a date-hash
+      # pick that can coincidentally repeat or cluster similar choices on
+      # nearby dates. Gemini's theme no longer uses any rotation state at all
+      # (2026-08-29): it's derived fresh each day from that day's real NASA
+      # photo (imageThemeHint() in src/generate.js), which is different
+      # content every day by construction, so there's no list to persist a
+      # cursor into. Separately, promoteToCuratedPool()
       # (src/index.js) copies today's approved Gemini engine into
       # engines/manual/ so the curated pool itself grows over time. Persist
       # both back to the repo so the next run sees them. Runs even if the
@@ -107,9 +110,9 @@ jobs:
       # avoids re-triggering any push-based workflow.
       #
       # Skipped on dry_run (2026-08-28 fix): a manual dry_run=true dispatch
-      # is explicitly a throwaway test, but curatedOr()/nextThemeHint()'s
-      # round-robin cursors are advanced as a side effect of just CHOOSING
-      # an engine/theme, regardless of dry_run -- so without this guard,
+      # is explicitly a throwaway test, but curatedOr()'s round-robin cursor
+      # is advanced as a side effect of just CHOOSING an engine, regardless
+      # of dry_run -- so without this guard,
       # every test dispatch was silently consuming a real "don't repeat
       # until the bucket cycles" slot from production rotation state.
       # Confirmed happening for real: a dry_run test run committed
