@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Prime Spiral — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine): the ULAM SPIRAL -- Stanislaw Ulam's 1963
+// doodle of the positive integers arranged in a square spiral around a
+// centre, which revealed that prime numbers are not scattered uniformly
+// but visibly cluster along diagonal and near-diagonal lines (a real,
+// still-studied number-theoretic phenomenon, not an optical illusion; the
+// most famous single diagonal comes from Euler's prime-rich polynomial
+// n^2+n+41). See CLAUDE.md's dated write-up for the search trail.
+//
+// A genuinely different construction PRINCIPLE from everything else in the
+// pool: not a substitution/subdivision system (quasicrystal.html), not a
+// discrete cellular-automaton generation-by-local-rule (automaton.html),
+// not an implicit wave-interference zero-set (chladni.html), not a rigid
+// transform of a fixed continuous shape (spirograph.html/ziggurat.html) --
+// an ARITHMETIC SIEVE (primality, a global number-theoretic predicate with
+// no adjustable "shape" of its own) mapped onto spiral integer coordinates.
+// The resulting emergent structure -- sparse dots that visually organise
+// into diagonal streaks -- is a byproduct of number theory, not of any
+// symmetry group or subdivision rule chosen for its geometry.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF, per-second rotation rate. Redraws each
+// frame from a fixed prime-cell list computed once at start-up (no
+// accumulation, no whiteout risk).
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 35);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  const cx = W / 2, cy = H / 2;
+  const minDim = Math.min(W, H);
+  const dt = 1 / FPS;
+
+  // Standard square Ulam-spiral coordinate walk: start at the centre cell
+  // and spiral outward (right, up, left, down), with the step length
+  // increasing by one every two turns. Returns [dx,dy] integer offsets for
+  // k = 0..n-1 (k=0 is the centre cell). This is a pure coordinate-layout
+  // function -- the number theory (primality) is applied separately below.
+  function spiralCoords(n) {
+    const out = [[0, 0]];
+    let x = 0, y = 0, step = 1, dirIdx = 0;
+    const dirs = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+    while (out.length < n) {
+      for (let rep = 0; rep < 2 && out.length < n; rep++) {
+        const [ddx, ddy] = dirs[dirIdx % 4];
+        for (let s = 0; s < step && out.length < n; s++) {
+          x += ddx; y += ddy;
+          out.push([x, y]);
+        }
+        dirIdx++;
+      }
+      step++;
+    }
+    return out;
+  }
+
+  function sieve(maxVal) {
+    const isComposite = new Uint8Array(maxVal + 1);
+    for (let i = 2; i * i <= maxVal; i++) {
+      if (!isComposite[i]) {
+        for (let j = i * i; j <= maxVal; j += i) isComposite[j] = 1;
+      }
+    }
+    return (v) => v >= 2 && !isComposite[v];
+  }
+
+  // Grid size, spiral starting integer, and colour scheme are all fixed
+  // ONCE for the whole video, never re-rolled per cycle -- the "any
+  // coverage-affecting parameter re-randomised per cycle creates a real
+  // (not aliased) brightness swing" lesson CLAUDE.md documents for five
+  // prior engines in a row (starburst, solids3d, spirograph, quasicrystal,
+  // chladni). Prime cell COUNT depends on gridSize and offsetStart alone,
+  // so re-rolling either mid-video would swing lit-area coverage between
+  // cycles exactly like a randomised subdivision depth or star count did.
+  let gridSize, offsetStart, cellSize, hue0, primeCells;
+  function initSpiral() {
+    const base = Math.round(43 * Math.max(0.7, Math.min(1.4, DENSITY)));
+    gridSize = Math.max(31, Math.min(57, base % 2 === 0 ? base + 1 : base));
+    const n = gridSize * gridSize;
+    // Different starting integers (not just 1) still show diagonal prime
+    // clustering -- a well-documented Ulam-spiral variant -- and give
+    // genuine per-seed variety in which specific diagonals light up.
+    // Kept small enough (<=2600) that prime density among the sampled
+    // integers stays comfortably in the same ballpark across seeds
+    // (~11-16%, via the prime-counting density ~1/ln(v)).
+    offsetStart = randInt(1, 2600);
+    const maxVal = offsetStart + n - 1;
+    const isPrime = sieve(maxVal);
+
+    cellSize = Math.max(14, Math.round((minDim * 0.86 / gridSize)));
+    hue0 = rng() * 360;
+
+    const coords = spiralCoords(n);
+    primeCells = [];
+    for (let k = 0; k < n; k++) {
+      const value = offsetStart + k;
+      if (!isPrime(value)) continue;
+      const [dx, dy] = coords[k];
+      const ring = Math.max(Math.abs(dx), Math.abs(dy));
+      const diag = dx - dy;
+      const baseCol = PAL[ring % PAL.length];
+      // Spatial (not time-based) hue ripple keyed to the DIAGONAL axis --
+      // literally the axis where Ulam-spiral primes are famous for
+      // clustering -- so the colour banding visually reinforces the same
+      // structure the sieve produced. sin() keeps it smooth/periodic (no
+      // wrap seam), the same fix quasicrystal.html already established.
+      const hue = ((baseCol[0] + hue0 + 40 * Math.sin(diag * 0.14)) % 360 + 360) % 360;
+      const light = Math.min(74, baseCol[2] + Math.min(10, ring * 0.25));
+      primeCells.push({ px: dx * cellSize, py: dy * cellSize, hue, sat: baseCol[1], light });
+    }
+  }
+
+  // Called at start-up AND every cycleSec. Only rotation resets --
+  // coverage-neutral by construction (a rigid rotation transform doesn't
+  // change how many prime cells are lit or how large they are), same
+  // reasoning as quasicrystal.html's / ziggurat.html's reconfigureRotation().
+  // Unlike ziggurat's exact N-fold-symmetric rosette, this spiral's prime
+  // placement has no exact rotational symmetry to resonate against (the
+  // sieve result is effectively irregular), so no special resonance-avoidance
+  // is needed here -- a plain guaranteed-minimum-magnitude, random-sign rate
+  // is sufficient.
+  let rotAngle0, rotRate;
+  function reconfigureRotation() {
+    rotAngle0 = rand(0, Math.PI * 2);
+    rotRate = (rng() < 0.5 ? -1 : 1) * rand(0.5, 1.0) * SPEED;
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  initSpiral();
+  reconfigureRotation();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  const dotSize = Math.max(4, cellSize * 0.82);
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(rotAngle0 + clk * rotRate);
+
+    for (const c of primeCells) {
+      ctx.fillStyle = `hsl(${c.hue}, ${c.sat}%, ${c.light}%)`;
+      ctx.fillRect(c.px - dotSize / 2, c.py - dotSize / 2, dotSize, dotSize);
+    }
+
+    ctx.restore();
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureRotation(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

@@ -1847,6 +1847,93 @@ the solid tapering-staircase silhouette really does read as structurally
 distinct from arcrings' thin rotating arc segments, not just superficially
 different.
 
+## Prime-spiral engine (`primespiral.html`) — 2026-08-29
+
+Daily creative-research routine. Category was "random Wikipedia article" by
+the firing-minute-mod-category-count method -- the same category flagged as
+"impractical" in the last two firings' write-ups, since Wikipedia/Wikimedia
+are blocked by this sandbox's network egress policy. Rather than skip it
+outright a third time, tried an open WebSearch (not a pre-decided
+technique) for an unusual geometric phenomenon, which surfaced several
+candidates (Form Constants, Ulam spirals, wallpaper groups) via search
+snippets without needing to fetch the blocked pages directly. Picked the
+**Ulam spiral**: Stanislaw Ulam's 1963 doodle of the positive integers
+arranged in a square spiral, which revealed that prime numbers visibly
+cluster along diagonal lines rather than scattering uniformly -- a real,
+still-studied number-theoretic phenomenon (the most famous single diagonal
+traces Euler's prime-rich polynomial n^2+n+41), not folklore or an optical
+illusion. Sources:
+[Live Science](https://www.livescience.com/26584-5-mind-boggling-math-facts.html),
+[Wikipedia:Unusual articles](https://en.wikipedia.org/wiki/Wikipedia:Unusual_articles)
+(search trail only, not fetched).
+
+**What it is**: a genuinely different construction PRINCIPLE from
+everything else in the pool: not a substitution/subdivision system
+(`quasicrystal.html`), not a discrete cellular-automaton local rule
+(`automaton.html`), not an implicit wave-interference zero-set
+(`chladni.html`), not a rigid transform of a fixed continuous shape
+(`spirograph.html`/`ziggurat.html`) -- an ARITHMETIC SIEVE (primality, a
+global number-theoretic predicate with no adjustable "shape" of its own)
+mapped onto spiral integer coordinates. Positive integers are walked
+outward in the classic square-spiral coordinate order (right/up/left/down,
+step length growing by one every two turns) starting from a per-video
+random offset (not always 1 -- other starting integers are a documented
+Ulam-spiral variant and still show diagonal clustering, giving genuine
+per-seed variety in which diagonals light up); a sieve of Eratosthenes
+marks which mapped integers are prime; only PRIME cells are drawn, as bold
+filled squares on black. Hue is a spatial (not time-based) ripple keyed to
+the diagonal axis (`dx - dy`) -- literally the axis where Ulam-spiral
+primes are famous for clustering -- so the colour banding visually
+reinforces the same structure the sieve produced, the same "tie the colour
+modulation to the engine's own defining axis" idea `quasicrystal.html`
+used with its 5-fold angular ripple. Grid size, spiral starting integer,
+and colour scheme are all fixed once per video (function of DENSITY and
+SEED only, computed in `initSpiral()`); the only thing that changes over
+time is a rigid rotation of the whole prime-cell field
+(`reconfigureRotation()`, per cycle), so total lit coverage never varies --
+structurally whiteout-proof and coverage-stable by construction, the same
+"compute once, only rotate per frame" pattern `quasicrystal.html`/
+`chladni.html`/`ziggurat.html` already established as safe.
+
+**No bugs found -- validateEngine() 10/10 across seeds 1-10 passed on the
+first attempt**, applying every coverage-stability lesson from the five
+prior engines from the first draft instead of rediscovering them: nothing
+coverage-affecting is re-randomised per cycle, and the hue ripple is
+spatial rather than time-varying to avoid the HSL-hue-affects-luma trap
+`quasicrystal.html` hit. This is now the SECOND engine in a row
+(`stripweave.html` was the first) to pass validation cleanly on the first
+attempt, real evidence the fix-once-per-video pattern documented across
+this file is now a reliable default for new engines rather than a lesson
+that has to be relearned each time. Also notably did NOT need
+`ziggurat.html`'s rotation-rate resonance-avoidance treatment: that engine
+has EXACT N-fold rotational symmetry (identical wedges), but a sieve-driven
+prime placement has no exact rotational symmetry to alias against, so a
+plain guaranteed-minimum-magnitude random-sign rotation rate (0.5-1.0
+rad/s) was sufficient without needing to tie it to any structural period.
+
+**Verified**: `validateEngine()` across seeds 1-10 -- **10/10 passed**.
+Margins comfortable throughout: `projectedRise` -18.7 to +7.8 (vs the 50
+threshold), `avgSat` 68.8-78.6 (vs the 22 minimum), zero near-white pixels,
+`fastMotion` comfortably above its floor on every seed (23.8-29.2 vs floors
+of 4.9-6.1), `projectedHourRenderMin` ~16.7min (well inside the CI budget)
+on the default-seed `node src/validate.js` CLI run. Visual spot-checks
+across 25/50/75/95/105% of a cycle at 3 seeds confirmed vivid, bold,
+immediately-legible scattered prime-cell constellations with visible
+diagonal chaining -- the real Ulam-spiral phenomenon reads clearly even at
+a glance -- and distinct palette/offset combinations per seed.
+
+**Novelty gate**: measured against all 20 existing engines using a
+same-day, already-current fingerprint cache (no missing files this time).
+Nearest neighbour is `wireframe` at distance **0.765** -- comfortably clear
+of the 0.60 threshold. Notably, `chladni.html` (the engine this design was
+most worried about resembling, given both render sparse coloured squares
+on a black background) did not even appear among the five nearest
+neighbours (`wireframe` 0.765, `composer` 0.782, `geometric` 0.972,
+`arcrings` 1.033, `cascade` 1.055), confirming the arithmetic-driven,
+diagonally-chained dot field reads as structurally distinct from chladni's
+smoothly-morphing implicit-curve nodal lines, not just superficially
+different.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
