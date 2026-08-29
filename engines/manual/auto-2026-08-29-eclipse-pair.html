@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generative Art Screensaver</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: black; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="screen-canvas"></canvas>
+    <script>
+        // --- PRNG (Mulberry32) ---
+        function mulberry32(a) {
+            return function() {
+                var t = a += 0x6D2B79F5;
+                t = Math.imul(t ^ t >>> 15, t | 1);
+                t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+                return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            }
+        }
+
+        // --- Global State and Configuration ---
+        const urlParams = new URLSearchParams(window.location.search);
+        const getParam = (name, defaultValue, type = String) => {
+            const value = urlParams.get(name);
+            if (value === null) return defaultValue;
+            if (type === Number) return parseFloat(value);
+            if (type === Boolean) return value === 'true';
+            return value;
+        };
+
+        const SEED = getParam('seed', 12345, Number);
+        const WIDTH = getParam('width', 1920, Number);
+        const HEIGHT = getParam('height', 1080, Number);
+        const FPS = getParam('fps', 24, Number);
+        const DURATION = getParam('duration', 3600, Number); // seconds
+        const SPEED = getParam('speed', 1.0, Number);
+        const DENSITY = getParam('density', 1.0, Number);
+        const CYCLE_SEC = getParam('cycleSec', 90, Number); // Hard reset frequency
+
+        let RND = mulberry32(SEED); // Global PRNG instance
+
+        const TOTAL_FRAMES = Math.round(DURATION * FPS);
+        const DT = 1 / FPS;
+
+        let canvas, ctx;
+
+        window.currentFrame = 0;
+        window.TOTAL_FRAMES = TOTAL_FRAMES;
+        window.READY = false;
+
+        // --- Utility Functions ---
+        function randomRange(min, max) {
+            return min + RND() * (max - min);
+        }
+
+        function randomInt(min, max) {
+            return Math.floor(randomRange(min, max + 1));
+        }
+
+        function randomSign() {
+            return RND() > 0.5 ? 1 : -1;
+        }
+
+        function hslToRgb(h, s, l) {
+            h /= 360;
+            s /= 100;
+            l /= 100;
+            let r, g, b;
+            if (s === 0) {
+                r = g = b = l; // achromatic
+            } else {
+                const hue2rgb = (p, q, t) => {
+                    if (t < 0) t += 1;
+                    if (t > 1) t -= 1;
+                    if (t < 1 / 6) return p + (q - p) * 6 * t;
+                    if (t < 1 / 2) return q;
+                    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+                    return p;
+                };
+                const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                const p = 2 * l - q;
+                r = hue2rgb(p, q, h + 1 / 3);
+                g = hue2rgb(p, q, h);
+                b = hue2rgb(p, q, h - 1 / 3);
+            }
+            return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+        }
+
+        function getPalette(prng) {
+            const baseHue = prng() * 360;
+            const saturation = randomRange(70, 95);
+            const lightness = randomRange(40, 60);
+
+            const colors = [];
+            const numColors = randomInt(3, 5);
+            const hueStep = randomRange(40, 70); // Spread hues
+
+            for (let i = 0; i < numColors; i++) {
+                let hue = (baseHue + i * hueStep) % 360;
+                if (hue < 0) hue += 360;
+                colors.push({
+                    h: hue,
+                    s: saturation,
+                    l: lightness
+                });
+            }
+            return colors;
+        }
+
+        // --- Core Engine Logic ---
+        const particles = [];
+        const NUM_PARTICLES = Math.floor(randomRange(50, 150) * DENSITY); // Fewer, bigger, clearer
+        let palette;
+        let cycleTimer = 0;
+
+        // Particle class (e.g., a line segment, or a point with a trail)
+        class Particle {
+            constructor(id) {
+                this.id = id;
+                this.reset();
+            }
+
+            reset() {
+                const angle = RND() * Math.PI * 2;
+                const radius = randomRange(0.1, 0.4) * Math.min(WIDTH, HEIGHT) / 2;
+                this.x = WIDTH / 2 + Math.cos(angle) * radius;
+                this.y = HEIGHT / 2 + Math.sin(angle) * radius;
+
+                this.vx = randomSign() * randomRange(50, 150) * SPEED; // pixels/sec
+                this.vy = randomSign() * randomRange(50, 150) * SPEED;
+
+                this.baseColor = palette[randomInt(0, palette.length - 1)];
+                this.alpha = randomRange(0.08, 0.15); // Additive blending
+                this.size = randomRange(5, 15) * DENSITY;
+
+                this.orbitRadius = randomRange(0.1, 0.4) * Math.min(WIDTH, HEIGHT) / 2;
+                this.orbitAngle = RND() * Math.PI * 2;
+                this.orbitSpeed = randomSign() * randomRange(0.4, 1.5) * SPEED; // radians/sec
+
+                this.life = randomRange(2, 5); // seconds
+                this.currentLife = 0;
+            }
+
+            update(dt) {
+                this.currentLife += dt;
+
+                // Orbit motion
+                this.orbitAngle += this.orbitSpeed * dt;
+                const newCenterX = WIDTH / 2 + Math.cos(this.orbitAngle) * this.orbitRadius;
+                const newCenterY = HEIGHT / 2 + Math.sin(this.orbitAngle) * this.orbitRadius;
+
+                // Move relative to the orbiting center
+                this.x += this.vx * dt;
+                this.y += this.vy * dt;
+
+                // Simple boundary wrap (makes it feel continuous)
+                if (this.x < 0) this.x += WIDTH;
+                if (this.x > WIDTH) this.x -= WIDTH;
+                if (this.y < 0) this.y += HEIGHT;
+                if (this.y > HEIGHT) this.y -= HEIGHT;
+
+                // Reset if life runs out
+                if (this.currentLife > this.life) {
+                    this.reset();
+                }
+            }
+
+            draw(ctx, time) {
+                const lifeRatio = 1 - (this.currentLife / this.life);
+                const currentAlpha = this.alpha * lifeRatio;
+
+                let hueMod = Math.sin(time * 0.1 * SPEED + this.id * 0.5) * 20; // Gentle hue shift
+                let satMod = Math.cos(time * 0.08 * SPEED + this.id * 0.3) * 10; // Gentle sat shift
+                let lightMod = Math.sin(time * 0.05 * SPEED + this.id * 0.7) * 5; // Gentle light shift
+
+                const currentHue = (this.baseColor.h + hueMod) % 360;
+                const currentSat = Math.max(70, Math.min(95, this.baseColor.s + satMod));
+                const currentLight = Math.max(40, Math.min(70, this.baseColor.l + lightMod));
+
+                const rgb = hslToRgb(currentHue, currentSat, currentLight);
+                ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${currentAlpha})`;
+
+                // Draw a square for a clear, geometric look
+                const halfSize = this.size / 2;
+                ctx.fillRect(this.x - halfSize, this.y - halfSize, this.size, this.size);
+
+                // Add a "bloom" effect by drawing a slightly larger, softer version
+                ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${currentAlpha * 0.5})`; // Half alpha for bloom
+                ctx.fillRect(this.x - halfSize * 1.5, this.y - halfSize * 1.5, this.size * 3, this.size * 3);
+            }
+        }
+
+        function initialize() {
+            canvas = document.getElementById('screen-canvas');
+            ctx = canvas.getContext('2d');
+
+            canvas.width = WIDTH;
+            canvas.height = HEIGHT;
+
+            ctx.globalCompositeOperation = 'lighter'; // Additive blending
+
+            // Initialize PRNG for palette generation
+            const paletteRNG = mulberry32(SEED + 1);
+            palette = getPalette(paletteRNG);
+
+            // Initialize particles
+            for (let i = 0; i < NUM_PARTICLES; i++) {
+                particles.push(new Particle(i));
+            }
+
+            window.READY = true;
+        }
+
+        function advanceFrame() {
+            const time = window.currentFrame * DT;
+
+            // Mandatory hard reset: clear to black periodically
+            if (cycleTimer >= CYCLE_SEC) {
+                ctx.globalCompositeOperation = 'source-over'; // Temporarily switch to overwrite
+                ctx.fillStyle = 'black';
+                ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                ctx.globalCompositeOperation = 'lighter'; // Switch back to additive
+                cycleTimer = 0;
+            } else {
+                // Gentle fade-to-black for trails
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.fillStyle = 'rgba(0,0,0,0.02)'; // Very subtle fade
+                ctx.fillRect(0, 0, WIDTH, HEIGHT);
+                ctx.globalCompositeOperation = 'lighter';
+            }
+
+            // Update and draw particles
+            for (const p of particles) {
+                p.update(DT);
+                p.draw(ctx, time);
+            }
+
+            cycleTimer += DT;
+            window.currentFrame++;
+        }
+
+        window.advanceFrame = advanceFrame;
+
+        window.advanceFrames = function(n) {
+            for (let i = 0; i < n; i++) {
+                advanceFrame();
+            }
+        };
+
+        // --- Run Initialization ---
+        initialize();
+    </script>
+</body>
+</html>
