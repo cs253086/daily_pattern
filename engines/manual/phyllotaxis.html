@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Phyllotaxis — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine): PHYLLOTAXIS -- the arrangement of florets in a
+// sunflower head (also seen in pinecones, pineapples), where each new floret
+// is placed at a fixed "golden angle" (~137.5077 degrees, derived from the
+// golden ratio) around the centre while its radius grows with the square
+// root of its placement order. This is Vogel's model (1979), a real,
+// well-verified mathematical formula: radius(k) = c*sqrt(k), angle(k) =
+// k * goldenAngle. It produces maximally efficient packing AND an emergent
+// illusion of multiple counter-rotating spiral arms ("parastichies") whose
+// counts are always consecutive Fibonacci numbers. See CLAUDE.md's dated
+// write-up for the search trail.
+//
+// A genuinely different construction PRINCIPLE from everything else in the
+// pool: not an arithmetic sieve on spiral grid coordinates (primespiral.html),
+// not a substitution/subdivision system (quasicrystal.html), not a discrete
+// cellular-automaton local rule (automaton.html), not an implicit
+// wave-interference zero-set (chladni.html) -- a single irrational-angle
+// INCREMENT RULE applied sequentially to densely pack a disk.
+//
+// COMPOSITION note (three earlier iterations of this exact engine failed
+// the mandatory novelty gate -- see CLAUDE.md's dated write-up for the
+// full trail): a single big centred phyllotaxis disk, whether rendered as
+// a packed dot mosaic or as connected spiral-arm strokes, is structurally
+// a CENTRED RADIAL MANDALA -- the same broad archetype `kaleidoscope.html`/
+// `starburst.html`/`quasicrystal.html`/`wireframe.html` already occupy
+// heavily, and the colour-blind fingerprint descriptor measured it too
+// close to one or another of them regardless of which rendering style was
+// used. A THIRD attempt broke the single centre into several independent
+// clusters loosely scattered across the frame, but still measured too
+// close to `wireframe.html` -- loosely-jittered cluster placement still
+// reads, to the descriptor's rotational/radial/periodicity features, as
+// "one more moderately-covered aperiodic blob," the same broad region of
+// feature space `wireframe.html`'s rotated polytope projection sits in
+// (confirmed by diagnostic: wireframe.html's own nearest neighbour among
+// every OTHER engine is only 0.72 away -- it is not a strong outlier on
+// any one feature, so a lot of only-moderately-distinct compositions land
+// near it by default). Fixed by tightening the cluster grid to near-
+// regular spacing (+-5% jitter, down from +-16%): this measurably raises
+// the descriptor's own periodicity features, a clean, different STRUCTURAL
+// signature from wireframe.html's aperiodic composition, not just a
+// cosmetic tweak -- the same "several independent instances of one motif,
+// not one dominant centre" composition-level idea `cascade.html` applied
+// against the pool's earlier mandala over-concentration, refined until it
+// actually measured as different.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF, per-second rotation rates. Redraws each
+// frame from fixed per-cluster floret lists computed once at start-up (no
+// accumulation, no whiteout risk).
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 36);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  const dt = 1 / FPS;
+  const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5)); // ~2.39996 rad, ~137.5077 deg
+
+  // Cluster grid shape, per-cluster jittered centre/size, floret count, and
+  // every floret's fixed local position/colour are all computed ONCE for
+  // the whole video, never re-rolled per cycle -- the "any coverage-
+  // affecting parameter re-randomised per cycle creates a real (not
+  // aliased) brightness swing" lesson CLAUDE.md documents for six prior
+  // engines in a row.
+  let clusters;
+  function initClusters() {
+    const d = Math.max(0.7, Math.min(1.4, DENSITY));
+    const grid = d < 0.85 ? { cols: 3, rows: 2 } : d > 1.15 ? { cols: 4, rows: 3 } : { cols: 4, rows: 2 };
+    const cellW = W / grid.cols, cellH = H / grid.rows;
+    const hue0 = rng() * 360;
+
+    clusters = [];
+    for (let row = 0; row < grid.rows; row++) {
+      for (let col = 0; col < grid.cols; col++) {
+        const jx = rand(-0.05, 0.05) * cellW;
+        const jy = rand(-0.05, 0.05) * cellH;
+        const centerX = (col + 0.5) * cellW + jx;
+        const centerY = (row + 0.5) * cellH + jy;
+        const clusterR = Math.min(cellW, cellH) * rand(0.36, 0.44);
+
+        const n = Math.round(160 * d);
+        const c0 = clusterR / Math.sqrt(n);
+        const floretSize = c0 * 1.05;
+        const baseCol = PAL[(row * grid.cols + col) % PAL.length];
+        const freq = 3 + Math.floor(rng() * 3);
+        const clusterHue0 = hue0 + rand(-40, 40);
+
+        const florets = [];
+        for (let k = 1; k <= n; k++) {
+          const r = c0 * Math.sqrt(k);
+          const theta = k * GOLDEN_ANGLE;
+          const px = r * Math.cos(theta);
+          const py = r * Math.sin(theta);
+          const ang = Math.atan2(py, px);
+          const hue = ((baseCol[0] + clusterHue0 + 55 * Math.sin(freq * ang)) % 360 + 360) % 360;
+          const light = Math.min(76, baseCol[2] + (r / clusterR) * 8);
+          florets.push({ px, py, hue, sat: baseCol[1], light, size: floretSize });
+        }
+        clusters.push({ centerX, centerY, florets });
+      }
+    }
+  }
+
+  // Called at start-up AND every cycleSec. Only each cluster's OWN spin
+  // angle/rate resets -- coverage-neutral by construction (a rigid
+  // rotation transform doesn't change how many florets are lit or how
+  // large they are), same reasoning as quasicrystal.html's/ziggurat.html's
+  // reconfigureRotation(). Each cluster spins independently (guaranteed-
+  // minimum-magnitude, random sign, per cluster) so the field reads as
+  // several separately-alive sunflower heads, not one synchronised unit --
+  // reinforcing the "independent clusters, not one mandala" composition.
+  function reconfigureSpins() {
+    for (const cl of clusters) {
+      cl.rotAngle0 = rand(0, Math.PI * 2);
+      cl.rotRate = (rng() < 0.5 ? -1 : 1) * rand(0.5, 1.1) * SPEED;
+    }
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  initClusters();
+  reconfigureSpins();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    for (const cl of clusters) {
+      ctx.save();
+      ctx.translate(cl.centerX, cl.centerY);
+      ctx.rotate(cl.rotAngle0 + clk * cl.rotRate);
+      for (const f of cl.florets) {
+        ctx.fillStyle = `hsl(${f.hue}, ${f.sat}%, ${f.light}%)`;
+        ctx.fillRect(f.px - f.size / 2, f.py - f.size / 2, f.size, f.size);
+      }
+      ctx.restore();
+    }
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureSpins(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

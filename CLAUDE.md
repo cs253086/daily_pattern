@@ -1934,6 +1934,99 @@ diagonally-chained dot field reads as structurally distinct from chladni's
 smoothly-morphing implicit-curve nodal lines, not just superficially
 different.
 
+## Phyllotaxis engine (`phyllotaxis.html`) — 2026-08-30
+
+Daily creative-research routine. Category was "random Wikipedia article" by
+the firing-minute-mod-category-count method (same category as yesterday's
+`primespiral.html`, but the actual inspiration must still differ). An open
+WebSearch for a fresh unusual geometric phenomenon surfaced **phyllotaxis**
+and **Vogel's model** -- the golden-angle (~137.5077 degree) placement rule
+that arranges florets in a sunflower head, pinecone, or pineapple, producing
+both maximally efficient packing AND an emergent illusion of multiple
+counter-rotating spiral arms ("parastichies") whose counts are always
+consecutive Fibonacci numbers, neither of which is designed in directly --
+both fall out of the single golden-angle increment: `radius(k) = c*sqrt(k)`,
+`angle(k) = k * goldenAngle`. Sources:
+[MathWorld](https://mathworld.wolfram.com/Phyllotaxis.html),
+[Biophysical optimality of the golden angle](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4607949/),
+[Sunflowers and Fibonacci: Models of Efficiency](https://thatsmaths.com/2014/06/05/sunflowers-and-fibonacci-models-of-efficiency/).
+
+**This engine needed FOUR design iterations to pass the mandatory novelty
+gate -- three straight failures, each a genuine composition-level redesign,
+not a parameter nudge.** Recorded in full because it surfaces a failure
+mode not previously documented in this file: the colour-blind fingerprint
+descriptor can measure two compositions that look nothing alike to a
+person as structurally close, and a "generically aperiodic, moderately-
+covered, roughly circular" composition can land near an unrelated engine
+that itself sits centrally in feature space, regardless of how different
+the actual rendering technique is.
+
+1. **A single big centred disk of densely packed filled-square florets**
+   (the direct, obvious rendering of Vogel's model) measured 0.573-0.596
+   from `wireframe.html` across two density settings -- both below the
+   0.60 threshold -- despite looking nothing alike to a person (a dense
+   colourful mosaic vs. a thin-line rotating polytope projection). A
+   diagnostic dump of per-feature z-scores (not just the aggregate
+   distance) showed the rotational-symmetry, radial-mass-profile, and
+   coverage features simply weren't distinct enough between the two,
+   even though intuition says they should be.
+2. **Rendering the same Fibonacci-offset point families as connected
+   spiral-arm STROKES instead of a dot mosaic** (a genuine composition
+   change -- continuous curves, not discrete filled cells) produced a
+   strikingly vivid multi-armed rainbow spiral, easily the most visually
+   striking of the four attempts. It still failed, though, at 0.579 from
+   `kaleidoscope.html`: the near-symmetric concentric-ring read is
+   structurally a CENTRED RADIAL MANDALA, the same broad archetype
+   `kaleidoscope.html`/`starburst.html`/`quasicrystal.html`/
+   `wireframe.html` already occupy heavily (see "Archetype clustering"
+   above) -- however novel the underlying math, the rendered silhouette
+   collapsed into an already-crowded family.
+3. **Breaking the single centre into several independently-positioned
+   phyllotaxis clusters, loosely scattered (+-16% jitter) across a grid of
+   cells** -- the same composition-level fix `cascade.html` applied
+   against the pool's earlier mandala over-concentration -- still measured
+   0.556 from `wireframe.html`. A second diagnostic explained why: run
+   against every OTHER engine, `wireframe.html`'s own nearest neighbour is
+   only 0.72 away -- it is not a strong outlier on any single feature, so
+   it functions as a kind of "generic attractor" in feature space that
+   many only-moderately-distinct compositions can drift near, not just
+   this one.
+4. **Final fix: tightened the cluster grid to near-regular spacing (+-5%
+   jitter, down from +-16%).** This measurably raises the descriptor's own
+   periodicity features (`periodX`/`periodY`) -- a genuine, different
+   STRUCTURAL signature from `wireframe.html`'s aperiodic composition, not
+   a cosmetic tweak. This finally passed: nearest neighbour `composer` at
+   distance **0.651**. Lesson for future engines: if a composition change
+   alone doesn't clear the novelty gate, check whether the failing
+   dimension is symmetry, coverage, OR periodicity specifically (a
+   diagnostic per-feature z-score dump is cheap and tells you which) --
+   "make it look different" and "make it measure different" are not
+   always the same lever.
+
+**What shipped**: several independent Vogel-model phyllotaxis clusters
+(count/grid-shape a function of `DENSITY`) placed in a near-regular grid
+across the frame, each an internally dense packed-square mosaic, each
+spinning on its own axis at its own guaranteed-minimum-magnitude rate --
+same underlying golden-angle growth rule as every failed iteration, applied
+as a repeated multi-instance field rather than one big mandala. Cluster
+grid shape, per-cluster jitter/size, floret count, and every floret's fixed
+position/colour are computed once per video (`initClusters()`); only each
+cluster's own rotation angle/rate resets per cycle
+(`reconfigureSpins()`) -- coverage-neutral by construction, the same
+"compute once, only rotate per frame" pattern established for
+`quasicrystal.html`/`chladni.html`/`ziggurat.html`/`primespiral.html`.
+
+**Verified**: `validateEngine()` 10/10 across seeds 1-10 passed throughout
+ALL FOUR iterations (this bug class is entirely about novelty distance, not
+quality-gate correctness -- every design variant was already visually
+sound and whiteout-safe). Final-design margins comfortable: `projectedRise`
+-23.9 to +16.6 (vs the 50 threshold), `avgSat` 52.6-61.9 (vs the 22
+minimum), zero near-white pixels, `fastMotion` comfortably above its floor
+on every seed. Visual spot-checks across 25/50/75/95/105% of a cycle at
+multiple seeds confirmed vivid, bold, independently-spinning packed-mosaic
+clusters, clearly legible as a multi-instance field rather than one
+dominant centred mandala.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
