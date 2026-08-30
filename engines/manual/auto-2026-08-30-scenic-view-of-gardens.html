@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generative Art Screensaver</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: black; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="glcanvas"></canvas>
+    <script>
+        // --- Global State and Utils ---
+        window.READY = false;
+        window.TOTAL_FRAMES = 0;
+        window.currentFrame = 0;
+
+        let gl;
+        let program;
+        let canvas;
+        let width, height;
+        let seed;
+        let fps;
+        let duration;
+        let speed;
+        let density;
+        let cycleSec;
+        let dt; // Time step per frame
+
+        let prng; // Mulberry32 PRNG instance
+
+        // Uniform locations
+        let u_transform_loc;
+        let u_color_loc;
+        let u_lightDir_loc;
+        let u_lightColor_loc;
+        let u_ambientColor_loc;
+        let u_viewPos_loc;
+
+        // Buffer for cubes
+        let positionBuffer;
+        let normalBuffer;
+
+        const MAX_CUBE_COUNT = 150; // Increased for density
+        let cubeCount;
+        let cubes = [];
+
+        // Colors
+        let palette = [];
+        let lightDir = [0.5, 0.7, 1.0];
+        let lightColor = [1.0, 0.9, 0.7]; // Gold/amber
+        let ambientColor = [0.1, 0.08, 0.05];
+
+        // Camera
+        let cameraRadius;
+        let cameraHeight;
+        let cameraSpeed;
+        let cameraAngle = 0;
+        let viewMatrix = new Float32Array(16);
+        let projectionMatrix = new Float32Array(16);
+
+        // --- Mulberry32 PRNG ---
+        function mulberry32(a) {
+            return function() {
+                let t = a += 0x6D2B79F5;
+                t = Math.imul(t ^ t >>> 15, t | 1);
+                t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+                return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            }
+        }
+
+        // --- Matrix Math (simplified for 4x4) ---
+        const mat4 = {
+            create: () => new Float32Array(16),
+            identity: (out) => {
+                for (let i = 0; i < 16; i++) out[i] = i % 5 == 0 ? 1 : 0;
+                return out;
+            },
+            perspective: (out, fov, aspect, near, far) => {
+                const f = 1.0 / Math.tan(fov / 2);
+                out[0] = f / aspect; out[1] = 0; out[2] = 0; out[3] = 0;
+                out[4] = 0; out[5] = f; out[6] = 0; out[7] = 0;
+                out[8] = 0; out[9] = 0; out[10] = (far + near) / (near - far); out[11] = -1;
+                out[12] = 0; out[13] = 0; out[14] = (2 * far * near) / (near - far); out[15] = 0;
+                return out;
+            },
+            lookAt: (out, eye, center, up) => {
+                let x0, x1, x2, y0, y1, y2, z0, z1, z2, len;
+                let eyex = eye[0];
+                let eyey = eye[1];
+                let eyez = eye[2];
+                let upx = up[0];
+                let upy = up[1];
+                let upz = up[2];
+
+                let centerx = center[0];
+                let centery = center[1];
+                let centerz = center[2];
+
+                z0 = eyex - centerx;
+                z1 = eyey - centery;
+                z2 = eyez - centerz;
+
+                len = 1 / Math.sqrt(z0 * z0 + z1 * z1 + z2 * z2);
+                z0 *= len;
+                z1 *= len;
+                z2 *= len;
+
+                x0 = upy * z2 - upz * z1;
+                x1 = upz * z0 - upx * z2;
+                x2 = upx * z1 - upy * z0;
+
+                len = Math.sqrt(x0 * x0 + x1 * x1 + x2 * x2);
+                if (!len) {
+                    x0 = 0; x1 = 0; x2 = 0;
+                } else {
+                    len = 1 / len;
+                    x0 *= len;
+                    x1 *= len;
+                    x2 *= len;
+                }
+
+                y0 = z1 * x2 - z2 * x1;
+                y1 = z2 * x0 - z0 * x2;
+                y2 = z0 * x1 - z1 * x0;
+
+                len = Math.sqrt(y0 * y0 + y1 * y1 + y2 * y2);
+                if (!len) {
+                    y0 = 0; y1 = 0; y2 = 0;
+                } else {
+                    len = 1 / len;
+                    y0 *= len;
+                    y1 *= len;
+                    y2 *= len;
+                }
+
+                out[0] = x0; out[1] = y0; out[2] = z0; out[3] = 0;
+                out[4] = x1; out[5] = y1; out[6] = z1; out[7] = 0;
+                out[8] = x2; out[9] = y2; out[10] = z2; out[11] = 0;
+                out[12] = -(x0 * eyex + x1 * eyey + x2 * eyez);
+                out[13] = -(y0 * eyex + y1 * eyey + y2 * eyez);
+                out[14] = -(z0 * eyex + z1 * eyey + z2 * eyez);
+                out[15] = 1;
+
+                return out;
+            },
+            multiply: (out, a, b) => {
+                const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+                const a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+                const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+                const a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+
+                let b0 = b[0], b1 = b[1], b2 = b[2], b3 = b[3];
+                out[0] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+                out[1] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+                out[2] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+                out[3] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+
+                b0 = b[4]; b1 = b[5]; b2 = b[6]; b3 = b[7];
+                out[4] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+                out[5] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+                out[6] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+                out[7] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+
+                b0 = b[8]; b1 = b[9]; b2 = b[10]; b3 = b[11];
+                out[8] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+                out[9] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+                out[10] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+                out[11] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+
+                b0 = b[12]; b1 = b[13]; b2 = b[14]; b3 = b[15];
+                out[12] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+                out[13] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+                out[14] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+                out[15] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+                return out;
+            },
+            translate: (out, a, v) => {
+                let x = v[0], y = v[1], z = v[2];
+                let a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+                let a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+                let a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+                let a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+
+                out[0] = a00; out[1] = a01; out[2] = a02; out[3] = a03;
+                out[4] = a10; out[5] = a11; out[6] = a12; out[7] = a13;
+                out[8] = a20; out[9] = a21; out[10] = a22; out[11] = a23;
+
+                out[12] = a00 * x + a10 * y + a20 * z + a30;
+                out[13] = a01 * x + a11 * y + a21 * z + a31;
+                out[14] = a02 * x + a12 * y + a22 * z + a32;
+                out[15] = a03 * x + a13 * y + a23 * z + a33;
+                return out;
+            },
+            scale: (out, a, v) => {
+                let x = v[0], y = v[1], z = v[2];
+                out[0] = a[0] * x; out[1] = a[1] * x; out[2] = a[2] * x; out[3] = a[3] * x;
+                out[4] = a[4] * y; out[5] = a[5] * y; out[6] = a[6] * y; out[7] = a[7] * y;
+                out[8] = a[8] * z; out[9] = a[9] * z; out[10] = a[10] * z; out[11] = a[11] * z;
+                out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+                return out;
+            },
+            rotateX: (out, a, rad) => {
+                let s = Math.sin(rad), c = Math.cos(rad);
+                let a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+                let a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+
+                out[4] = a10 * c + a20 * s;
+                out[5] = a11 * c + a21 * s;
+                out[6] = a12 * c + a22 * s;
+                out[7] = a13 * c + a23 * s;
+
+                out[8] = a20 * c - a10 * s;
+                out[9] = a21 * c - a11 * s;
+                out[10] = a22 * c - a12 * s;
+                out[11] = a23 * c - a13 * s;
+
+                if (a !== out) {
+                    out[0] = a[0]; out[1] = a[1]; out[2] = a[2]; out[3] = a[3];
+                    out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+                }
+                return out;
+            },
+            rotateY: (out, a, rad) => {
+                let s = Math.sin(rad), c = Math.cos(rad);
+                let a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+                let a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+
+                out[0] = a00 * c - a20 * s;
+                out[1] = a01 * c - a21 * s;
+                out[2] = a02 * c - a22 * s;
+                out[3] = a03 * c - a23 * s;
+
+                out[8] = a00 * s + a20 * c;
+                out[9] = a01 * s + a21 * c;
+                out[10] = a02 * s + a22 * c;
+                out[11] = a03 * s + a23 * c;
+
+                if (a !== out) {
+                    out[4] = a[4]; out[5] = a[5]; out[6] = a[6]; out[7] = a[7];
+                    out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+                }
+                return out;
+            },
+            rotateZ: (out, a, rad) => {
+                let s = Math.sin(rad), c = Math.cos(rad);
+                let a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+                let a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+
+                out[0] = a00 * c + a10 * s;
+                out[1] = a01 * c + a11 * s;
+                out[2] = a02 * c + a12 * s;
+                out[3] = a03 * c + a13 * s;
+
+                out[4] = a10 * c - a00 * s;
+                out[5] = a11 * c - a01 * s;
+                out[6] = a12 * c - a02 * s;
+                out[7] = a13 * c - a03 * s;
+
+                if (a !== out) {
+                    out[8] = a[8]; out[9] = a[9]; out[10] = a[10]; out[11] = a[11];
+                    out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+                }
+                return out;
+            }
+        };
+
+        // --- Shader Source ---
+        const vsSource = `
+            attribute vec4 a_position;
+            attribute vec3 a_normal;
+
+            uniform mat4 u_transform; // Model-view-projection matrix
+            uniform mat4 u_model;     // Model matrix
+            uniform vec3 u_color;
+            uniform vec3 u_lightDir;
+            uniform vec3 u_lightColor;
+            uniform vec3 u_ambientColor;
+            uniform vec3 u_viewPos;
+
+            varying lowp vec4 v_color;
+
+            void main() {
+                gl_Position = u_transform * a_position;
+
+                vec3 worldPosition = (u_model * a_position).xyz;
+                vec3 worldNormal = normalize((u_model * vec4(a_normal, 0.0)).xyz);
+
+                // Diffuse lighting
+                float diff = max(dot(worldNormal, normalize(u_lightDir)), 0.0);
+                vec3 diffuse = u_lightColor * diff;
+
+                // Specular lighting (simple Phong)
+                vec3 viewDir = normalize(u_viewPos - worldPosition);
+                vec3 reflectDir = reflect(-normalize(u_lightDir), worldNormal);
+                float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0); // Shininess factor
+                vec3 specular = u_lightColor * spec * 0.7; // Reduced specular intensity
+
+                vec3 finalColor = u_ambientColor + diffuse + specular;
+
+                v_color = vec4(finalColor * u_color, 1.0);
+            }
+        `;
+
+        const fsSource = `
+            precision mediump float;
+            varying lowp vec4 v_color;
+
+            void main() {
+                gl_FragColor = v_color;
+            }
+        `;
+
+        // --- WebGL Initialization ---
+        function initWebGL() {
+            canvas = document.getElementById('glcanvas');
+            width = parseInt(getParam('width', '1920'));
+            height = parseInt(getParam('height', '1080'));
+            canvas.width = width;
+            canvas.height = height;
+
+            gl = canvas.getContext('webgl', {
+                preserveDrawingBuffer: true,
+                antialias: true // Can help with crispness
+            });
+
+            if (!gl) {
+                console.error('Unable to initialize WebGL. Your browser may not support it.');
+                return false;
+            }
+
+            gl.enable(gl.DEPTH_TEST);
+            gl.depthFunc(gl.LEQUAL);
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // Additive blending
+
+            const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+            program = shaderProgram;
+
+            gl.useProgram(program);
+
+            // Get attribute and uniform locations
+            program.attribLocations = {
+                position: gl.getAttribLocation(program, 'a_position'),
+                normal: gl.getAttribLocation(program, 'a_normal'),
+            };
+            u_transform_loc = gl.getUniformLocation(program, 'u_transform');
+            u_model_loc = gl.getUniformLocation(program, 'u_model');
+            u_color_loc = gl.getUniformLocation(program, 'u_color');
+            u_lightDir_loc = gl.getUniformLocation(program, 'u_lightDir');
+            u_lightColor_loc = gl.getUniformLocation(program, 'u_lightColor');
+            u_ambientColor_loc = gl.getUniformLocation(program, 'u_ambientColor');
+            u_viewPos_loc = gl.getUniformLocation(program, 'u_viewPos');
+
+
+            // Create cube buffers
+            positionBuffer = gl.createBuffer();
+            normalBuffer = gl.createBuffer();
+            setupCubeBuffers();
+
+            return true;
+        }
+
+        function initShaderProgram(gl, vsSource, fsSource) {
+            const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+            const shaderProgram = gl.createProgram();
+            gl.attachShader(shaderProgram, vertexShader);
+            gl.attachShader(shaderProgram, fragmentShader);
+            gl.linkProgram(shaderProgram);
+
+            if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+                console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
+                return null;
+            }
+            return shaderProgram;
+        }
+
+        function loadShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        function setupCubeBuffers() {
+            // Define a cube with positions and normals
+            const positions = new Float32Array([
+                // Front face
+                -1.0, -1.0,  1.0,
+                 1.0, -1.0,  1.0,
+                 1.0,  1.0,  1.0,
+                -1.0, -1.0,  1.0,
+                 1.0,  1.0,  1.0,
+                -1.0,  1.0,  1.0,
+
+                // Back face
+                -1.0, -1.0, -1.0,
+                -1.0,  1.0, -1.0,
+                 1.0,  1.0, -1.0,
+                -1.0, -1.0, -1.0,
+                 1.0,  1.0, -1.0,
+                 1.0, -1.0, -1.0,
+
+                // Top face
+                -1.0,  1.0, -1.0,
+                -1.0,  1.0,  1.0,
+                 1.0,  1.0,  1.0,
+                -1.0,  1.0, -1.0,
+                 1.0,  1.0,  1.0,
+                 1.0,  1.0, -1.0,
+
+                // Bottom face
+                -1.0, -1.0, -1.0,
+                 1.0, -1.0, -1.0,
+                 1.0, -1.0,  1.0,
+                -1.0, -1.0, -1.0,
+                 1.0, -1.0,  1.0,
+                -1.0, -1.0,  1.0,
+
+                // Right face
+                 1.0, -1.0, -1.0,
+                 1.0,  1.0, -1.0,
+                 1.0,  1.0,  1.0,
+                 1.0, -1.0, -1.0,
+                 1.0,  1.0,  1.0,
+                 1.0, -1.0,  1.0,
+
+                // Left face
+                -1.0, -1.0, -1.0,
+                -1.0, -1.0,  1.0,
+                -1.0,  1.0,  1.0,
+                -1.0, -1.0, -1.0,
+                -1.0,  1.0,  1.0,
+                -1.0,  1.0, -1.0,
+            ]);
+
+            const normals = new Float32Array([
+                // Front
+                 0.0,  0.0,  1.0,
+                 0.0,  0.0,  1.0,
+                 0.0,  0.0,  1.0,
+                 0.0,  0.0,  1.0,
+                 0.0,  0.0,  1.0,
+                 0.0,  0.0,  1.0,
+
+                // Back
+                 0.0,  0.0, -1.0,
+                 0.0,  0.0, -1.0,
+                 0.0,  0.0, -1.0,
+                 0.0,  0.0, -1.0,
+                 0.0,  0.0, -1.0,
+                 0.0,  0.0, -1.0,
+
+                // Top
+                 0.0,  1.0,  0.0,
+                 0.0,  1.0,  0.0,
+                 0.0,  1.0,  0.0,
+                 0.0,  1.0,  0.0,
+                 0.0,  1.0,  0.0,
+                 0.0,  1.0,  0.0,
+
+                // Bottom
+                 0.0, -1.0,  0.0,
+                 0.0, -1.0,  0.0,
+                 0.0, -1.0,  0.0,
+                 0.0, -1.0,  0.0,
+                 0.0, -1.0,  0.0,
+                 0.0, -1.0,  0.0,
+
+                // Right
+                 1.0,  0.0,  0.0,
+                 1.0,  0.0,  0.0,
+                 1.0,  0.0,  0.0,
+                 1.0,  0.0,  0.0,
+                 1.0,  0.0,  0.0,
+                 1.0,  0.0,  0.0,
+
+                // Left
+                -1.0,  0.0,  0.0,
+                -1.0,  0.0,  0.0,
+                -1.0,  0.0,  0.0,
+                -1.0,  0.0,  0.0,
+                -1.0,  0.0,  0.0,
+                -1.0,  0.0,  0.0,
+            ]);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, normals, gl.STATIC_DRAW);
+        }
+
+        function drawScene() {
+            gl.clearColor(0.0, 0.0, 0.0, 1.0); // Clear to black
+            gl.clearDepth(1.0); // Clear everything
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            gl.useProgram(program);
+
+            // Set up camera
+            const fieldOfView = 45 * Math.PI / 180; // in radians
+            const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+            const zNear = 0.1;
+            const zFar = 100.0;
+            mat4.perspective(projectionMatrix, fieldOfView, aspect, zNear, zFar);
+
+            const camX = cameraRadius * Math.sin(cameraAngle);
+            const camZ = cameraRadius * Math.cos(cameraAngle);
+            const cameraPosition = [camX, cameraHeight, camZ]; // Fixed height
+            const target = [0, 0, 0];
+            const up = [0, 1, 0];
+            mat4.lookAt(viewMatrix, cameraPosition, target, up);
+
+            gl.uniform3fv(u_lightDir_loc, normalizeVector(lightDir));
+            gl.uniform3fv(u_lightColor_loc, lightColor);
+            gl.uniform3fv(u_ambientColor_loc, ambientColor);
+            gl.uniform3fv(u_viewPos_loc, cameraPosition);
+
+            // Set positions
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.vertexAttribPointer(program.attribLocations.position, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(program.attribLocations.position);
+
+            // Set normals
+            gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+            gl.vertexAttribPointer(program.attribLocations.normal, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(program.attribLocations.normal);
+
+            for (let i = 0; i < cubeCount; i++) {
+                const cube = cubes[i];
+                const modelMatrix = mat4.create();
+                mat4.identity(modelMatrix);
+                mat4.translate(modelMatrix, modelMatrix, cube.position);
+                mat4.rotateX(modelMatrix, modelMatrix, cube.rotation[0]);
+                mat4.rotateY(modelMatrix, modelMatrix, cube.rotation[1]);
+                mat4.rotateZ(modelMatrix, modelMatrix, cube.rotation[2]);
+                mat4.scale(modelMatrix, modelMatrix, [cube.scale, cube.scale, cube.scale]);
+
+                const modelViewProjectionMatrix = mat4.create();
+                mat4.multiply(modelViewProjectionMatrix, projectionMatrix, viewMatrix);
+                mat4.multiply(modelViewProjectionMatrix, modelViewProjectionMatrix, modelMatrix);
+
+                gl.uniformMatrix4fv(u_transform_loc, false, modelViewProjectionMatrix);
+                gl.uniformMatrix4fv(u_model_loc, false, modelMatrix); // Pass model matrix for normals
+                gl.uniform3fv(u_color_loc, cube.color);
+
+                gl.drawArrays(gl.TRIANGLES, 0, 36); // 36 vertices for a cube (6 faces * 2 triangles * 3 vertices)
+            }
+        }
+
+        function normalizeVector(v) {
+            const len = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            return [v[0] / len, v[1] / len, v[2] / len];
+        }
+
+        // --- Core Simulation Logic ---
+        function getParam(name, defaultValue) {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get(name) || defaultValue;
+        }
+
+        function HSLtoRGB(h, s, l) {
+            h /= 360;
+            s /= 100;
+            l /= 100;
+            let c = (1 - Math.abs(2 * l - 1)) * s;
+            let x = c * (1 - Math.abs((h * 6) % 2 - 1));
+            let m = l - c / 2;
+            let r = 0, g = 0, b = 0;
+
+            if (0 <= h && h < 1 / 6) {
+                r = c; g = x; b = 0;
+            } else if (1 / 6 <= h && h < 2 / 6) {
+                r = x; g = c; b = 0;
+            } else if (2 / 6 <= h && h < 3 / 6) {
+                r = 0; g = c; b = x;
+            } else if (3 / 6 <= h && h < 4 / 6) {
+                r = 0; g = x; b = c;
+            } else if (4 / 6 <= h && h < 5 / 6) {
+                r = x; g = 0; b = c;
+            } else if (5 / 6 <= h && h < 1) {
+                r = c; g = 0; b = x;
+            }
+            r = (r + m);
+            g = (g + m);
+            b = (b + m);
+            return [r, g, b];
+        }
+
+        function initParams() {
+            seed = parseInt(getParam('seed', '12345'));
+            prng = mulberry32(seed);
+
+            width = parseInt(getParam('width', '1920'));
+            height = parseInt(getParam('height', '1080'));
+            fps = parseInt(getParam('fps', '24'));
+            duration = parseInt(getParam('duration', '3600'));
+            speed = parseFloat(getParam('speed', '1'));
+            density = parseFloat(getParam('density', '1'));
+            cycleSec = parseFloat(getParam('cycleSec', '90'));
+
+            dt = 1 / fps;
+            window.TOTAL_FRAMES = Math.round(duration * fps);
+
+            // Derived from photo inspiration: gold/amber, with hints of orange/red
+            // Base hues: gold (around 40-50), orange (around 20-30), reddish-orange (around 10-20)
+            const baseHue1 = 40 + prng() * 10; // Gold-ish
+            const baseHue2 = (baseHue1 + 60 + prng() * 20) % 360; // Offset hue
+            const baseHue3 = (baseHue1 - 60 - prng() * 20 + 360) % 360; // Other offset hue
+            
+            palette = [
+                HSLtoRGB(baseHue1, 80 + prng() * 10, 50 + prng() * 10), // Gold
+                HSLtoRGB(baseHue2, 70 + prng() * 10, 45 + prng() * 10), // Orange/Reddish
+                HSLtoRGB(baseHue3, 75 + prng() * 10, 55 + prng() * 10)  // Slightly different gold/amber
+            ];
+
+            // Normalize light direction for shader
+            lightDir = [prng() * 2 - 1, 0.5 + prng() * 0.5, prng() * 2 - 1]; // More consistent Y direction
+            lightColor = [0.9 + prng() * 0.1, 0.8 + prng() * 0.1, 0.6 + prng() * 0.1]; // Warm gold/amber light
+            ambientColor = [0.08 + prng() * 0.02, 0.07 + prng() * 0.02, 0.04 + prng() * 0.02]; // Darker ambient
+
+            cubeCount = Math.floor(20 + prng() * (MAX_CUBE_COUNT - 20) * density);
+            
+            // Camera setup
+            cameraRadius = 15 + prng() * 5; // Fixed camera radius
+            cameraHeight = 5 + prng() * 3; // Fixed camera height
+            cameraSpeed = (0.5 + prng() * 1.0) * speed; // Radians per second
+
+            initCubes();
+        }
+
+        function initCubes() {
+            cubes = [];
+            const centralClusterRadius = 4.0;
+            const outerOrbitRadius = 6.0;
+
+            for (let i = 0; i < cubeCount; i++) {
+                const colorIndex = Math.floor(prng() * palette.length);
+                const baseScale = 0.2 + prng() * 0.3 * density;
+                const scaleVariance = (prng() * 0.5 + 0.5) * baseScale; // Scale from 0.5*base to 1*base
+                
+                let position;
+                let orbitRadius;
+                if (prng() < 0.6) { // More cubes in a central cluster
+                    const angle = prng() * Math.PI * 2;
+                    const r = prng() * centralClusterRadius;
+                    position = [
+                        r * Math.cos(angle) * (0.5 + prng() * 0.5),
+                        (prng() * 2 - 1) * 2, // Y position
+                        r * Math.sin(angle) * (0.5 + prng() * 0.5)
+                    ];
+                    orbitRadius = r;
+                } else { // Some cubes in a wider orbit
+                    const angle = prng() * Math.PI * 2;
+                    const r = outerOrbitRadius + prng() * 3;
+                    position = [
+                        r * Math.cos(angle),
+                        (prng() * 2 - 1) * 3,
+                        r * Math.sin(angle)
+                    ];
+                    orbitRadius = r;
+                }
+
+                const orbitSpeed = (0.4 + prng() * 1.2) * speed * (prng() < 0.5 ? 1 : -1); // Lively pace
+                const rotSpeedX = (0.5 + prng() * 1.5) * speed * (prng() < 0.5 ? 1 : -1);
+                const rotSpeedY = (0.5 + prng() * 1.5) * speed * (prng() < 0.5 ? 1 : -1);
+                const rotSpeedZ = (0.5 + prng() * 1.5) * speed * (prng() < 0.5 ? 1 : -1);
+
+                cubes.push({
+                    position: position,
+                    initialAngle: Math.atan2(position[2], position[0]),
+                    orbitRadius: Math.sqrt(position[0]*position[0] + position[2]*position[2]),
+                    orbitSpeed: orbitSpeed,
+                    rotation: [prng() * Math.PI * 2, prng() * Math.PI * 2, prng() * Math.PI * 2],
+                    rotationSpeed: [rotSpeedX, rotSpeedY, rotSpeedZ],
+                    color: palette[colorIndex],
+                    scale: scaleVariance
+                });
+            }
+        }
+
+        function updateSimulation() {
+            const time = window.currentFrame * dt;
+
+            // Camera movement
+            cameraAngle += cameraSpeed * dt * speed;
+            if (cameraAngle >= Math.PI * 2) cameraAngle -= Math.PI * 2;
+
+            // Cube movement and rotation
+            for (let i = 0; i < cubeCount; i++) {
+                const cube = cubes[i];
+
+                // Orbital movement (mostly in XZ plane)
+                const currentAngle = cube.initialAngle + time * cube.orbitSpeed;
+                cube.position[0] = cube.orbitRadius * Math.cos(currentAngle);
+                cube.position[2] = cube.orbitRadius * Math.sin(currentAngle);
+                // Simple oscillating Y movement for some cubes
+                if (i % 3 === 0) {
+                     cube.position[1] = 2 * Math.sin(time * 0.5 * speed + cube.initialAngle);
+                } else if (i % 2 === 0) {
+                     cube.position[1] = 1 * Math.cos(time * 0.7 * speed + cube.initialAngle);
+                }
+
+
+                cube.rotation[0] += cube.rotationSpeed[0] * dt * speed;
+                cube.rotation[1] += cube.rotationSpeed[1] * dt * speed;
+                cube.rotation[2] += cube.rotationSpeed[2] * dt * speed;
+
+                for (let j = 0; j < 3; j++) {
+                    if (cube.rotation[j] >= Math.PI * 2) cube.rotation[j] -= Math.PI * 2;
+                    if (cube.rotation[j] < 0) cube.rotation[j] += Math.PI * 2;
+                }
+
+                // Gently modulate cube color/saturation over time
+                const baseColor = palette[Math.floor(i % palette.length)];
+                const hueShift = Math.sin(time * 0.1 * speed + i) * 10;
+                const satShift = Math.sin(time * 0.2 * speed + i * 0.5) * 5;
+                const lightShift = Math.sin(time * 0.15 * speed + i * 0.2) * 5;
+
+                // Re-calculating HSL for modulation (simplified, not exact reverse transform)
+                // This is a rough way to shift HSL for a given RGB base
+                // For a more accurate shift, convert RGB to HSL, modify, then back to RGB
+                // For now, simple direct shifts on RGB components to get a 'breathing' effect
+                cube.color[0] = Math.max(0, Math.min(1, baseColor[0] + Math.sin(time * 0.2 + i * 0.1) * 0.05));
+                cube.color[1] = Math.max(0, Math.min(1, baseColor[1] + Math.sin(time * 0.15 + i * 0.2) * 0.05));
+                cube.color[2] = Math.max(0, Math.min(1, baseColor[2] + Math.sin(time * 0.25 + i * 0.3) * 0.05));
+            }
+        }
+
+        // --- External API ---
+        window.advanceFrame = function() {
+            updateSimulation();
+            drawScene();
+            window.currentFrame++;
+        };
+
+        window.advanceFrames = function(n) {
+            for (let i = 0; i < n; i++) {
+                window.advanceFrame();
+            }
+        };
+
+        // --- Context Loss/Restore Handling ---
+        function handleContextLost(event) {
+            event.preventDefault();
+            console.warn('WebGL context lost. Attempting to restore...');
+            // Stop drawing, wait for restore
+            window.READY = false;
+        }
+
+        function handleContextRestored() {
+            console.log('WebGL context restored. Re-initializing...');
+            // Re-initialize all GL resources
+            if (initWebGL()) {
+                initParams(); // Re-seed to ensure same state as before loss if possible
+                // Re-advance frames to the current time to restore state
+                // Note: currentFrame would not have been reset by the renderer
+                const framesToCatchUp = window.currentFrame;
+                window.currentFrame = 0; // Reset for re-simulation
+                for (let i = 0; i < framesToCatchUp; i++) {
+                    updateSimulation();
+                }
+                drawScene(); // Draw the current state immediately after restore
+                window.READY = true;
+                console.log('WebGL context re-initialized and ready.');
+            } else {
+                console.error('Failed to re-initialize WebGL context.');
+            }
+        }
+
+        // --- Initialization ---
+        function initialize() {
+            // Give a short delay for potential early context loss to fire
+            setTimeout(() => {
+                const canvasElement = document.getElementById('glcanvas');
+                canvasElement.addEventListener('webglcontextlost', handleContextLost, false);
+                canvasElement.addEventListener('webglcontextrestored', handleContextRestored, false);
+
+                if (initWebGL()) {
+                    initParams();
+                    drawScene(); // Initial draw
+                    window.READY = true;
+                    console.log('Engine ready.');
+                } else {
+                    console.error('Initial WebGL setup failed.');
+                }
+            }, 300); // 300ms delay
+        }
+
+        document.addEventListener('DOMContentLoaded', initialize);
+    </script>
+</body>
+</html>
