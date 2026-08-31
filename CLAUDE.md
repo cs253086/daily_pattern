@@ -2027,6 +2027,95 @@ multiple seeds confirmed vivid, bold, independently-spinning packed-mosaic
 clusters, clearly legible as a multi-instance field rather than one
 dominant centred mandala.
 
+## Dendritic-growth engine (`dendrite.html`) — 2026-08-31
+
+Daily creative-research routine. Category was "random Wikipedia article" by
+the firing-minute-mod-category-count method. An open WebSearch for
+"unusual natural pattern mineral crystal growth structure mathematics
+symmetry" surfaced several crystal-formation candidates -- crystal
+twinning (two lattices grown together across a mirror-symmetric boundary),
+phantom crystals, dendritic (tree-like branching) crystals, and botryoidal
+(rounded, grape-like) formations. Picked **dendritic crystal growth**
+deliberately over the other three: twinning's mirror-symmetric composite
+shape risked reading too close to the pool's existing mirror/radial-
+symmetric engines, and botryoidal's rounded clustered-bubble form would
+read as a soft organic blob, directly against the house style's "crisp
+straight edges... not soft organic blobs" rule. Dendritic growth -- the
+branching pattern seen in frost on glass, manganese/pyrolusite mineral
+dendrites, and Lichtenberg figures (branching electrical-discharge marks)
+-- is naturally renderable as crisp straight branch segments (real
+dendrites and Lichtenberg figures ARE jagged/faceted, not smooth curves).
+
+**What it is**: a genuinely different construction PRINCIPLE from
+everything else in the pool: not an arithmetic sieve (`primespiral.html`),
+not a substitution/subdivision system that repartitions a fixed area
+(`quasicrystal.html`), not a discrete cellular-automaton local rule
+(`automaton.html`), not an implicit wave-interference zero-set
+(`chladni.html`), not a golden-angle packing rule (`phyllotaxis.html`) --
+a RECURSIVE BRANCHING growth process: each segment spawns two shorter,
+angularly-offset child segments, generation after generation (the classic
+fractal-tree/L-system construction). Rendered as several independent
+dendrites placed in a near-regular grid of cells -- deliberately NOT one
+centred radially-symmetric "snowflake" (which would land back in the
+pool's already-crowded centred-radial-mandala archetype per the
+"Archetype clustering" section above) and NOT a single directional sweep
+(`cascade.html` already owns that archetype) -- each spinning
+independently on its own axis. Every branch segment's position, width,
+and colour is computed once per video (`initDendrites()`); only each
+dendrite's own rotation angle/rate resets per cycle
+(`reconfigureSpins()`), the same "compute once, only rotate/spin per
+frame" pattern established for `quasicrystal.html`/`chladni.html`/
+`ziggurat.html`/`primespiral.html`/`phyllotaxis.html`.
+
+**Two real bugs found only by rendering frames and looking, not by
+reasoning about the code**:
+
+1. **Fully-random placement with a fully-random, position-independent
+   growth direction regularly sent whole trees sprawling off-canvas.** A
+   dendrite's reach (roughly 3.3x its trunk length, from the geometric
+   series of the length-decay ratio) has nothing to do with where it
+   starts or which direction it happens to grow, so a tree could easily
+   fly off one edge of the frame -- leaving a large, mostly-empty black
+   canvas, directly against the house style's "vivid, bold" rule. The
+   same wide random branch-angle spread also occasionally accumulated
+   across generations into a tree curling back and crossing its own
+   trunk, reading as a tangled mess rather than a clean fractal fork.
+   Fixed by applying the exact composition-level fix `phyllotaxis.html`'s
+   final design settled on: place dendrites in a near-regular grid of
+   cells (not fully random points) and scale each dendrite's trunk length
+   down from its own cell size, so its full statistical reach stays
+   within its cell regardless of which random direction or angle sequence
+   it happens to draw. Also tightened the per-branch angle spread (0.26-
+   0.46 rad, down from 0.32-0.62) to reduce the self-crossing risk at the
+   source, not just contain its consequences.
+2. **The first cell-confined version still clipped at cell/canvas edges**
+   for a wide (3-column) grid layout: the cluster radius (up to 0.72x the
+   cell's smaller dimension) exceeded HALF that dimension, so a dendrite
+   oriented toward a cell boundary could reach past it. Fixed by capping
+   the radius to 0.44-0.5x the cell's smaller dimension, comfortably under
+   the 0.5x safety line with margin -- verified across both the 3-column
+   and 2x2-grid density layouts with no further clipping.
+
+**Verified**: `validateEngine()` across seeds 1-10 -- **10/10 passed**.
+Margins comfortable throughout: `projectedRise` -3.6 to +6.1 (vs the 50
+threshold), `avgSat` 63.7-69.0 (vs the 22 minimum), zero near-white
+pixels, `fastMotion` comfortably above its floor on every seed,
+`projectedHourRenderMin` 13.3-35.5min (well inside the CI budget). Visual
+spot-checks across 25/50/75/95/105% of a cycle at 5 seeds, and both the
+3-dendrite and 4-dendrite (2x2) grid layouts, confirmed bold, vivid,
+coral/fern-like fractal trees with no clipping or self-crossing after the
+fixes.
+
+**Novelty gate**: measured against all 24 existing engines (the committed
+fingerprint cache was several commits behind -- missing two Gemini-
+promoted engines plus `phyllotaxis.html` and `primespiral.html` -- so all
+four were fingerprinted fresh alongside the candidate) using
+`fingerprintEngine`/`zscoreMatrix`/`distance` from `src/fingerprint.js`.
+Nearest neighbour is `auto-2026-08-30-scenic-view-of-gardens` at distance
+**0.785** -- comfortably clear of the 0.60 threshold, passing on the
+first attempt (the two fixes above were visual-quality iterations before
+ever running the gate, not novelty-gate failures).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
