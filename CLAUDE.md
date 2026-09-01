@@ -2116,6 +2116,138 @@ Nearest neighbour is `auto-2026-08-30-scenic-view-of-gardens` at distance
 first attempt (the two fixes above were visual-quality iterations before
 ever running the gate, not novelty-gate failures).
 
+## Geodesic dome engine (`geodome.html`) — 2026-09-01
+
+Daily creative-research routine. Category was "random architectural or
+typographic movement" by the firing-minute-mod-category-count method. An
+open WebSearch for a geometric architectural structural principle surfaced
+the **geodesic dome** -- Buckminster Fuller's structure built by
+triangulating an icosahedron's faces ("frequency" subdivision) and
+projecting every new vertex outward onto a circumscribing sphere,
+distributing structural load evenly across a lattice of near-equal
+triangles. The curated pool was also explicitly 3D-poor at the time (4 of
+25 engines real WebGL), and this inspiration genuinely supports a real
+lit-3D rendering rather than forcing one, so it was built as the pool's
+FOURTH real-WebGL engine. Sources:
+[HowStuffWorks](https://science.howstuffworks.com/engineering/structural/geodesic-dome.htm),
+[The R. Buckminster Fuller FAQ](https://www.cjfearnley.com/fuller-faq-4.html).
+
+**What it is**: an icosahedron subdivided N times (each new edge midpoint
+re-projected onto the unit sphere -- the real Fuller-dome "frequency"
+construction, not an approximation), cut below a fixed latitude for a
+recognisable dome silhouette (not a full sphere), rendered as ONE
+continuous faceted mesh in a SINGLE WebGL draw call (per-vertex colour via
+an `aColor` attribute, not a per-object uniform like `solids3d.html`) so
+hundreds of differently-coloured triangles render fast enough for the
+render budget. A genuinely different 3D composition from every other
+real-WebGL engine in the pool: not sparse orbiting solids (`solids3d.html`),
+not a grid of independently-spinning cubes (`lattice3d.html`), not lit
+tori/rings (`torusrings3d.html`) -- one large continuous faceted surface,
+lit and depth-sorted as a single solid mesh.
+
+**Icosahedron vertex/face data and the subdivision's topology were
+verified OFFLINE before writing any rendering code** (a standalone script
+confirmed every edge is shared by exactly 2 triangles and winding is
+consistent, at the base 20-face level and after 3 subdivision levels,
+1280 triangles) -- the same discipline this file already documents for
+`quasicrystal.html`'s Robinson-triangle formulas: a subtly wrong
+subdivision produces a mesh with gaps/overlaps that can still look
+plausible at a glance.
+
+**Three real bugs found only by rendering and running `validate.js`, the
+third needing substantially more iteration than any prior engine's motion
+fix**:
+
+1. **A centroid-only dome-cut filter let thin dark slivers through.** The
+   first cut test averaged a triangle's 3 vertex heights and kept it if
+   the average cleared the cut plane -- this let through boundary
+   triangles with one vertex well below the cut, rendering as small dark
+   slivers poking below the dome's main silhouette. Fixed by requiring
+   ALL THREE vertices to clear the cut plane, giving a clean (if jagged,
+   like a real triangulated dome's base ring) rim with no partial faces.
+2. **Colouring each face by LONGITUDE (theta) failed the brightness-trend
+   check** (projected +208 luma over a full render). As the dome spins
+   about its own vertical axis, depth occlusion exposes a DIFFERENT half
+   of the theta-based colour wheel to the camera each cycle, and since
+   HSL hue affects luma at fixed saturation/lightness, which half happens
+   to be visible swings average frame brightness -- the same "hue affects
+   luma" lesson `quasicrystal.html` already documents, just reached via
+   3D depth-occlusion visibility (the failure class this file documents
+   for `solids3d.html`) rather than a re-randomised per-cycle parameter.
+   Fixed by tying hue to LATITUDE (phi) instead, which is invariant under
+   a Y-axis rotation -- spinning the dome never changes which latitude
+   band a face belongs to, so the visible hue distribution stays constant
+   at every rotation angle by construction.
+3. **That fix then made the dome look visually self-similar under
+   rotation to the fast-motion check** (every longitude at a given
+   latitude is now the same colour) -- the same underlying problem
+   `torusrings3d.html` hit from its own silhouette-invariant spin, just
+   reached by an accidentally rotation-invariant colour field instead of
+   an exactly-symmetric shape. `validateEngine()` failed fastMotion on
+   5/5 tested seeds even after raising the rotation rate to 0.9-1.4 rad/s.
+   A diagnostic dump confirmed the root cause: the fast-motion floor (12%
+   of `peakStd`) is dominated by the high black-background/lit-dome
+   contrast, which a silhouette-invariant spin can never move enough of
+   to register. Fixed with THREE independent, coverage-neutral levers
+   layered together after many rounds of parameter tuning (a real
+   whack-a-mole -- raising one lever's amplitude fixed some seeds while
+   breaking others, since the light/tilt phase relationships are fixed
+   constants, not seed-derived, so their interaction with each seed's
+   random geometry/hue differs unpredictably):
+   - A small longitude-based SATURATION ripple (not hue) -- saturation
+     has a far smaller, more predictable effect on luma than hue at fixed
+     lightness, restoring a longitude-visible cue without the occlusion/
+     hue-luma coupling that caused bug 2.
+   - A bounded, dual-frequency light-direction oscillation (never
+     sweeping fully behind the dome into a dark silhouette state, unlike
+     an early full 360-degree sweep that reintroduced the brightness-
+     trend bug at the same magnitude as bug 2).
+   - A small, CONTINUOUS tilt wobble -- critically, fixed once at
+     start-up and never reset by the per-`cycleSec` reconfigure (an
+     earlier version that DID reset tilt phase/rate every cycle turned
+     out to be a fourth real bug: each fresh reconfigure lands the tilt's
+     sine wave at an uncorrelated random phase, so validate.js's 8
+     widely-spaced samples -- each landing in a different reconfigure
+     cycle -- see essentially independent random coverage draws instead
+     of a smoothly-averaging periodic signal, occasionally producing a
+     spurious trend).
+
+**Verified**: `validateEngine()` across a 16-seed stress battery (seeds
+1-13, 17, 42, 99, plus the CLI's actual default seed 12345 -- discovered
+mid-debugging that `validate.js`'s CLI entry point and `validateEngine()`'s
+own internal default seed is 12345, NOT 1; testing only seed 1 gave a
+false sense of confidence early on) -- **13/16 passed, including the
+production-default seed**. The 3 residual failures (seed 3: +54.9
+brightness; seeds 42/99: fast-motion) persisted across many different
+structural adjustments (hemisphere vs. 5/8-sphere cut, several tilt/light
+amplitude combinations) without a clean elimination. This is treated as
+consistent with this file's own documented, accepted residual-failure-rate
+for real 3D depth-occlusion engines (see `solids3d.html`'s "a small
+residual failure rate remains as an honest, inherent property of dynamic
+3D occlusion, not a bug" and `torusrings3d.html`'s similar motion-check
+struggle above) rather than an uncaught bug -- curated engines are a
+design-time sanity check only and never run `validate.js` at production
+runtime. `avgSat` 46.7-62.3 throughout (well above the 22 minimum), zero
+near-white pixels, `projectedHourRenderMin` 37.9min on the default seed
+(well inside the CI budget). Visual spot-checks across 25/50/75/95/105%
+of a cycle at multiple seeds confirmed a vivid, bold, cleanly-triangulated
+faceted dome with a correct zigzag rim (no sliver artifacts) and a smooth
+latitude-banded rainbow gradient.
+
+**Novelty gate**: measured against all 25 existing engines (the committed
+fingerprint cache was several commits behind -- missing two Gemini-
+promoted engines plus `phyllotaxis.html`/`primespiral.html`/
+`dendrite.html` -- so all five were fingerprinted fresh alongside the
+candidate) using `fingerprintEngine`/`zscoreMatrix`/`distance` from
+`src/fingerprint.js`. Nearest neighbour is `quasicrystal` at distance
+**1.292** -- more than double the 0.60 threshold and above the pool's own
+median pair distance (1.263), confirming this is a genuinely distinct
+composition, not a borderline case. Notably, none of the other three real
+3D engines (`solids3d`, `lattice3d`, `torusrings3d`) placed among the
+nearest handful of neighbours, confirming a single continuous faceted dome
+reads as structurally distinct from every other 3D composition already in
+the pool.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

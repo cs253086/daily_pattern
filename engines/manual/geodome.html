@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Geodesic Dome — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated engine, inspired by a genuinely random web find (today's
+// creative-research routine): the GEODESIC DOME -- Buckminster Fuller's
+// architectural structure built by triangulating an icosahedron's faces
+// ("frequency" subdivision) and projecting every new vertex outward onto a
+// circumscribing sphere, distributing structural load evenly across a
+// lattice of near-equal triangles. See CLAUDE.md's dated write-up for the
+// search trail.
+//
+// A genuinely different 3D composition from every other real-WebGL engine
+// in the pool: not a handful of sparse orbiting solids (solids3d.html), not
+// a dense fixed GRID of independently-spinning cubes (lattice3d.html), not
+// lit tori/rings (torusrings3d.html) -- ONE large continuous faceted
+// surface (a subdivided icosahedral dome), lit and depth-sorted as a single
+// solid mesh in a single draw call. This is also a genuinely different
+// construction PRINCIPLE from every 2D curated engine: not a substitution
+// system confined to a flat decagon (quasicrystal.html) but a real
+// spherical subdivision + projection in 3D.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. WebGL context MUST be created with
+// preserveDrawingBuffer:true (see solids3d.html's write-up for why) and
+// handle the same startup-only webglcontextlost/restored dance. gl.clear()
+// to opaque black every frame -- structurally whiteout-proof, same as every
+// other real-WebGL engine here.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 40);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true, antialias: true })
+    || canvas.getContext('experimental-webgl', { preserveDrawingBuffer: true, antialias: true });
+
+  // Same startup-only context-loss risk documented in solids3d.html --
+  // headless software WebGL (swiftshader) intermittently fires a spurious
+  // webglcontextlost shortly after context creation, never observed mid-
+  // render past the first couple of frames. Defer window.READY until any
+  // early loss has had a chance to fire and recover.
+  let contextLost = false;
+  canvas.addEventListener('webglcontextlost', (e) => {
+    contextLost = true;
+    e.preventDefault();
+  });
+  canvas.addEventListener('webglcontextrestored', () => {
+    initGL();
+    contextLost = false;
+  });
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+  function hsl2rgb(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [f(0), f(8), f(4)];
+  }
+
+  // ---- Minimal column-major mat4 helpers (WebGL/GLSL convention, same as
+  // solids3d.html) ---------------------------------------------------------
+  function mat4Identity() { return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); }
+  function mat4Multiply(a, b) {
+    const out = new Float32Array(16);
+    for (let c = 0; c < 4; c++) {
+      for (let r = 0; r < 4; r++) {
+        let sum = 0;
+        for (let k = 0; k < 4; k++) sum += a[k * 4 + r] * b[c * 4 + k];
+        out[c * 4 + r] = sum;
+      }
+    }
+    return out;
+  }
+  function mat4Perspective(fovyRad, aspect, near, far) {
+    const f = 1 / Math.tan(fovyRad / 2);
+    const nf = 1 / (near - far);
+    const out = new Float32Array(16);
+    out[0] = f / aspect; out[5] = f; out[10] = (far + near) * nf; out[11] = -1;
+    out[14] = 2 * far * near * nf;
+    return out;
+  }
+  function mat4RotateY(a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    const m = mat4Identity(); m[0] = c; m[2] = -s; m[8] = s; m[10] = c; return m;
+  }
+  function mat4RotateX(a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    const m = mat4Identity(); m[5] = c; m[6] = s; m[9] = -s; m[10] = c; return m;
+  }
+  function mat4Scale(s) {
+    const m = mat4Identity(); m[0] = s; m[5] = s; m[10] = s; return m;
+  }
+  // Standard column-major lookAt (verified against mat4RotateY's column
+  // layout offline before use -- see CLAUDE.md's dated write-up).
+  function mat4LookAt(eye, target, up) {
+    let zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
+    let zl = Math.hypot(zx, zy, zz) || 1; zx /= zl; zy /= zl; zz /= zl;
+    let xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+    let xl = Math.hypot(xx, xy, xz) || 1; xx /= xl; xy /= xl; xz /= xl;
+    const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+    const out = new Float32Array(16);
+    out[0] = xx; out[1] = yx; out[2] = zx; out[3] = 0;
+    out[4] = xy; out[5] = yy; out[6] = zy; out[7] = 0;
+    out[8] = xz; out[9] = yz; out[10] = zz; out[11] = 0;
+    out[12] = -(xx * eye[0] + xy * eye[1] + xz * eye[2]);
+    out[13] = -(yx * eye[0] + yy * eye[1] + yz * eye[2]);
+    out[14] = -(zx * eye[0] + zy * eye[1] + zz * eye[2]);
+    out[15] = 1;
+    return out;
+  }
+
+  // ---- Geodesic dome geometry: icosahedron subdivided N times, every new
+  // vertex re-projected onto the unit sphere (the real Fuller-dome
+  // "frequency" construction). Vertex/face data and the edge-sharing/
+  // winding-consistency of the subdivision were verified offline against a
+  // standalone check (every edge shared by exactly 2 triangles, no gaps)
+  // before writing this file -- getting a subdivision topology subtly
+  // wrong produces a mesh with gaps/overlaps that can still look plausible
+  // at a glance, the same risk CLAUDE.md documents for quasicrystal.html's
+  // Robinson-triangle formulas.
+  function normalize3(v) {
+    const l = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / l, v[1] / l, v[2] / l];
+  }
+  function icosahedron() {
+    const t = (1 + Math.sqrt(5)) / 2;
+    const verts = [
+      [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0],
+      [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t],
+      [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1],
+    ].map(normalize3);
+    const faces = [
+      [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+      [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+      [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+      [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+    ];
+    return faces.map(([a, b, c]) => [verts[a], verts[b], verts[c]]);
+  }
+  function midpoint(a, b) {
+    return normalize3([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2]);
+  }
+  function subdivide(tris, levels) {
+    for (let i = 0; i < levels; i++) {
+      const out = [];
+      for (const [a, b, c] of tris) {
+        const ab = midpoint(a, b), bc = midpoint(b, c), ca = midpoint(c, a);
+        out.push([a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]);
+      }
+      tris = out;
+    }
+    return tris;
+  }
+
+  // ---- WebGL setup: per-VERTEX colour (not a per-object uniform like
+  // solids3d.html) so the whole dome -- hundreds of differently-coloured
+  // faces -- renders in a SINGLE drawArrays call rather than one call per
+  // face, which would blow the render-speed budget.
+  const VERT_SRC = `
+    attribute vec3 aPosition;
+    attribute vec3 aNormal;
+    attribute vec3 aColor;
+    uniform mat4 uMVP;
+    uniform mat4 uModel;
+    uniform vec3 uEye;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vColor;
+    void main() {
+      vec4 world = uModel * vec4(aPosition, 1.0);
+      vNormal = mat3(uModel) * aNormal;
+      vViewDir = normalize(uEye - world.xyz);
+      vColor = aColor;
+      gl_Position = uMVP * vec4(aPosition, 1.0);
+    }
+  `;
+  const FRAG_SRC = `
+    precision mediump float;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vColor;
+    uniform vec3 uLightDir;
+    void main() {
+      vec3 N = normalize(vNormal);
+      float diff = max(dot(N, normalize(uLightDir)), 0.0);
+      float fresnel = pow(1.0 - max(dot(N, normalize(vViewDir)), 0.0), 2.0);
+      // Ambient floor raised well above solids3d.html's own 0.42 -- a real
+      // bug found only by running validate.js (not by reasoning about the
+      // code): a full 360-degree light sweep independent of the fixed
+      // camera cycles the visible dome between strongly front-lit and
+      // fully back-lit/silhouetted, a real (not aliased) periodic
+      // brightness swing large enough that validate.js's 8 sparse sample
+      // points occasionally alias it into a spurious monotonic trend
+      // (projected +215 luma). A high ambient floor keeps even the
+      // back-lit state comfortably visible, damping that swing at the
+      // source rather than fighting the sampling aliasing after the fact.
+      vec3 base = vColor * (0.58 + 0.42 * diff);
+      vec3 rim = vColor * fresnel * 0.45;
+      // Soft clamp, same fix solids3d.html established: keeps a bright
+      // rim/highlight readable without lit faces washing out to near-white.
+      gl_FragColor = vec4(min(base + rim, vec3(0.86)), 1.0);
+    }
+  `;
+  function compileShader(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error('shader compile: ' + gl.getShaderInfoLog(sh));
+    return sh;
+  }
+
+  let prog, aPosition, aNormal, aColor, uMVP, uModel, uLightDir, uEye, domeBuf;
+  function initGL() {
+    prog = gl.createProgram();
+    gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, VERT_SRC));
+    gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, FRAG_SRC));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('program link: ' + gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+
+    aPosition = gl.getAttribLocation(prog, 'aPosition');
+    aNormal = gl.getAttribLocation(prog, 'aNormal');
+    aColor = gl.getAttribLocation(prog, 'aColor');
+    uMVP = gl.getUniformLocation(prog, 'uMVP');
+    uModel = gl.getUniformLocation(prog, 'uModel');
+    uLightDir = gl.getUniformLocation(prog, 'uLightDir');
+    uEye = gl.getUniformLocation(prog, 'uEye');
+
+    const posBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, domeMesh.positions, gl.STATIC_DRAW);
+    const normBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, domeMesh.normals, gl.STATIC_DRAW);
+    const colBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, domeMesh.colors, gl.STATIC_DRAW);
+    domeBuf = { posBuf, normBuf, colBuf, count: domeMesh.count };
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.viewport(0, 0, W, H);
+  }
+
+  // Dome mesh, colours, and the dome-cut latitude are all fixed ONCE for
+  // the whole video (function of DENSITY/SEED only), never re-rolled per
+  // cycle -- the "any coverage-affecting parameter re-randomised per cycle
+  // creates a real (not aliased) brightness swing" lesson CLAUDE.md
+  // documents for seven prior engines in a row. Only the rotation rate
+  // (below) changes per cycle.
+  let domeMesh, hue0;
+  function buildDome() {
+    const levels = Math.max(1, Math.min(3, Math.round(2 * Math.max(0.7, Math.min(1.4, DENSITY)))));
+    let tris = subdivide(icosahedron(), levels);
+    // Cut below the "5/8 sphere" latitude, the classic geodesic-DOME
+    // silhouette (not a full ball) -- keeps the faceted taper-to-apex read
+    // that makes this recognisably a dome, distinct from lattice3d's cube
+    // grid or solids3d's small orbiting solids. Requires ALL THREE vertices
+    // to clear the cut plane (not just the centroid average) -- a real bug
+    // found only by rendering and looking: a centroid-only test let through
+    // a few boundary triangles with one vertex well below the cut, which
+    // rendered as thin dark slivers poking below the dome's main silhouette.
+    // Excluding any triangle that crosses the plane at all gives a clean
+    // (if slightly jagged, like a real triangulated dome's base ring) rim
+    // with no partial/degenerate-looking slivers.
+    const CUT_Y = -0.2;
+    tris = tris.filter(([a, b, c]) => a[1] >= CUT_Y && b[1] >= CUT_Y && c[1] >= CUT_Y);
+
+    hue0 = rng() * 360;
+    const freq = 2 + Math.floor(rng() * 3); // spatial hue ripple lobes
+    const baseCol = PAL[SEED % PAL.length];
+
+    const positions = [], normals = [], colors = [];
+    for (const [a, b, c] of tris) {
+      const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+      const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const nl = Math.hypot(nx, ny, nz) || 1;
+      nx /= nl; ny /= nl; nz /= nl;
+      // Faces are already wound outward-consistent (verified offline), so
+      // the geometric normal already points away from the origin -- no
+      // flip needed, unlike solids3d.html's cube/octahedron (whose winding
+      // wasn't hand-verified).
+      const phi = Math.acos(Math.max(-1, Math.min(1, ny)));
+      // Hue tied to LATITUDE (phi), not longitude (theta) -- a real bug
+      // found only by running validate.js: colouring by theta failed the
+      // whiteout/brightness-trend check (projected +208 luma) even though
+      // the dome only ever rotates about the vertical Y axis. Root cause
+      // was the "3D depth occlusion" false-positive class CLAUDE.md already
+      // documents for solids3d.html, compounded by HSL hue affecting luma
+      // (the quasicrystal.html lesson): as the dome spins, occlusion
+      // exposes a DIFFERENT half of the theta-based colour wheel to the
+      // camera at each random per-cycle rotAngle0, and since different
+      // hues carry different luma at the same S/L, which half happens to
+      // be visible swings average frame brightness -- a real (not aliased)
+      // swing, just one caused by rotation-dependent visibility rather
+      // than a re-randomised coverage parameter. Latitude, unlike
+      // longitude, is INVARIANT under a Y-axis rotation -- spinning the
+      // dome about Y never changes which latitude band a given face
+      // belongs to, only its azimuthal position, so the visible hue
+      // distribution (and hence average luma) stays constant at every
+      // rotation angle by construction, not just on average.
+      //
+      // Deliberately NO longitude (theta) component in colour at all --
+      // a tried-and-reverted third bug: adding even a SMALL theta ripple
+      // (16 degrees) to restore per-longitude variation for the
+      // fast-motion check (see reconfigureRotation()'s tilt-wobble
+      // comment for the real fix) reintroduced the same occlusion/hue-
+      // luma coupling that caused the original brightness-trend bug, just
+      // at smaller amplitude -- validateEngine() still failed 1/5 seeds
+      // with a 103-luma projected rise. Purely latitude-based colour
+      // keeps the visible hue distribution EXACTLY rotation-invariant
+      // (not just approximately), and the tilt wobble below supplies
+      // fast-motion detectability independently, so there's no reason to
+      // reintroduce any theta dependence at all.
+      const hue = ((baseCol[0] + hue0 + 55 * Math.sin(freq * phi)) % 360 + 360) % 360;
+      const light = Math.min(70, baseCol[2] + (1 - phi / Math.PI) * 10);
+      // Small longitude (theta) SATURATION ripple, not a hue ripple --
+      // deliberately different from the reverted theta-hue attempt above.
+      // At fixed lightness, saturation has a far smaller and more
+      // predictable effect on luma than hue does (the luma formula is
+      // dominated by lightness; desaturating toward grey barely moves it),
+      // so this restores a longitude-dependent visual cue for the
+      // fast-motion check to catch as the dome spins about Y, without
+      // reintroducing the large hue-driven occlusion/luma swing that
+      // caused the original brightness-trend bug.
+      const theta = Math.atan2(nz, nx);
+      const sat = Math.max(30, Math.min(95, baseCol[1] + 24 * Math.sin(3 * theta)));
+      const [r, g, bch] = hsl2rgb(hue, sat, light);
+      for (const p of [a, b, c]) { positions.push(...p); normals.push(nx, ny, nz); colors.push(r, g, bch); }
+    }
+    domeMesh = {
+      positions: new Float32Array(positions),
+      normals: new Float32Array(normals),
+      colors: new Float32Array(colors),
+      count: tris.length * 3,
+    };
+  }
+
+  // Called at start-up AND every cycleSec. Only rotation resets --
+  // coverage-neutral by construction (rotating the whole rigid dome about
+  // its own vertical axis doesn't change how much geometry is lit, and the
+  // dome-cut stays perpendicular to that axis so the silhouette never
+  // flips to show its open underside), same reasoning as every other
+  // curated engine's reconfigure step.
+  let rotAngle0, rotRate;
+  function reconfigureRotation() {
+    rotAngle0 = rand(0, Math.PI * 2);
+    rotRate = (rng() < 0.5 ? -1 : 1) * rand(0.6, 1.1) * SPEED;
+  }
+
+  // A genuine INDEPENDENT motion source, the same fix torusrings3d.html
+  // already established for the identical underlying problem: rotating
+  // the dome about its own vertical (cut-plane-perpendicular) axis is
+  // deliberately SILHOUETTE-INVARIANT (needed to keep the open underside
+  // from ever rotating into view), so internal shading/colour shifts were
+  // the only motion cue -- and even after widening the theta colour
+  // ripple and raising rotRate, validateEngine() still failed fastMotion
+  // on 4/5 tested seeds (4.4-7.4 vs required 6.8-10.3). Root cause
+  // confirmed the same as torusrings3d.html's: peakStd (and hence the
+  // fast-motion floor, 12% of it) is dominated by the high black-
+  // background/lit-dome contrast, not internal facet detail, so a
+  // silhouette-invariant spin can never move enough of that contrast edge
+  // to register. A small bounded tilt wobble genuinely moves the dome's
+  // silhouette against the black background every frame -- but a FIRST
+  // version reset its phase/rate every cycleSec alongside rotAngle0/
+  // rotRate, which turned out to be a second real bug: each fresh
+  // reconfigure lands the tilt's sine wave at an uncorrelated random
+  // phase, so the 8 widely-spaced validate.js samples (each landing in a
+  // DIFFERENT reconfigure cycle) see essentially independent random
+  // coverage draws instead of a smoothly-averaging periodic signal,
+  // occasionally producing a spurious trend (confirmed: seed 5 measured a
+  // genuine +82.7 to +103.3 projected rise depending on tilt amplitude,
+  // while other seeds swung just as hard in the negative direction).
+  // Fixed by making the tilt a single CONTINUOUS oscillation driven
+  // directly by the monotonic clock, fixed once at start-up and never
+  // reset by reconfigureRotation() -- with dozens of full periods inside
+  // the 300s test window, its own coverage contribution averages out
+  // smoothly, the same "many periods fit the window" reasoning already
+  // established for chladni.html's cross-fade rate.
+  const tiltPhase0 = rand(0, Math.PI * 2);
+  const tiltRate = (rng() < 0.5 ? -1 : 1) * rand(1.4, 2.0);
+
+  buildDome();
+  initGL();
+  reconfigureRotation();
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+  const dt = 1 / FPS;
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  const EYE = [0, 1.1, 4.4];
+  const TARGET = [0, -0.1, 0];
+  const UP = [0, 1, 0];
+  const proj = mat4Perspective((42 * Math.PI) / 180, W / H, 0.1, 100);
+  const DOME_SCALE = 1.7;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    if (gl.isContextLost()) return;
+
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    const view = mat4LookAt(EYE, TARGET, UP);
+    // Bounded tilt (+-0.16 rad, ~9 degrees) so the open underside never
+    // rotates into view, layered under the main Y-axis spin -- see
+    // reconfigureRotation()'s comment for why this independent wobble is
+    // needed at all.
+    const tilt = 0.15 * Math.sin(tiltPhase0 + clk * tiltRate);
+    let model = mat4RotateY(rotAngle0 + clk * rotRate);
+    model = mat4Multiply(model, mat4RotateX(tilt));
+    model = mat4Multiply(model, mat4Scale(DOME_SCALE));
+
+    const mvp = mat4Multiply(proj, mat4Multiply(view, model));
+    gl.uniformMatrix4fv(uMVP, false, mvp);
+    gl.uniformMatrix4fv(uModel, false, model);
+    gl.uniform3f(uEye, EYE[0], EYE[1], EYE[2]);
+
+    // Bounded oscillation, not a full 360-degree sweep -- paired with the
+    // raised ambient floor above, this keeps the light roughly on the
+    // camera-facing side at all times (never swinging fully behind the
+    // dome into a dark silhouette state), removing the front-lit/back-lit
+    // brightness swing at its source instead of only damping it. Rate
+    // raised substantially (was 0.3 rad/s) once the tilt wobble alone
+    // proved an unreliable lever for the fast-motion check across seeds
+    // (see reconfigureRotation()'s tilt comment) -- unlike a tilt, which
+    // changes the dome's SILHOUETTE against black (a real coverage
+    // change), a lighting sweep only redistributes brightness WITHIN the
+    // already-lit dome area, so it can move fast without risking the same
+    // coverage-driven brightness-trend failure.
+    const lightAngle = 1.6 * Math.sin(clk * 2.6) + 0.6 * Math.sin(clk * 5.3 + 0.7);
+    gl.uniform3f(uLightDir, Math.cos(lightAngle), 0.65, Math.sin(lightAngle) + 1.2);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, domeBuf.posBuf);
+    gl.enableVertexAttribArray(aPosition);
+    gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, domeBuf.normBuf);
+    gl.enableVertexAttribArray(aNormal);
+    gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, domeBuf.colBuf);
+    gl.enableVertexAttribArray(aColor);
+    gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, domeBuf.count);
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureRotation(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+
+  // Same early-context-loss grace window as solids3d.html before declaring
+  // ready.
+  (async () => {
+    await new Promise((r) => setTimeout(r, 300));
+    const deadline = Date.now() + 1500;
+    while (contextLost && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    window.READY = true;
+  })();
+})();
+</script>
+</body>
+</html>
