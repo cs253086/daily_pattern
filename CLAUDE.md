@@ -1042,6 +1042,81 @@ provider's guessed response-field paths are actually correct) can only be
 confirmed from a real production job log the next time this runs with the
 new keys configured.
 
+### WebGL repair attempts now fall back to Canvas2D instead of retrying WebGL — 2026-09-01
+
+User complaint, verbatim: "another repeated pattern is generated today.
+I'm tired of seeing repeated patterns... dig into the ground to find and
+understand why it keeps happening." This time the root cause was neither
+of the two previous repeat-pattern bugs (dry-run state pollution, fixed
+2026-08-28; the fixed theme-hint list, replaced 2026-08-29) — both of
+those fixes are confirmed still working correctly. This is a THIRD,
+distinct cause, found by pulling the actual job logs for the last 4 real
+(schedule-triggered, non-dry-run) production days rather than guessing:
+
+| date | dimension | result |
+|---|---|---|
+| 2026-08-29 | 2D | Gemini succeeded ("Eclipse Pair") |
+| 2026-08-30 | 3D | Gemini succeeded ("Scenic View of Gardens") |
+| 2026-08-31 | 3D | Gemini failed BOTH attempts → curated fallback (`solids3d`) |
+| 2026-09-01 | 3D | Gemini failed BOTH attempts → curated fallback (`torusrings3d`) |
+
+Both fallback days were legitimate, correct round-robin picks (verified
+the same way as every prior rotation complaint in this file: not a stuck
+cursor) — but that's exactly the problem this file's own "Standing
+requirement" section below already predicts: when Gemini's success rate
+drops, the pipeline leans hard on the still-small curated pool and
+repeats become perceptible within days, even with a mathematically
+correct rotation. The new, concrete finding is WHY the success rate
+dropped: on 2026-08-31 and 2026-09-01, Gemini attempted a WebGL engine
+BOTH times (`dimension=3D` in the job log, i.e. `wantWebGL3D(seed)` came
+up true both days — expected, given the 65% target), and on both days
+the WebGL repair attempt failed with a genuinely DIFFERENT runtime bug
+than the first attempt (`ReferenceError: Cannot access 'mat4' before
+initialization` on 8/31, already patched with a targeted prompt guardrail
+the same day; `ReferenceError: finalNormNormals is not defined` on 9/1, a
+plain typo/naming-mismatch bug too generic to guard against with a
+specific prompt rule the way the `mat4` one was). By contrast the one
+Canvas2D attempt in this 4-day window succeeded outright. N=3 WebGL
+attempts is a small sample, but the mechanism is sound independent of the
+exact odds: raw hand-written WebGL (shaders, matrices, buffers, depth/
+context-loss handling) is a much larger and more failure-prone code
+surface for a single-shot LLM generation than Canvas2D, so forcing BOTH
+the first attempt AND the repair attempt down that harder path — the
+previous behavior — stacks two hard chances instead of splitting one hard
+and one easy chance.
+
+**Fix**: `generateEngine()` (`src/generate.js`) now accepts an
+`opts.wantWebGL` override (previously dimension was always freshly
+computed from `wantWebGL3D(seed)`, with no way for a caller to force it).
+`chooseEngine()` (`src/index.js`) passes `wantWebGL: false` on the repair
+call whenever the first attempt's `gen.wantWebGL` was true — i.e., if
+WebGL just failed, the repair attempt is Canvas2D, not WebGL again. This
+is deliberately NOT the same mistake as the theme-switching repair bug
+documented elsewhere in this file (a repair silently picking a NEW
+creative direction, which was a real bug when theme selection became
+stateful): `imageInfo`/theme stay byte-identical between the two calls,
+only the rendering TECHNOLOGY changes, and only in direct response to
+that technology having just failed — the repair is still fixing the same
+reported problems, just with an easier tool. Long-run 3D share drops only
+modestly below the 65% target from this (only repair attempts that follow
+a WebGL failure are affected; first attempts are untouched).
+
+**Verified**: called `buildPrompt()` directly (per this file's own
+template-literal gotcha) with `wantWebGL: true` and `wantWebGL: false` —
+confirmed the WebGL-mandate instruction and the Canvas2D instruction are
+mutually exclusive and each appears only for its matching flag. Confirmed
+the override plumbing (`opts.wantWebGL !== undefined ? opts.wantWebGL :
+wantWebGL3D(seed)`) correctly falls through to the normal computed value
+when the repair call's first attempt was already Canvas2D (passes
+`wantWebGL: undefined` in that case, which the `!==` check treats
+identically to the key being absent). Ran a full local dry-run end to end
+(`DRY_RUN=1 DURATION=8 node src/index.js`, no `GEMINI_API_KEY` in this
+sandbox) — the curated-fallback path (unaffected by this change) still
+runs correctly. Could not exercise the actual Gemini repair path live
+(same standing constraint as every other Gemini-related change in this
+project) — whether this measurably improves the real success rate can
+only be confirmed from production job logs over the next several days.
+
 ### Standing requirement: every video should look new, not just non-repeating
 
 User-stated durable rule (not a one-off fix): each day's video should read

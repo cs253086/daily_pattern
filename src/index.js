@@ -249,15 +249,40 @@ async function chooseEngine(cli, imageInfo) {
     // One repair attempt: hand the validator's reasons + the previous file
     // back to Gemini and ask for a fix. imageInfo (via genOpts) is the same
     // object as the first attempt, so generateEngine() derives the
-    // identical theme/dimension again -- no special reuse needed, since
-    // both are now pure functions of imageInfo/seed rather than a
-    // stateful rotation cursor.
+    // identical theme again -- no special reuse needed, since it's a pure
+    // function of imageInfo rather than a stateful rotation cursor.
+    //
+    // Dimension is the one exception (2026-09-01 fix): if the first
+    // attempt was WebGL, force the repair to Canvas2D instead of asking
+    // Gemini to fix WebGL a second time. Real evidence, not a guess: two
+    // consecutive real production days (2026-08-31, 2026-09-01) each had a
+    // WebGL first attempt fail, then the WebGL repair attempt fail AGAIN
+    // with a genuinely different runtime bug each time (a temporal-dead-
+    // zone ReferenceError on 'mat4', then an unrelated 'finalNormNormals
+    // is not defined' the next day) -- both days then fell back to the
+    // curated pool, directly causing the repeat-pattern complaints this
+    // fix responds to. Raw WebGL (hand-written shaders/matrices/buffers)
+    // is a much larger, more failure-prone code surface for a single-shot
+    // LLM generation than Canvas2D, so two independent chances split
+    // across the easier and harder path is a better repair strategy than
+    // stacking both chances on the harder one. This is NOT the same
+    // mistake as the theme-switching bug documented elsewhere in this
+    // file (a repair silently picking a NEW creative direction) --
+    // imageInfo/theme stay byte-identical; only the rendering technology
+    // changes, in service of actually fixing the reported problem instead
+    // of doubling down on whatever just failed. Long-run 3D share drops
+    // only modestly below the 65% target from this (only repair attempts
+    // following a WebGL failure are affected, not first attempts).
     console.warn(`[index] first attempt failed: ${result.reasons.join('; ')}`);
     await logEngineSnippet('first attempt', gen.path);
+    if (gen.wantWebGL) {
+      console.log('[index] first attempt was WebGL and failed -- repairing as Canvas2D instead of retrying WebGL.');
+    }
     console.log('[index] asking Gemini to repair…');
     const previousHtml = await readFile(gen.path, 'utf8');
     const gen2 = await generateEngine({
       ...genOpts,
+      wantWebGL: gen.wantWebGL ? false : undefined,
       repair: { previousHtml, reasons: result.reasons },
     });
     result = await validateEngine(gen2.path, validateOpts);

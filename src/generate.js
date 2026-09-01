@@ -92,6 +92,12 @@ export function imageThemeHint(imageInfo) {
 // effectiveP3D()): that cap existed because a small FILE pool could get
 // over-concentrated on one engine; Gemini can invent a fresh 3D engine
 // every time, so there's no small pool to over-concentrate on.
+// This is a FIRST-ATTEMPT default only -- chooseEngine() (src/index.js) can
+// override the repair attempt's dimension to Canvas2D regardless of this
+// function's result. See that override's own comment for why (2026-09-01:
+// two real production days in a row failed BOTH attempts on a WebGL-
+// specific bug -- doubling down on WebGL for the harder-to-get-right repair
+// attempt was measurably worse than giving it an easier path to succeed).
 const DESIRED_P_3D = 0.65;
 function wantWebGL3D(seed) {
   return (hashStr(`${seed}:dim`) % 100) < DESIRED_P_3D * 100;
@@ -271,13 +277,16 @@ export async function generateEngine(opts = {}) {
   const date = opts.date || todayUTC();
   const seed = opts.seed ?? date.replace(/-/g, '');
   const outDir = opts.outDir || path.join(repoRoot, 'engines', 'auto');
-  // Theme and dimension are pure functions of imageInfo/seed (see
-  // imageThemeHint()/wantWebGL3D() above) -- a repair call passing the same
-  // imageInfo (src/index.js's chooseEngine() always does) naturally gets
-  // the identical creative direction back, with no stateful cursor to
-  // accidentally advance twice on a repair.
+  // Theme is a pure function of imageInfo/seed (see imageThemeHint()
+  // above) -- a repair call passing the same imageInfo (src/index.js's
+  // chooseEngine() always does) naturally gets the identical creative
+  // direction back, with no stateful cursor to accidentally advance twice
+  // on a repair.
   const theme = imageThemeHint(opts.imageInfo);
-  const wantWebGL = wantWebGL3D(seed);
+  // Dimension is also normally a pure function of seed (wantWebGL3D), but
+  // chooseEngine() (src/index.js) can override it to false on a repair
+  // call specifically -- see the 2026-09-01 fix below for why.
+  const wantWebGL = opts.wantWebGL !== undefined ? opts.wantWebGL : wantWebGL3D(seed);
 
   const prompt = opts.repair
     ? buildRepairPrompt({
