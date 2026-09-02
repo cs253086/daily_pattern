@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Voderberg Spiral — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine): the VODERBERG TILING -- Heinz Voderberg's
+// 1936 discovery, the first spiral tiling ever devised. A single congruent
+// non-convex nonagon (nine-sided tile), repeated and rotated by a fixed
+// increment as it marches outward, forms TWO interlocking spiral arms
+// (point-symmetric through the centre) that together tile the plane with
+// no gaps -- despite being built from just one repeated shape. See
+// CLAUDE.md's dated write-up for the search trail and for why the exact
+// nonagon isn't reproduced here (its precise vertices come from solving a
+// specific angle-matching constraint between three copies of the tile,
+// which risked an unverifiable subtly-wrong shape; the STRUCTURAL
+// PRINCIPLE -- two interlocking logarithmic-spiral ribbons built from
+// tapering polygon segments, each segment's shared edge computed exactly
+// so no gap is even possible -- is what's rendered instead, the same
+// "visualisation-grade, not lab-exact" precedent chladni.html already set
+// for this pool).
+//
+// A genuinely different construction PRINCIPLE from everything else in the
+// pool: not an aperiodic substitution system built from MULTIPLE tile
+// types (quasicrystal.html's Penrose tiling), not a continuous golden-angle
+// point-placement rule (phyllotaxis.html), not a fixed-position rosette of
+// discrete wedges (ziggurat.html) -- a single tile shape marching
+// CONTINUOUSLY outward along a spiral path, radius and angle both growing
+// together, with a second point-symmetric copy interlocking into the gaps.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF, per-second rotation rate. Redraws each
+// frame from a fixed two-arm segment list computed once at start-up (no
+// accumulation, no whiteout risk).
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 37);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  const cx = W / 2, cy = H / 2;
+  const minDim = Math.min(W, H);
+  const dt = 1 / FPS;
+
+  // Spiral shape (growth rate, turn count, ribbon width, segment count,
+  // colours) and the whole two-arm segment list are all fixed ONCE for the
+  // whole video, never re-rolled per cycle -- the "any coverage-affecting
+  // parameter re-randomised per cycle creates a real (not aliased)
+  // brightness swing" lesson CLAUDE.md documents for eight prior engines
+  // in a row. Turn count/ribbon width directly set total lit coverage, so
+  // re-rolling either mid-video would swing average frame brightness
+  // between cycles exactly like a randomised subdivision depth did.
+  let arms, hue0;
+  function buildSpiral() {
+    const d = Math.max(0.7, Math.min(1.4, DENSITY));
+    const turns = rand(4.0, 5.0);
+    const thetaMax = turns * Math.PI * 2;
+    const rMax = minDim * 0.47;
+    const r0 = minDim * 0.045;
+    const growthRate = Math.log(rMax / r0) / thetaMax; // r(theta) = r0 * exp(growthRate*theta)
+    const segsPerTurn = Math.round(16 * d);
+    const dTheta = (Math.PI * 2) / segsPerTurn;
+    const nSegs = Math.max(8, Math.round(thetaMax / dTheta));
+    const widthFrac = rand(0.34, 0.44);
+    hue0 = rng() * 360;
+    const armHueOffset = rand(90, 160);
+
+    function rAt(theta) { return r0 * Math.exp(growthRate * theta); }
+
+    function buildArm(phaseOffset, baseCol) {
+      const segs = [];
+      for (let k = 0; k < nSegs; k++) {
+        // A tiny angular pad (~0.6% of a segment's own width) on BOTH ends
+        // of each segment -- a real rendering artifact found only by
+        // rendering and looking: even though adjacent segments' shared
+        // edges are analytically identical (computed from the same rAt()
+        // at the same shared angle), Canvas2D antialiases each fill() call
+        // independently, leaving a visible hairline dark seam between
+        // neighbouring polygons despite the coordinates matching exactly.
+        // Slightly overlapping each segment into its neighbours' territory
+        // hides the seam without changing the logical (gap-free-by-
+        // construction) geometry.
+        const pad = dTheta * 0.006;
+        const th0 = k * dTheta - pad, th1 = (k + 1) * dTheta + pad;
+        const rc0 = rAt(th0), rc1 = rAt(th1);
+        const w0 = Math.max(minDim * 0.012, rc0 * widthFrac) + minDim * 0.002;
+        const w1 = Math.max(minDim * 0.012, rc1 * widthFrac) + minDim * 0.002;
+        const rIn0 = rc0 - w0 / 2, rOut0 = rc0 + w0 / 2;
+        const rIn1 = rc1 - w1 / 2, rOut1 = rc1 + w1 / 2;
+        const a0 = th0 + phaseOffset, a1 = th1 + phaseOffset;
+        const p1 = [rIn0 * Math.cos(a0), rIn0 * Math.sin(a0)];
+        const p2 = [rOut0 * Math.cos(a0), rOut0 * Math.sin(a0)];
+        const p3 = [rOut1 * Math.cos(a1), rOut1 * Math.sin(a1)];
+        const p4 = [rIn1 * Math.cos(a1), rIn1 * Math.sin(a1)];
+        // Spatial (not time-based) hue ripple along the spiral's own
+        // parameter (k/nSegs), the same "tie colour to the engine's own
+        // defining axis" idea quasicrystal.html/ziggurat.html established
+        // -- safe against creating a temporal brightness trend.
+        const frac = k / nSegs;
+        const hue = ((baseCol[0] + hue0 + 50 * Math.sin(frac * Math.PI * 3)) % 360 + 360) % 360;
+        const light = Math.min(72, baseCol[2] + frac * 10);
+        segs.push({ p1, p2, p3, p4, hue, sat: baseCol[1], light });
+      }
+      return segs;
+    }
+
+    const baseA = PAL[SEED % PAL.length];
+    const baseB = PAL[(SEED + Math.round(armHueOffset / 60)) % PAL.length];
+    arms = [buildArm(0, baseA), buildArm(Math.PI, baseB)];
+  }
+
+  // Called at start-up AND every cycleSec. Only rotation resets --
+  // coverage-neutral by construction (a rigid rotation transform doesn't
+  // change how much geometry is lit), same reasoning as every other
+  // curated engine's reconfigure step. The two-arm spiral has no exact
+  // rotational symmetry to resonate against (unlike ziggurat.html's
+  // identical wedges), so a plain guaranteed-minimum-magnitude,
+  // random-sign rate is sufficient.
+  let rotAngle0, rotRate;
+  function reconfigureRotation() {
+    rotAngle0 = rand(0, Math.PI * 2);
+    rotRate = (rng() < 0.5 ? -1 : 1) * rand(0.5, 1.0) * SPEED;
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  buildSpiral();
+  reconfigureRotation();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(rotAngle0 + clk * rotRate);
+
+    for (const arm of arms) {
+      for (const s of arm) {
+        ctx.fillStyle = `hsl(${s.hue}, ${s.sat}%, ${s.light}%)`;
+        ctx.beginPath();
+        ctx.moveTo(s.p1[0], s.p1[1]);
+        ctx.lineTo(s.p2[0], s.p2[1]);
+        ctx.lineTo(s.p3[0], s.p3[1]);
+        ctx.lineTo(s.p4[0], s.p4[1]);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    ctx.restore();
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureRotation(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

@@ -2323,6 +2323,93 @@ nearest handful of neighbours, confirming a single continuous faceted dome
 reads as structurally distinct from every other 3D composition already in
 the pool.
 
+## Voderberg spiral-tiling engine (`voderberg.html`) — 2026-09-02
+
+Daily creative-research routine. Category was "random Wikipedia article" by
+the firing-minute-mod-category-count method. An open WebSearch for an
+obscure named mathematical tiling/curve surfaced Penrose tilings (already
+shipped as `quasicrystal.html`), the "Einstein" aperiodic monotile, and the
+**Voderberg tiling** -- Heinz Voderberg's 1936 discovery, the first spiral
+tiling ever devised: a single congruent non-convex nonagon, repeated and
+rotated by a fixed increment as it marches outward, forms TWO interlocking
+spiral arms (point-symmetric through the centre) that tile the plane with
+no gaps, using just one repeated shape. Picked over the other candidates as
+the strongest fit for a genuinely different, renderable structural
+principle not yet in the pool -- a single-shape CONTINUOUS spiral march,
+distinct from Penrose's aperiodic multi-tile substitution. Sources:
+[Wikipedia](https://en.wikipedia.org/wiki/Voderberg_tiling),
+[Curiosa Mathematica](https://curiosamathematica.tumblr.com/post/51292229311/heinz-voderberg-discovered-the-first-spiral).
+
+**What it is**: two interlocking logarithmic-spiral ribbons, each built
+from tapering polygon (polar-trapezoid) segments whose shared edges are
+computed from the exact same radius function (`r(theta) = r0 *
+exp(growthRate * theta)`) at the exact same shared angle -- gap-free
+WITHIN each arm by construction, the ribbon equivalent of Voderberg's
+edge-matching tile shape. The second arm is the first rotated by pi (point
+symmetry), interlocking to read as two spiral-galaxy-like arms. A
+genuinely different construction principle from every other engine in the
+pool: not an aperiodic substitution system built from MULTIPLE tile TYPES
+(`quasicrystal.html`), not a continuous golden-angle point-placement rule
+(`phyllotaxis.html`), not a fixed-position rosette of discrete wedges
+(`ziggurat.html`) -- a single tile shape marching continuously outward
+along a spiral path, radius and angle growing together.
+
+**The exact Voderberg nonagon was deliberately NOT reproduced.** Its
+precise vertices come from solving a specific angle-matching constraint
+between three copies of the tile (Voderberg's answer to Reinhardt's
+"can two copies of a tile fully enclose a third?" question) -- getting
+that subtly wrong would produce an unverifiable, possibly-gappy shape that
+still looks plausible at a glance, the same risk this file already
+documents for `quasicrystal.html`'s Robinson triangles. Instead, the
+STRUCTURAL PRINCIPLE is rendered directly (single-shape edge-matched
+spiral march, two interlocking arms), the same "visualisation-grade, not
+lab-exact" precedent `chladni.html` already set for this pool (its
+formula is a widely-used visualisation approximation, not a lab-exact
+eigenmode derivation).
+
+**One real rendering bug found only by rendering and looking, not by
+reasoning about the code**: adjacent segments' shared edges are
+analytically identical (computed from the same radius function at the
+same shared angle), yet Canvas2D antialiases each `fill()` call
+independently, leaving a visible hairline dark seam between neighbouring
+polygons despite the coordinates matching exactly. Fixed by padding each
+segment slightly (a tiny angular/radial overlap into its neighbours) to
+hide the seam without changing the logical gap-free-by-construction
+geometry.
+
+**Verified**: `validateEngine()` 10/10 across seeds 1-10 passed on the
+**first attempt** (matching `primespiral.html`/`stripweave.html`'s
+precedent that the fix-once-per-video coverage-stability pattern
+documented across this file is now a reliable default), plus the CLI's
+actual default seed 12345 (see `geodome.html`'s write-up for why that
+matters -- `validate.js`'s real default is 12345, not 1). Margins
+excellent throughout: `projectedRise` -21.5 to +24.2 (vs the 50
+threshold), `avgSat` 71.7-93.5 (vs the 22 minimum), zero near-white
+pixels, `fastMotion` always 2-4x its floor, `projectedHourRenderMin`
+6.4min on the default seed (well inside the CI budget). Visual
+spot-checks across 25/50/75/95/105% of a cycle at 3 seeds confirmed a
+vivid, bold, immediately-legible two-arm interlocking spiral (reads like
+a nautilus shell / spiral galaxy) with clean seams and vivid distinct
+palettes per seed.
+
+**Novelty gate needed a real iteration round, even with a technical
+first-attempt pass**: the first design (2.6-3.6 turns, 16 segments/turn)
+measured only 0.633 from `lattice3d` -- comfortably above the 0.60
+threshold, but an uncomfortably thin margin next to this pool's typical
+0.7+ passes, so it was iterated rather than shipped on a bare pass.
+Reducing segments/turn to 11 made it WORSE (0.569, an actual fail);
+increasing to 22 was still worse than the original (0.606) -- segment
+count alone wasn't the right lever. The lever that actually worked was
+increasing turn count (2.6-3.6 to 4.0-5.0 turns, a denser multi-turn
+spiral): nearest-neighbour distance rose to **0.738** from `kaleidoscope`
+(`lattice3d` dropped out of the top 5 nearest neighbours entirely), and
+the full quality-gate battery was re-verified clean at the new turn
+count. Lesson: a technical pass just above the 0.60 line is still worth a
+quick iteration check before shipping -- not every lever moves the
+distance in the expected direction (segment count moved it the WRONG way
+twice before turn count moved it the right way), so measure each change
+rather than assuming "more detail = more different."
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
