@@ -105,9 +105,21 @@ function readRotationState() {
     return {
       last3D: typeof data.last3D === 'string' ? data.last3D : null,
       last2D: typeof data.last2D === 'string' ? data.last2D : null,
+      // Archetype cursors (2026-09-02, see SHAPE_ARCHETYPES below) -- must
+      // be read through here too, or curatedOr() always sees them as
+      // undefined regardless of what writeRotationState() persisted,
+      // silently disabling the same-archetype-skip logic entirely. Caught
+      // by direct verification (300 synthetic curatedOr() calls), not by
+      // inspection -- this exact bug shipped once already in this file's
+      // history for a different field (see the old-schema migration
+      // comment above) and repeated here until the test caught it.
+      last3DArchetype: typeof data.last3DArchetype === 'string' ? data.last3DArchetype : null,
+      last2DArchetype: typeof data.last2DArchetype === 'string' ? data.last2DArchetype : null,
     };
   } catch { /* missing or corrupt state file -- caller bootstraps instead */ }
-  return { last3D: null, last2D: null };
+  return {
+    last3D: null, last2D: null, last3DArchetype: null, last2DArchetype: null,
+  };
 }
 
 function writeRotationState(state) {
@@ -133,13 +145,126 @@ function hashStr(s) {
 // the seed if there's no usable cursor (first run, or the last-used engine
 // no longer exists in this bucket), same logic as the pre-weighting
 // version, just parameterised over which subset of the pool to cycle.
-function nextInBucket(bucketPool, lastName, seed) {
+// Basic-unit / shape-vocabulary tags (2026-09-02). Real user complaint,
+// verbatim: "when I say a repeated pattern is basic unit making the pattern
+// is the same... we've seen this type of 3d cube pattern many times
+// before. define what is repeated pattern correctly and avoid it."
+// Investigated with src/fingerprint.js's measured distances first, not
+// assumed: solids3d.html (sparse orbiting solids) and the Gemini-promoted
+// auto-2026-08-27-field-of-small-lit-3d-solids-drifting-th.html (a
+// scattered field of the same kind of solids) measure FAR apart on
+// composition statistics -- solids3d's orbit creates strong rotational/
+// mirror symmetry the Aug-27 engine's scattered field doesn't have -- even
+// after adding connected-component "basic unit" features to
+// fingerprint.js (blobCount/blobSizeCV/largestBlobFrac) specifically to
+// try to catch this. A per-feature diagnostic (same method already used
+// for phyllotaxis.html's novelty-gate iteration, see CLAUDE.md) confirmed
+// the blob features DO carry real signal (largestBlobFrac 0.87 vs 0.61,
+// blobSizeCV 0.48 vs 1.20) but contribute under 4% of the aggregate
+// z-scored distance, dwarfed by symmetry/layout features that measure a
+// real but DIFFERENT thing (spatial ARRANGEMENT, not shape VOCABULARY).
+// A fully general "what is the repeated element" descriptor is a much
+// harder, unverified research problem than fits this fix -- applying the
+// same fix this project already used successfully for the analogous 2D
+// problem instead (CLAUDE.md's "Archetype clustering": kaleidoscope/
+// starburst/spirograph all read as "centred radial mandala" despite the
+// round-robin never repeating a FILE): an explicit, human-assigned
+// archetype tag, and a rotation that avoids repeating the TAG, not just
+// the filename.
+//
+// Only the 3D bucket has a confirmed shared-vocabulary problem right now:
+// solids3d, lattice3d, and the Aug-27 promoted engine all render several
+// individual flat-shaded convex polyhedra as their basic unit (differing
+// only in arrangement -- sparse orbit, dense grid, scattered field).
+// torusrings3d (smooth lit tori) and geodome (one continuous triangulated
+// mesh) are visually distinct vocabularies and are left untagged. Any
+// engine not listed here defaults to its own name as its tag (its own
+// unique archetype), so this can never silently misclassify an engine
+// this map doesn't know about, including future Gemini-promoted engines --
+// extend this map by hand when a future promotion is recognisably "more of
+// the same basic unit" as something already here, the same way
+// cascade.html was hand-added for the 2D case rather than waiting for an
+// automated detector to notice.
+const SHAPE_ARCHETYPES = {
+  solids3d: 'discrete-3d-solids',
+  lattice3d: 'discrete-3d-solids',
+  'auto-2026-08-27-field-of-small-lit-3d-solids-drifting-th': 'discrete-3d-solids',
+};
+function archetypeOf(name) {
+  return SHAPE_ARCHETYPES[name] || name;
+}
+
+// Build a visiting order for a bucket's members where consecutive entries
+// -- INCLUDING the wrap from the last entry back to the first, since this
+// order is walked lap after lap -- never share an archetype, whenever
+// that's achievable. A first version of this fix tried a simpler "skip
+// forward one slot on conflict" approach against the PLAIN alphabetical
+// order; direct verification (300 synthetic curatedOr() calls, not just
+// code review) caught a real bug in it: solids3d.html was PERMANENTLY
+// excluded from the rotation, never picked even once. Root cause: in a
+// fixed cyclic order, a given member's predecessor is always the SAME
+// member every lap, so if that predecessor always shares its archetype,
+// the skip-forward triggers identically every single lap forever --
+// "skip past a conflict" is not the same guarantee as "everybody still
+// gets a fair turn eventually." This function instead computes a full
+// reordering up front and verifies it, rather than reacting position by
+// position.
+//
+// Algorithm: group members by archetype, then greedily place the
+// currently-largest remaining group next whenever doing so doesn't create
+// a same-archetype adjacency with what was just placed (ties broken by
+// original bucket order for determinism). This is the standard
+// "reorganize so no two adjacent are equal" construction; it's guaranteed
+// solvable whenever no archetype holds a majority of the bucket. The
+// result is verified (both the linear adjacencies AND the circular
+// wrap-around) before being trusted -- if verification fails (e.g. a
+// future bucket composition where one archetype genuinely holds more than
+// half the members, making full separation mathematically impossible),
+// this falls back to the members' plain original order rather than
+// shipping an arrangement that silently doesn't deliver what it promises.
+function archetypeSeparatedOrder(names) {
+  const groups = new Map();
+  names.forEach((n, i) => {
+    const a = archetypeOf(n);
+    if (!groups.has(a)) groups.set(a, []);
+    groups.get(a).push(i);
+  });
+  const remaining = [...groups.entries()].map(([a, idxs]) => ({ a, idxs: [...idxs] }));
+
+  const order = [];
+  let prevArchetype = null;
+  for (let step = 0; step < names.length; step++) {
+    remaining.sort((x, y) => y.idxs.length - x.idxs.length);
+    let pick = remaining.find((g) => g.idxs.length > 0 && g.a !== prevArchetype);
+    if (!pick) pick = remaining.find((g) => g.idxs.length > 0); // unavoidable repeat
+    order.push(pick.idxs.shift());
+    prevArchetype = pick.a;
+  }
+
+  const ok = order.every((idx, i) => {
+    const nextIdx = order[(i + 1) % order.length];
+    return names.length < 2 || archetypeOf(names[idx]) !== archetypeOf(names[nextIdx]);
+  });
+  return ok ? order : names.map((_, i) => i);
+}
+
+// Pick the next engine in round-robin order within a bucket, walking the
+// archetype-separated order above instead of the bucket's plain
+// alphabetical order -- guarantees the same basic unit (see
+// SHAPE_ARCHETYPES above) can't appear on two consecutive fallback days
+// within this bucket, not just the same exact file, while still visiting
+// every member once per full lap. `lastArchetype` is accepted for call-
+// site compatibility but unused: the separated order already encodes the
+// no-adjacent-repeat guarantee structurally, so only the last-used NAME
+// (to find the current position) is needed here.
+function nextInBucket(bucketPool, lastName, lastArchetype, seed) {
   const names = bucketPool.map((p) => path.basename(p, '.html'));
-  const lastIdx = lastName ? names.indexOf(lastName) : -1;
-  const idx = lastIdx === -1
-    ? (Number(String(seed).replace(/\D/g, '')) || 0) % bucketPool.length
-    : (lastIdx + 1) % bucketPool.length;
-  return bucketPool[idx];
+  const order = archetypeSeparatedOrder(names);
+  const lastPos = lastName ? order.findIndex((idx) => names[idx] === lastName) : -1;
+  const nextPos = lastPos === -1
+    ? (Number(String(seed).replace(/\D/g, '')) || 0) % order.length
+    : (lastPos + 1) % order.length;
+  return bucketPool[order[nextPos]];
 }
 
 // Fallback when Gemini isn't available or fails: pick the next curated
@@ -201,10 +326,11 @@ function curatedOr(reason, seed) {
   const want3D = pool3D.length > 0 && (pool2D.length === 0 || (hashStr(`${seed}:dim`) % 100) < p3D * 100);
   const bucketPool = want3D ? pool3D : pool2D;
   const bucketKey = want3D ? 'last3D' : 'last2D';
+  const archetypeKey = `${bucketKey}Archetype`;
 
-  const engine = nextInBucket(bucketPool, state[bucketKey], seed);
+  const engine = nextInBucket(bucketPool, state[bucketKey], state[archetypeKey], seed);
   const name = path.basename(engine, '.html');
-  writeRotationState({ ...state, [bucketKey]: name });
+  writeRotationState({ ...state, [bucketKey]: name, [archetypeKey]: archetypeOf(name) });
   if (reason) console.warn(`[index] ${reason} — using curated engine ${path.basename(engine)} (${want3D ? '3D' : '2D'} bucket).`);
   return { engine, source: `curated:${name}` };
 }

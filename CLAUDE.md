@@ -1117,6 +1117,130 @@ runs correctly. Could not exercise the actual Gemini repair path live
 project) — whether this measurably improves the real success rate can
 only be confirmed from production job logs over the next several days.
 
+### Defining "repeated pattern" correctly: shape-vocabulary archetype tags for the 3D bucket — 2026-09-02
+
+User complaint, verbatim, with a screenshot of the Aug-27 promoted engine's
+output: "when I say a repeated pattern is basic unit making the pattern is
+the same... we've seen this type of 3d cube pattern many times before.
+define what is repeated pattern correctly and avoid it." A genuinely new,
+correct framing: not "did the exact same FILE get picked twice" (already
+solved) and not "does the exact same overall COMPOSITION recur"
+(`src/fingerprint.js`, already solved for the 2D pool) — but "is the
+recurring visual BUILDING BLOCK the same," independent of arrangement.
+
+**Confirmed which engine, then measured rather than assumed.** The
+complained-about video (2026-09-02's real production run) used
+`auto-2026-08-27-field-of-small-lit-3d-solids-drifting-th.html`, not
+`solids3d.html` — a DIFFERENT file. Ran `scripts/analyze-pool.js`:
+these two engines were NOT nearest neighbours of each other at all
+(distance 0.894, not even in the pool's top-8 closest pairs) — the
+existing composition-level fingerprint considers them clearly different.
+Yet a viewer (correctly) sees "the same 3d cube pattern." This is real
+evidence of a genuine gap, not user error or a stale complaint.
+
+**First fix attempt — connected-component "basic unit" features — measured
+as insufficient, not just assumed to be.** Added `blobCount`,
+`blobSizeCV`, `largestBlobFrac` to `src/fingerprint.js` (how many separate
+lit shapes are on screen, how uniform their sizes are, whether one shape
+dominates) specifically to try to catch this class of similarity.
+Re-measured: the distance went UP, not down (0.894 → 0.955), and a
+per-feature z-score diagnostic (same method already used for
+`phyllotaxis.html`'s novelty-gate iteration) showed why — the blob
+features DO carry real, correctly-directional signal (`largestBlobFrac`
+0.87 for solids3d vs. 0.61 for the Aug-27 engine, `blobSizeCV` 0.48 vs.
+1.20) but contribute under 4% of the AGGREGATE z-scored distance across
+~30 features, completely dwarfed by rotational/mirror symmetry features
+(over 60% combined) that measure something real but genuinely DIFFERENT:
+solids3d's orbiting motion creates strong radial symmetry the Aug-27
+engine's scattered "field" arrangement structurally doesn't have. Kept
+the three blob features anyway (real, if partial, signal — harmless
+addition to the novelty gate for future promotions) but this alone does
+not and cannot fix the reported problem: composition-level statistics are
+the wrong TOOL for a shape-vocabulary question, no matter how many more
+of them get added, because "what is the repeated element" and "how is it
+arranged" are different axes that an aggregate distance metric will
+always let the numerically-larger-variance axis dominate.
+
+**Real fix: explicit, human-assigned archetype tags + a rotation that
+avoids repeating the TAG, not just the filename** — applying the exact
+fix this project already proved out for the identical 2D problem
+(`cascade.html`, see "Archetype clustering" above: kaleidoscope/
+starburst/spirograph all read as "centred radial mandala" despite the
+round-robin never repeating a file). `SHAPE_ARCHETYPES` in `src/index.js`
+tags `solids3d`, `lattice3d`, and the Aug-27 engine as
+`'discrete-3d-solids'` (all three render several individual flat-shaded
+convex polyhedra as their basic unit, differing only in arrangement —
+sparse orbit, dense grid, scattered field); `torusrings3d` (smooth lit
+tori) and `geodome` (one continuous mesh) are left untagged (default to
+their own name = their own unique archetype). Any future engine not in
+this map defaults to being its own archetype, so this can never silently
+misclassify something it doesn't know about — extend the map by hand when
+a future promotion is recognisably "more of the same basic unit," the
+same way `cascade.html` was hand-added rather than waiting for an
+automated detector.
+
+**A first implementation of the rotation fix had a real, serious bug,
+caught only by direct verification (300 synthetic `curatedOr()` calls),
+not by code review.** The first attempt patched `nextInBucket()` with a
+"skip forward one slot if the plain next pick shares last time's
+archetype" rule against the bucket's plain alphabetical order. This
+PERMANENTLY excluded `solids3d.html` from the rotation — it never got
+picked even once across 187 consecutive 3D selections. Root cause: in a
+fixed cyclic order, a given member's predecessor is always the SAME
+member every lap (alphabetically, `solids3d` always follows `lattice3d`,
+which shares its archetype), so the skip-forward triggered identically
+every single lap, forever — "skip past a conflict" is not the same
+guarantee as "everybody still gets a fair turn eventually." A second,
+separate bug in the same commit: `readRotationState()` explicitly
+whitelisted which JSON fields it returned and silently dropped the new
+`last3DArchetype`/`last2DArchetype` fields even though
+`writeRotationState()` was saving them — so the skip logic was reading
+`undefined` every time regardless of what was on disk, a near-identical
+mistake to one already documented in this same function's own old-schema-
+migration comment, just for a different field.
+
+Fixed by replacing the reactive skip with a proactively-computed
+**archetype-separated visiting order** (`archetypeSeparatedOrder()`): group
+bucket members by archetype, then greedily place the currently-largest
+remaining group next whenever doing so doesn't create a same-archetype
+adjacency (the standard "reorganize so no two adjacent are equal"
+construction), generated fresh from the CURRENT bucket contents on every
+call (same "recompute, don't trust stale cursors" convention already used
+for `curatedPool()`'s alphabetical listing). The persisted cursor still
+stores the last-used engine NAME (not a position/index, for the same
+reason `state/engine-rotation.json`'s existing name-based cursor was
+chosen originally — pool membership changes shape over time); `nextInBucket()`
+finds that name's position in the freshly-computed order and advances by
+one. Verified BOTH the linear adjacency AND the circular wrap-around (the
+order is walked lap after lap, so the last entry's neighbour is the
+first) before trusting the result; if verification fails (mathematically
+possible only when one archetype holds a strict majority of the bucket —
+not the current 3-of-6 case, which is exactly at the boundary and
+solvable), falls back to the members' plain original order rather than
+shipping a broken arrangement, the same fail-closed convention already
+used by the novelty gate (`noveltyDistance()` in `src/index.js`).
+
+**Verified**: re-ran the same 300-synthetic-seed `curatedOr()` battery
+against the fixed code — 187 consecutive 3D picks, ZERO same-archetype-
+back-to-back violations, and (the check the first attempt would have
+failed) every one of the 3D bucket's 6 members appeared at least once,
+confirming full coverage restored. Directly inspected
+`archetypeSeparatedOrder()`'s output for the real 3D bucket: `[aug27
+(discrete-3d-solids), aug30 (own), lattice3d (discrete-3d-solids), geodome
+(own), solids3d (discrete-3d-solids), torusrings3d (own)]` — the three
+`discrete-3d-solids` members correctly interleaved with the three
+distinct ones, including the wrap from `torusrings3d` back to `aug27`.
+Confirmed the fail-safe path with a synthetic 3-of-5-majority case
+(mathematically unsolvable): correctly detected the violation and fell
+back to plain order rather than producing a broken result. Also confirmed
+`readRotationState()`'s fix directly: the archetype fields now round-trip
+through a real write/read cycle instead of silently reverting to
+`undefined`. Ran a full local dry-run end to end (no `GEMINI_API_KEY` in
+this sandbox) — engine selection correctly walked from `last3D:
+auto-2026-08-27-...` to `auto-2026-08-30-scenic-view-of-gardens` (a
+different, non-`discrete-3d-solids` archetype), confirming the whole
+pipeline still works together correctly, not just the isolated function.
+
 ### Standing requirement: every video should look new, not just non-repeating
 
 User-stated durable rule (not a one-off fix): each day's video should read

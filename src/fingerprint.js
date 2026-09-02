@@ -259,6 +259,71 @@ function periodicity(g, w, h, axis) {
   return best;
 }
 
+// "Basic unit" analysis (2026-09-02). Every feature above describes overall
+// COMPOSITION (symmetry, periodicity, coverage, edge orientation) -- none of
+// them describe what the recurring visual UNIT actually is. Real user
+// complaint, verbatim: "when I say a repeated pattern is basic unit making
+// the pattern is the same... define what is repeated pattern correctly."
+// Measured evidence this gap is real, not hypothetical: solids3d.html (a
+// handful of orbiting lit 3D polyhedra) and the Gemini-promoted
+// auto-2026-08-27-field-of-small-lit-3d-solids-drifting-th.html (a scattered
+// field of the same kind of polyhedra) were NOT even nearest neighbours of
+// each other under the composition-only features above (distance 0.894, not
+// in the pool's top-8 closest pairs) -- despite a real user immediately,
+// correctly identifying them as "this type of 3d cube pattern... many times
+// before." Their orbit/scatter arrangement genuinely differs, which is what
+// the composition features measure; their basic VISUAL UNIT -- a few
+// separate, differently-sized, per-face-lit convex solids on black -- is
+// identical, and nothing was measuring that.
+//
+// Connected-component analysis on the thresholded luminance frame gives a
+// real, cheap proxy for "what is the repeated unit": how many separate lit
+// shapes are on screen (blobCount), how uniform their sizes are
+// (blobSizeCV -- low for many-identical-small-units like lattice3d.html's
+// cube grid, high for a few irregularly-sized individual solids like
+// solids3d.html/the Aug-27 engine), and whether one shape dominates
+// (largestBlobFrac -- near 1.0 for a single continuous mesh like
+// geodome.html, low for several separate scattered objects).
+function connectedComponents(g, w, h, threshold = 12) {
+  const seen = new Uint8Array(w * h);
+  const sizes = [];
+  const stack = [];
+  for (let start = 0; start < w * h; start++) {
+    if (seen[start] || g[start] <= threshold) continue;
+    seen[start] = 1;
+    stack.length = 0;
+    stack.push(start);
+    let size = 0;
+    while (stack.length) {
+      const i = stack.pop();
+      size++;
+      const x = i % w;
+      const y = (i / w) | 0;
+      if (x > 0 && !seen[i - 1] && g[i - 1] > threshold) { seen[i - 1] = 1; stack.push(i - 1); }
+      if (x < w - 1 && !seen[i + 1] && g[i + 1] > threshold) { seen[i + 1] = 1; stack.push(i + 1); }
+      if (y > 0 && !seen[i - w] && g[i - w] > threshold) { seen[i - w] = 1; stack.push(i - w); }
+      if (y < h - 1 && !seen[i + w] && g[i + w] > threshold) { seen[i + w] = 1; stack.push(i + w); }
+    }
+    sizes.push(size);
+  }
+  return sizes;
+}
+
+function blobFeatures(g, w, h) {
+  // Drop single-pixel components -- noise at this downsampled resolution,
+  // not a real distinct shape.
+  const sizes = connectedComponents(g, w, h).filter((s) => s >= 2);
+  if (sizes.length === 0) return { blobCount: 0, blobSizeCV: 0, largestBlobFrac: 0 };
+  const total = sizes.reduce((a, b) => a + b, 0);
+  const mean = total / sizes.length;
+  const variance = sizes.reduce((a, s) => a + (s - mean) ** 2, 0) / sizes.length;
+  return {
+    blobCount: sizes.length,
+    blobSizeCV: mean > 0 ? Math.sqrt(variance) / mean : 0,
+    largestBlobFrac: total > 0 ? Math.max(...sizes) / total : 0,
+  };
+}
+
 export const FEATURE_NAMES = [
   'rotSym2', 'rotSym3', 'rotSym4', 'rotSym5', 'rotSym6', 'rotSym8',
   'mirrorLR', 'mirrorUD',
@@ -267,6 +332,7 @@ export const FEATURE_NAMES = [
   'orient0', 'orient1', 'orient2', 'orient3', 'orient4', 'orient5', 'orient6', 'orient7',
   'periodX', 'periodY',
   'edgeDensity', 'coverage',
+  'blobCount', 'blobSizeCV', 'largestBlobFrac',
 ];
 
 // One frame -> one fixed-length descriptor.
@@ -277,6 +343,7 @@ export function frameFeatures(g, w, h) {
   const grad = gradientFeatures(g, w, h, 8);
   let lit = 0;
   for (let i = 0; i < g.length; i++) if (g[i] > 12) lit++;
+  const blob = blobFeatures(g, w, h);
   return [
     ...[2, 3, 4, 5, 6, 8].map((k) => rotationalSymmetry(polar, nR, nT, k)),
     mirrorSymmetry(g, w, h, 'lr'),
@@ -288,6 +355,7 @@ export function frameFeatures(g, w, h) {
     periodicity(g, w, h, 'y'),
     grad.edgeDensity,
     lit / g.length,
+    blob.blobCount, blob.blobSizeCV, blob.largestBlobFrac,
   ];
 }
 
