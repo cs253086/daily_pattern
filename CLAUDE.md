@@ -2534,6 +2534,86 @@ distance in the expected direction (segment count moved it the WRONG way
 twice before turn count moved it the right way), so measure each change
 rather than assuming "more detail = more different."
 
+## Widmanstätten crosshatch engine (`widmanstatten.html`) — 2026-09-03
+
+Daily creative-research routine. Category was "random natural structure" by
+the firing-minute-mod-category-count method (the same category
+`chladni.html` used via fallback on 2026-08-27, but the actual topic still
+had to be different). An open WebSearch for an unusual natural geometric/
+crystal pattern surfaced snowflake hexagonal symmetry and quasicrystals
+(both already covered by existing engines or the pool's archetype mix) plus
+the **Widmanstätten pattern** -- the interlocking crosshatch of metal bands
+revealed when a polished, acid-etched slice of an iron-nickel octahedrite
+meteorite is examined. As the meteorite cools over millions of years,
+kamacite plates nucleate and thicken along the four crystallographic
+`<111>` planes of the parent taenite crystal's octahedral lattice; a flat
+cut through that 3D structure intersects those plane-families as several
+sets of parallel bands crossing at angles fixed by the crystal geometry,
+producing a bold "basketweave" mesh, plus finer secondary bands filling the
+gaps between the wide primary lamellae (the real "comb plessite" texture).
+Sources:
+[Britannica](https://www.britannica.com/science/Widmanstatten-pattern),
+[FossilEra](https://www.fossilera.com/pages/widmanstatten-patterns-and-neumann-lines-in-iron-meteorites),
+[Meteoritics & Planetary Science](https://onlinelibrary.wiley.com/doi/10.1111/maps.13403).
+
+**What it is**: three independent families of parallel bands at irregular
+oblique angles -- deliberately NOT an even 60/120-degree split (which would
+read as a regular hexagonal tiling, `tessellation.html`'s archetype)
+but independently randomised offsets between 48-72 degrees apart -- overlaid
+on top of each other. Each family follows a repeating wide-primary/
+narrow-secondary "comb" thickness rhythm (every width independently
+jittered within its role's range, not literally periodic), mimicking the
+real alternation between wide kamacite lamellae and finer comb-plessite
+fill. A genuinely different construction principle from every other engine
+in the pool: not a single-direction field of parallel strips
+(`stripweave.html`, whose strips are opaque non-overlapping columns each
+carrying one internal motif), not an orthogonal axis-aligned grid
+(`grid.html`), not a filled-polygon tiling (`tessellation.html`/
+`quasicrystal.html`) -- the interesting structure here is the CROSSHATCH
+the overlapping oblique bands carve out where they intersect, not any one
+family alone. Rendered as a flat abstract crosshatch rather than a literal
+3D octahedron slice, the same "visualisation-grade, not lab-exact"
+precedent `chladni.html`/`voderberg.html` already set for this pool (the
+true crystallographic cut angles depend on a specific slice orientation
+relative to the octahedron, which isn't necessary to render the
+STRUCTURAL PRINCIPLE: oblique parallel-band families overlaid into an
+interlocking mesh). Family angles, band widths/positions, and colours are
+all fixed once per video in `initBands()`; only the whole composition's
+rigid rotation resets per `cycleSec` in `reconfigureRotation()`, the same
+coverage-neutral-reset pattern established across nine prior engines
+(applied from the first draft, per `primespiral.html`/`stripweave.html`'s
+precedent that this is now a reliable default rather than a lesson to
+relearn).
+
+**No bugs found -- `validateEngine()` passed 11/11 on the first attempt**
+across seeds 1-10 plus the CLI's actual default seed 12345 (see
+`geodome.html`'s write-up for why that specific seed matters). Margins
+comfortable throughout: `projectedRise` -14.6 to +17.2 (vs the 50
+threshold), `avgSat` 60.6-78.7 (vs the 22 minimum), zero near-white pixels
+on every seed, `fastMotion` 7-9x its per-frame floor on every seed,
+`projectedHourRenderMin` 32-57.4min (well inside the 144min/100ms-per-frame
+CI budget). Visual spot-checks across 2/25/50/75/95/105% of a 40s cycle at
+3 seeds confirmed a vivid, bold, immediately-legible oblique crosshatch/
+basketweave mesh with no whiteout and no empty corners revealed at any
+rotation angle (the band field is sized to the canvas's own half-diagonal,
+covering every corner through a full rotation by construction). One seed
+(seed 3) happened to land one family's angle close to vertical, giving
+that family a near-`stripweave`-like look in isolation, but the two
+crossing families still read clearly as a mesh rather than plain stripes,
+so no fix was needed -- confirmed by direct visual inspection of the
+rendered PNG, not just validator output, per the standing "look at it"
+visual-requirements rule.
+
+**Novelty gate**: measured against all 27 existing engines (the committed
+fingerprint cache was current, covering every file in the pool including
+the previous day's `voderberg.html`) using `fingerprintEngine`/
+`zscoreMatrix`/`distance` from `src/fingerprint.js`. Nearest neighbour is
+`wireframe` at distance **1.007** -- comfortably clear of the 0.60
+threshold (`wireframe` is the same "generic attractor" this file's
+`phyllotaxis.html` write-up documents landing near several otherwise-
+distinct engines, but a distance this far above threshold is a clean,
+comfortable pass regardless).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

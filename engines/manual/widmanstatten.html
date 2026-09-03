@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Widmanstätten Crosshatch — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine): the WIDMANSTATTEN PATTERN -- the interlocking
+// crosshatch of metal bands seen when a polished, acid-etched slice of an
+// iron-nickel octahedrite meteorite is examined. As the meteorite cools over
+// millions of years, kamacite plates nucleate and thicken along the four
+// crystallographic <111> planes of the parent taenite crystal's octahedral
+// lattice; a flat cut through that 3D octahedral structure intersects those
+// plane-families as several sets of PARALLEL BANDS crossing each other at
+// angles fixed by the crystal geometry, producing a bold "basketweave" mesh
+// of triangular/rhombic cells -- plus finer secondary bands filling the
+// gaps between the wide primary lamellae (the real "comb plessite" texture).
+// See CLAUDE.md's dated write-up for the search trail and sources.
+//
+// A genuinely different construction PRINCIPLE from everything else in the
+// pool: not a single-direction field of parallel strips (stripweave.html),
+// not an orthogonal axis-aligned grid (grid.html), not a filled-polygon
+// tiling (tessellation.html/quasicrystal.html) -- SEVERAL independent
+// families of parallel bands at oblique (non-90-degree, non-exactly-60/120)
+// angles overlaid on top of each other, so the interesting structure is the
+// CROSSHATCH itself (the cells the overlapping bands carve out), not any
+// one family alone. Rendered as a flat abstract crosshatch, not a literal
+// 3D octahedron slice -- the same "visualisation-grade, not lab-exact"
+// precedent chladni.html/voderberg.html already set for this pool (getting
+// the true crystallographic cut angles right would need a specific slice
+// orientation relative to the octahedron, which isn't necessary to render
+// the STRUCTURAL PRINCIPLE: oblique parallel-band families overlaid to form
+// an interlocking mesh).
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF, per-second rotation rate. Redraws each
+// frame from a fixed band-family list computed once at start-up (no
+// accumulation, no whiteout risk).
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 40);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  const cx = W / 2, cy = H / 2;
+  const minDim = Math.min(W, H);
+  const halfDiag = Math.sqrt(W * W + H * H) / 2 * 1.08; // covers every corner at any rotation angle
+  const dt = 1 / FPS;
+
+  // Family angles, band widths/positions, and colours are all fixed ONCE for
+  // the whole video, never re-rolled per cycle -- the "any coverage-
+  // affecting parameter re-randomised per cycle creates a real (not
+  // aliased) brightness swing" lesson CLAUDE.md documents for nine prior
+  // engines in a row. Total ink coverage is entirely a function of how many
+  // bands exist and how wide they are, so re-rolling either mid-video would
+  // swing average frame brightness between cycles exactly like a
+  // randomised subdivision depth or star count did in those engines.
+  let families, matrixCol;
+  function initBands() {
+    const d = Math.max(0.7, Math.min(1.4, DENSITY));
+
+    // Three families at irregular (independently randomised) oblique
+    // offsets -- deliberately NOT an even 60/120-degree split, which would
+    // read as a regular hexagonal tiling (tessellation.html's archetype)
+    // rather than the irregular basketweave a real octahedrite slice shows.
+    const angle0 = rand(0, Math.PI);
+    const angle1 = angle0 + rand(48, 72) * Math.PI / 180;
+    const angle2 = angle1 + rand(48, 72) * Math.PI / 180;
+    const angles = [angle0, angle1, angle2];
+
+    matrixCol = PAL[SEED % PAL.length];
+
+    families = angles.map((theta, fi) => {
+      const baseCol = PAL[(SEED + fi + 1) % PAL.length];
+      // "Comb" thickness pattern: a repeating short cycle of one wide
+      // primary lamella followed by several narrow secondary (plessite)
+      // bands, each jittered -- the real alternating wide/thin rhythm a
+      // Widmanstatten slice shows, without being literally periodic (each
+      // width is independently randomised within its role's range).
+      const bands = [];
+      let p = -halfDiag;
+      let i = 0;
+      while (p < halfDiag) {
+        const cyclePos = i % 4;
+        const isPrimary = cyclePos === 0;
+        const w = isPrimary
+          ? minDim * rand(0.028, 0.05) * d
+          : minDim * rand(0.006, 0.016) * d;
+        const gap = isPrimary
+          ? minDim * rand(0.02, 0.045)
+          : minDim * rand(0.01, 0.03);
+        const light = Math.min(74, baseCol[2] + (isPrimary ? rand(-4, 4) : rand(6, 16)));
+        bands.push({ p0: p, w, hue: baseCol[0], sat: baseCol[1], light });
+        p += w + gap;
+        i++;
+      }
+      return { theta, bands };
+    });
+  }
+
+  // Called at start-up AND every cycleSec. Only rotation resets --
+  // coverage-neutral by construction (a rigid rotation of the whole
+  // composite crosshatch doesn't change how much geometry is lit), same
+  // reasoning as every other curated engine's reconfigure step. The three
+  // oblique, irregularly-spaced families have no exact rotational symmetry
+  // to resonate against (unlike ziggurat.html's identical wedges), so a
+  // plain guaranteed-minimum-magnitude, random-sign rate is sufficient.
+  let rotAngle0, rotRate;
+  function reconfigureRotation() {
+    rotAngle0 = rand(0, Math.PI * 2);
+    rotRate = (rng() < 0.5 ? -1 : 1) * rand(0.45, 0.9) * SPEED;
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  initBands();
+  reconfigureRotation();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    ctx.fillStyle = `hsl(${matrixCol[0]}, ${Math.max(20, matrixCol[1] - 40)}%, ${Math.max(8, matrixCol[2] - 46)}%)`;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(rotAngle0 + clk * rotRate);
+
+    for (const fam of families) {
+      ctx.save();
+      ctx.rotate(fam.theta);
+      for (const b of fam.bands) {
+        ctx.fillStyle = `hsl(${b.hue}, ${b.sat}%, ${b.light}%)`;
+        ctx.fillRect(-halfDiag, b.p0, halfDiag * 2, b.w);
+      }
+      ctx.restore();
+    }
+
+    ctx.restore();
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureRotation(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
