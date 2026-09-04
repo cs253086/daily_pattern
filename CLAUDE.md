@@ -2614,6 +2614,99 @@ threshold (`wireframe` is the same "generic attractor" this file's
 distinct engines, but a distance this far above threshold is a clean,
 comfortable pass regardless).
 
+## Hilbert-curve weave engine (`hilbertweave.html`) — 2026-09-04
+
+Daily creative-research routine. Category was "random Wikipedia article" by
+the firing-minute-mod-category-count method. Since Wikipedia is blocked in
+this sandbox, used the established fallback for this category: an open
+WebSearch for an unusual/lesser-known geometric curve construction, which
+surfaced Peano/Hilbert space-filling curves, the dragon curve, and several
+rolling-circle curves (cardioid, limaçon) that read too close to
+`spirograph.html`'s existing archetype. Picked the **Hilbert curve** --
+David Hilbert's 1891 space-filling curve, generated here via its classic
+Lindenmayer-system (L-system) definition: variables A, B; constants F
+(forward), + (turn left 90 degrees), - (turn right 90 degrees); axiom A;
+rules A -> +BF-AFA-FB+, B -> -AF+BFB+FA- (A/B are non-drawing
+placeholders). Iterating the rules and walking the result produces a
+single continuous path that visits every cell of an NxN grid EXACTLY
+ONCE via unit axis-aligned steps -- a genuine Hamiltonian path, not an
+approximation. Sources:
+[American Scientist](https://www.americanscientist.org/article/crinkly-curves),
+[Wikipedia: Hilbert curve](https://en.wikipedia.org/wiki/Hilbert_curve)
+(L-system rules corroborated via search snippets, not fetched directly --
+Wikipedia itself is blocked here).
+
+**The L-system rules were verified OFFLINE before writing any rendering
+code**, the same discipline this pool's `quasicrystal.html`/`geodome.html`
+already established for subdivision formulas that would still "look
+plausible" even if subtly wrong: a standalone script expanded the rules
+for orders 1-5 and confirmed the resulting turtle path visits every one
+of the `(2^order)^2` grid cells EXACTLY once, stays in-bounds, and only
+ever takes unit-length axis-aligned steps -- a true Hamiltonian path, not
+just a plausible-looking one.
+
+**What it is**: a genuinely different construction PRINCIPLE from every
+other engine in the pool: not a substitution/subdivision system that
+repartitions a fixed area (`quasicrystal.html`/`voderberg.html`), not
+several independent overlaid band families (`widmanstatten.html`), not a
+branching growth process (`dendrite.html`), not an arithmetic sieve
+(`primespiral.html`) -- one single continuous recursively-defined path
+that fills a square by visiting every grid cell exactly once, rendered as
+a bold, thick "circuit board" / maze weave (stroke width a large fraction
+of the grid cell size, per the house style's "bigger, fewer, clearer"
+rule) rather than a fine hairline.
+
+**Novelty-gate iteration, not a quality-gate bug.** The first design (ONE
+large Hilbert curve filling a centred square, whole-composition rotation
+per cycle plus a travelling brightness pulse) passed `validateEngine()`
+cleanly on the first attempt but measured only **0.619** from
+`wireframe.html` in the mandatory novelty gate -- technically above the
+0.60 threshold but an uncomfortably thin margin, the same "generic
+attractor" this file's `phyllotaxis.html`/`widmanstatten.html` write-ups
+already document `wireframe.html` landing near. A per-feature z-score
+diagnostic (the same technique used to debug `phyllotaxis.html`'s own
+novelty-gate failures) showed the single square's own strong
+lattice-periodicity (`periodX`/`periodY`) and approximate 4-fold
+rotational-symmetry signature (`rotSym4`, `radial4`) were the largest
+contributors -- properties inherent to any single regular-grid Hilbert
+curve, not something a colour or motion tweak could fix. Fixed with the
+same composition-level lever `dendrite.html`/`phyllotaxis.html` already
+proved out for the identical situation: broke the one big centred square
+into 2-4 independently-positioned, independently-rotating smaller
+instances placed in a near-regular grid of cells (`initInstances()`),
+capping each instance's side to 0.54-0.6x its cell's smaller dimension --
+comfortably under the 0.5x safety line once accounting for a *rotating*
+square's larger circumscribed radius (`side*sqrt(2)/2`), so no instance
+ever clips a neighbour or the canvas edge regardless of rotation angle.
+Re-measured: nearest neighbour rose to `starburst` at **0.745** -- a
+healthy, comfortable margin -- with `wireframe` dropping to 5th-nearest
+at 0.876.
+
+Instance placement, per-instance Hilbert order, path geometry, and
+per-segment colour are all fixed once per video in `initInstances()`;
+only each instance's own rotation angle/rate and travelling-pulse phase
+reset per `cycleSec` in `reconfigureMotion()` -- the same coverage-neutral
+"compute once, only rotate/pulse-phase per frame" pattern established
+across eleven prior engines. The travelling pulse (a fixed-length window
+of segment indices sliding along each instance's own path) is the same
+"fixed-size window, position varies" mechanic `chladni.html`'s percentile
+threshold already proved safe, giving genuine lively per-frame motion
+beyond the coarser per-cycle rotation reset without ever changing total
+lit coverage.
+
+**Verified** (final multi-instance design): `validateEngine()` **11/11**
+across seeds 1-10 plus the CLI's actual default seed 12345 (see
+`geodome.html`'s write-up for why that seed specifically matters).
+Margins comfortable throughout: `projectedRise` -7.0 to +4.1 (vs the 50
+threshold), `avgSat` 74.1-80.3 (vs the 22 minimum), zero near-white
+pixels on every seed, `fastMotion` 2.6-3.2x its per-frame floor on every
+seed, `projectedHourRenderMin` 5.9-7.2min (well inside the CI budget).
+Visual spot-checks across 2/25/50/75/95/105% of a 38s cycle at 4 seeds,
+plus both the 2-3-instance and 2x2-grid (4-instance) density layouts,
+confirmed bold, vivid, immediately-legible independently-spinning
+maze/circuit-board instances with no clipping between instances or at
+the canvas edge.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

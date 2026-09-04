@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hilbert Weave — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine): the HILBERT CURVE -- David Hilbert's 1891
+// space-filling curve, generated here via its classic Lindenmayer-system
+// (L-system) definition: variables A, B; constants F (forward), + (turn
+// left 90deg), - (turn right 90deg); axiom A; rules A -> +BF-AFA-FB+,
+// B -> -AF+BFB+FA- (A and B are non-drawing placeholders, only F/+/- are
+// interpreted by the turtle). Iterating the rules and walking the result
+// produces a single continuous path that visits every cell of an NxN grid
+// (N = 2^order) EXACTLY ONCE, using only unit-length axis-aligned steps --
+// a genuine Hamiltonian path on the grid, not an approximation. See
+// CLAUDE.md's dated write-up for the search trail; the L-system rules were
+// verified OFFLINE before writing any rendering code (a standalone script
+// confirmed exact one-visit-per-cell coverage, in-bounds coordinates, and
+// unit-step connectivity for orders 1-5), the same discipline this pool's
+// quasicrystal.html/geodome.html already established for subdivision
+// formulas that would still "look plausible" even if subtly wrong.
+//
+// A genuinely different construction PRINCIPLE from everything else in the
+// pool: not a substitution/subdivision system that repartitions a fixed
+// area (quasicrystal.html/voderberg.html), not several independent
+// overlaid band families (widmanstatten.html), not a branching growth
+// process (dendrite.html), not an arithmetic sieve (primespiral.html) --
+// ONE (repeated, per instance below) single continuous path, recursively
+// defined, that fills a square by visiting every cell of a grid exactly
+// once. Rendered as a bold, thick "circuit board" / maze weave (stroke
+// width a large fraction of the grid cell size, per the house style's
+// "bigger, fewer, clearer" rule) rather than a fine hairline, so the
+// recursive self-similar structure still reads as bold geometric shapes
+// at a glance.
+//
+// Several independent Hilbert-curve instances are placed in a near-regular
+// grid of cells (the same composition-level pattern dendrite.html/
+// phyllotaxis.html established) rather than one big centred square -- the
+// mandatory novelty gate (src/fingerprint.js) found a single large
+// instance measured only 0.619 from wireframe.html (an uncomfortably thin
+// pass, the same "generic attractor" this pool's phyllotaxis.html/
+// widmanstatten.html write-ups already document), driven mostly by the
+// single square's own strong lattice-periodicity and approximate 4-fold-
+// symmetry signature (confirmed via a per-feature z-score diagnostic, the
+// same technique used to debug phyllotaxis.html's own novelty-gate
+// failures). Breaking one big periodic square into several smaller,
+// independently-rotating instances is a genuine composition-level change
+// (not a cosmetic one) that measurably raises the distance -- see
+// CLAUDE.md's dated write-up for the before/after numbers.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF, per-second rotation rate. Redraws each
+// frame from fixed paths (geometry + per-segment colour) computed once at
+// start-up -- no accumulation, no whiteout risk. The only things that
+// change per frame are each instance's own rigid rotation (reset per
+// cycleSec) and a travelling brightness pulse per instance with a FIXED
+// window length (so total lit coverage never varies as it moves), giving
+// genuine lively per-frame motion beyond the coarser per-cycle rotation
+// reset.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 38);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  const minDim = Math.min(W, H);
+  const dt = 1 / FPS;
+
+  // Hilbert-curve L-system: axiom A, rules A -> +BF-AFA-FB+, B -> -AF+BFB+FA-,
+  // verified offline (see header comment) to produce a correct Hamiltonian
+  // path -- every cell of the 2^order x 2^order grid visited exactly once
+  // via unit axis-aligned steps.
+  function hilbertGridPoints(order) {
+    const rules = { A: '+BF-AFA-FB+', B: '-AF+BFB+FA-' };
+    let s = 'A';
+    for (let i = 0; i < order; i++) {
+      let next = '';
+      for (const c of s) next += rules[c] || c;
+      s = next;
+    }
+    let x = 0, y = 0, dir = 0;
+    const dirs = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+    const pts = [[x, y]];
+    for (const c of s) {
+      if (c === 'F') {
+        const [dx, dy] = dirs[dir];
+        x += dx; y += dy;
+        pts.push([x, y]);
+      } else if (c === '+') dir = (dir + 1) % 4;
+      else if (c === '-') dir = (dir + 3) % 4;
+    }
+    return pts;
+  }
+
+  // Instance placement (grid shape, per-instance jitter), each instance's
+  // Hilbert order, path geometry, per-segment colour, and pulse window
+  // length are all fixed ONCE for the whole video, never re-rolled per
+  // cycle -- the "any coverage-affecting parameter re-randomised per cycle
+  // creates a real (not aliased) brightness swing" lesson CLAUDE.md
+  // documents for ten prior engines in a row.
+  let instances;
+  function initInstances() {
+    const d = Math.max(0.7, Math.min(1.4, DENSITY));
+    const grid = d < 0.85 ? { cols: 2, rows: 1 } : d > 1.15 ? { cols: 2, rows: 2 } : { cols: 3, rows: 1 };
+    const cellW = W / grid.cols, cellH = H / grid.rows;
+    const order = grid.cols * grid.rows <= 2 ? 4 : 3;
+    const n = 1 << order;
+    const pts = hilbertGridPoints(order);
+    const totalSegs = pts.length - 1;
+
+    instances = [];
+    let idx = 0;
+    for (let row = 0; row < grid.rows; row++) {
+      for (let col = 0; col < grid.cols; col++, idx++) {
+        const jx = rand(-0.06, 0.06) * cellW;
+        const jy = rand(-0.06, 0.06) * cellH;
+        const centerX = (col + 0.5) * cellW + jx;
+        const centerY = (row + 0.5) * cellH + jy;
+        // A rotating square's circumscribed radius is side*sqrt(2)/2
+        // (~0.707x side). Capping side to 0.6x the cell's smaller
+        // dimension keeps that full swept radius comfortably under half
+        // the cell dimension (0.6*0.707 = 0.424 < 0.5), so an
+        // independently-rotating instance never clips a neighbour or the
+        // canvas edge regardless of rotation angle.
+        const side = Math.min(cellW, cellH) * rand(0.54, 0.6);
+        const cellSize = side / n;
+        const originX = -side / 2 + cellSize / 2;
+        const originY = -side / 2 + cellSize / 2;
+        const strokeW = cellSize * 0.56;
+
+        const baseCol = PAL[idx % PAL.length];
+        const hue0 = rng() * 360;
+        const rippleFreq = 3 + ((SEED + idx) % 3); // 3, 4, or 5 -- spatially fixed, no time drift
+        const rippleAmt = 42;
+
+        const segments = [];
+        for (let i = 0; i < totalSegs; i++) {
+          const [gx0, gy0] = pts[i];
+          const [gx1, gy1] = pts[i + 1];
+          const x0 = originX + gx0 * cellSize, y0 = originY + gy0 * cellSize;
+          const x1 = originX + gx1 * cellSize, y1 = originY + gy1 * cellSize;
+          const frac = i / totalSegs;
+          const hue = ((baseCol[0] + hue0 + rippleAmt * Math.sin(frac * Math.PI * 2 * rippleFreq)) % 360 + 360) % 360;
+          segments.push({ x0, y0, x1, y1, hue, sat: baseCol[1], light: baseCol[2] });
+        }
+
+        instances.push({
+          centerX, centerY, strokeW, segments, totalSegs,
+          pulseLenIdx: Math.max(6, Math.round(totalSegs * 0.14)),
+          rotAngle0: 0, rotRate: 0, pulseSpeed: 0, pulseDir: 1,
+        });
+      }
+    }
+  }
+
+  // Called at start-up AND every cycleSec. Only rotation/pulse-phase
+  // parameters reset -- coverage-neutral by construction (a rigid rotation
+  // of a fixed path, or a fixed-length pulse window sliding along it,
+  // doesn't change how much geometry is lit), same reasoning as every
+  // other curated engine's reconfigure step.
+  function reconfigureMotion() {
+    for (const inst of instances) {
+      inst.rotAngle0 = rand(0, Math.PI * 2);
+      inst.rotRate = (rng() < 0.5 ? -1 : 1) * rand(0.35, 0.7) * SPEED;
+      inst.pulseDir = rng() < 0.5 ? -1 : 1;
+      inst.pulseSpeed = rand(0.18, 0.32) * SPEED; // fraction of the full path travelled per second
+    }
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  initInstances();
+  reconfigureMotion();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    for (const inst of instances) {
+      // Travelling pulse: a FIXED-length window of segment indices (so
+      // total lit coverage never varies as it moves) slides along the
+      // path over time, giving genuine per-frame motion beyond the
+      // coarser per-cycle rotation -- the same "fixed-size window,
+      // position varies" mechanic chladni.html's percentile threshold
+      // already proved safe.
+      const pulseCenter = ((inst.pulseDir * clk * inst.pulseSpeed) % 1 + 1) % 1 * inst.totalSegs;
+      const halfLen = inst.pulseLenIdx / 2;
+
+      ctx.save();
+      ctx.translate(inst.centerX, inst.centerY);
+      ctx.rotate(inst.rotAngle0 + clk * inst.rotRate);
+
+      for (let i = 0; i < inst.totalSegs; i++) {
+        const s = inst.segments[i];
+        let dCirc = Math.abs(i - pulseCenter);
+        dCirc = Math.min(dCirc, inst.totalSegs - dCirc);
+        const boost = dCirc < halfLen ? (1 - dCirc / halfLen) : 0;
+        const light = Math.min(88, s.light + boost * 26);
+        const sat = Math.min(96, s.sat + boost * 10);
+        ctx.strokeStyle = `hsl(${s.hue}, ${sat}%, ${light}%)`;
+        ctx.lineWidth = inst.strokeW;
+        ctx.beginPath();
+        ctx.moveTo(s.x0, s.y0);
+        ctx.lineTo(s.x1, s.y1);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureMotion(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
