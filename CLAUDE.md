@@ -2707,6 +2707,124 @@ confirmed bold, vivid, immediately-legible independently-spinning
 maze/circuit-board instances with no clipping between instances or at
 the canvas edge.
 
+## Voronoi mosaic engine (`voronoimosaic.html`) — 2026-09-05
+
+Daily creative-research routine. Category was "random Wikipedia article" by
+the firing-minute-mod-category-count method. Since Wikipedia is blocked in
+this sandbox, an open WebSearch for obscure tiling/partition principles
+(the established fallback for this category) surfaced several
+aperiodic-monotile variants (the Einstein tile, Wang tiles) that read too
+close to `quasicrystal.html`'s/`voderberg.html`'s existing
+substitution-tiling archetype, plus the **Voronoi diagram** -- a
+nearest-neighbour spatial partition of the plane: given a set of seed
+points, each cell consists of every point closer to its own seed than to
+any other seed, with straight-line perpendicular-bisector boundaries
+between neighbours. Picked as a genuinely different, renderable structural
+principle not yet in the pool -- a proximity-based partition, not a
+recursive substitution rule.
+
+**What it is**: cells computed via HALF-PLANE-INTERSECTION clipping (not
+Fortune's sweep algorithm): starting from a large bounding square, each
+seed's cell is the box repeatedly clipped against the
+perpendicular-bisector half-plane of every other seed, keeping the half
+closer to this seed. Verified OFFLINE before writing any rendering code
+(a standalone script confirmed the resulting cells' total area exactly
+equals the bounding square's area with no gaps/overlaps, and every cell
+centroid is genuinely nearest its own seed, for an 18-seed test case) --
+the same discipline this pool's `quasicrystal.html`/`geodome.html`
+already established. A genuinely different construction principle from
+every other engine in the pool: not a substitution/subdivision system
+(`quasicrystal.html`/`voderberg.html`), not several overlaid band
+families (`widmanstatten.html`), not a single recursively-defined path
+(`hilbertweave.html`), not an arithmetic sieve (`primespiral.html`) -- a
+proximity partition with no recursion and, since seed points have no
+radial/lattice structure, no exact rotational or lattice symmetry at all.
+
+**This engine needed the most iteration of any curated engine to date --
+four substantively different designs, three of them motivated by a real
+failure the previous one didn't catch, not by guessing.** Recorded in
+full because the underlying lesson (a fix for one gate can break the
+OTHER gate) hadn't been hit this starkly before in this pool.
+
+1. **One full-canvas mosaic, full continuous rotation, index-based
+   per-cell colour.** Passed every other check but repeatedly failed
+   `validate.js`'s brightness-trend (whiteout) regression on some seeds
+   (+62 to -76 luma projected, vs the 50 threshold), across several
+   colour-scheme tweaks (tightening per-cell lightness jitter, raising
+   cell count from 16 to 46 to 70 per density). Root-caused, not just
+   patched around: rotating a large colour-varying field inside a FIXED
+   RECTANGULAR (16:9) viewport isn't coverage-neutral the way rotating it
+   inside a circular one would be -- the canvas reaches ~2.04x farther
+   along its own diagonal (to its corners) than along its short edge
+   (`sqrt(W^2+H^2)/H`), so cells sitting in that outer "annulus" between
+   the inscribed circle and the circumscribed disk are only visible
+   during SOME rotation angles, and an unlucky seed's specific cell
+   layout there can swing the frame average as it cycles in and out of
+   view -- a real, bounded, periodic effect (the mosaic always tiles the
+   canvas completely, so it's never true accumulation), not a validator
+   fluke, but one that still needed fixing at the source.
+2. **Tied hue to each cell's radius-from-centre** (the same
+   rotation-invariant-axis fix `geodome.html` used for its own
+   longitude/latitude brightness-trend bug, reasoning that a
+   rotation-invariant colour field couldn't swing with rotation).
+   Measured WORSE, not better (`projectedRise` to -99): with only ~20
+   large cells, correlating colour with radius meant several
+   similarly-radius cells near the annulus now shared correlated (not
+   independent) colour, so their combined entering/exiting the frame
+   REINFORCED the swing instead of cancelling it out. Lesson: the
+   "rotation-invariant axis" fix relies on a densely-tessellated
+   continuous field (many small elements per band, as in `geodome.html`'s
+   mesh) to approximate true invariance -- it can backfire on a coarse
+   field of few, large, now-correlated elements.
+3. **Several independent square mosaic instances in a grid** (the
+   `hilbertweave.html`/`dendrite.html` multi-instance composition
+   pattern, each instance's own square aspect having a much smaller
+   annulus-to-inscribed ratio, `sqrt(2)` =~1.41x vs ~2.04x for the full
+   16:9 canvas). This fully fixed the whiteout risk -- 11/11 seeds passed
+   with comfortable margins -- but broke the OTHER mandatory gate: the
+   novelty measurement dropped to **0.486** against `lattice3d`, below
+   the 0.60 minimum, because a grid of independently-rotating square
+   patches reads compositionally too close to `lattice3d.html`'s own
+   grid-of-spinning-elements archetype, regardless of the very different
+   underlying content (2D Voronoi cells vs. lit 3D cubes) -- the novelty
+   descriptor measures composition, not subject matter. Lesson: a fix
+   that satisfies the whiteout gate can defeat the novelty gate, and both
+   must be re-checked after any structural change, not just the one the
+   change targeted.
+4. **Final design: reverted to ONE full-canvas mosaic (restoring design
+   1's good ~0.7+ novelty) but replaced full continuous rotation with a
+   BOUNDED angular wobble** (base angle plus a sine oscillation of only
+   +-0.36 rad, at a fast enough rate to keep the same peak angular
+   velocity -- hence the same strong `fastMotion` reading -- a slow full
+   rotation gave) -- the same "bound the risky excursion, don't remove
+   the motion" lever `torusrings3d.html` already used for its own
+   silhouette-degeneracy problem (bounding tilt instead of an unbounded
+   sweep through the edge-on angle). A small bounded wobble
+   proportionally shrinks how much of the outer annulus ever cycles into
+   view at all, combined with a higher cell count (60x density) as a
+   second, complementary dilution lever.
+
+**Verified** (final design): `validateEngine()` **11/11** across seeds
+1-10 plus the CLI's actual default seed 12345 (see `geodome.html`'s
+write-up for why that seed matters). Margins comfortable throughout:
+`projectedRise` -33.2 to +23.6 (vs the 50 threshold), `avgSat` 76.9-89.3
+(vs the 22 minimum), zero near-white pixels on every seed, `fastMotion`
+always comfortably above its per-frame floor. Visual spot-checks across
+2/25/50/75/95/105% of a 36s cycle at multiple seeds confirmed a vivid,
+bold, full-bleed stained-glass mosaic with clean crisp cell boundaries,
+no empty corners at the wobble's extremes, and a smooth (non-jarring)
+oscillation.
+
+**Novelty gate**: measured against all 30 existing engines (the
+committed fingerprint cache was several commits behind -- missing a
+Gemini-promoted engine plus `hilbertweave.html`/`widmanstatten.html` --
+so all three were fingerprinted fresh alongside the candidate) using
+`fingerprintEngine`/`zscoreMatrix`/`distance` from `src/fingerprint.js`.
+Nearest neighbour is `wireframe` at distance **0.732** -- comfortably
+clear of the 0.60 threshold (`wireframe` is the same "generic attractor"
+this file's `phyllotaxis.html`/`widmanstatten.html` write-ups document
+landing near several otherwise-distinct engines).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

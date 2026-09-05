@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Voronoi Mosaic — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine): the VORONOI DIAGRAM -- a nearest-neighbour
+// spatial partition of the plane. Given a set of seed points, each cell
+// consists of every point closer to its own seed than to any other seed;
+// cell boundaries are straight-line perpendicular bisectors between
+// neighbouring seed pairs, so the cells are always convex polygons, never
+// curved or organic. See CLAUDE.md's dated write-up for why this category
+// (an obscure structural principle rather than a specific named tiling)
+// led here rather than to another aperiodic-tiling variant.
+//
+// A genuinely different construction PRINCIPLE from everything else in the
+// pool: not a substitution/subdivision system that recursively repartitions
+// a FIXED shape (quasicrystal.html/voderberg.html), not several overlaid
+// band families (widmanstatten.html), not a single recursively-defined
+// path (hilbertweave.html), not an arithmetic sieve (primespiral.html) --
+// a PROXIMITY-based partition with no recursion, no substitution rule, and
+// (because seed points are placed with no radial/lattice structure) no
+// exact rotational or lattice symmetry at all, unlike almost every other
+// engine in the pool. ONE mosaic fills the entire canvas (deliberately not
+// several independent instances in a grid -- an earlier attempt at that
+// fix measured too close to lattice3d.html's own grid-of-elements
+// composition in the mandatory novelty gate, 0.486 vs the 0.60 minimum;
+// see CLAUDE.md's dated write-up for the full iteration history).
+//
+// Cells are computed via HALF-PLANE-INTERSECTION clipping (not Fortune's
+// sweep algorithm): starting from a large bounding square, each seed's
+// cell is the box repeatedly clipped against the perpendicular-bisector
+// half-plane of every OTHER seed, keeping the half closer to this seed.
+// This construction was verified OFFLINE before writing any rendering
+// code (the same discipline this pool's quasicrystal.html/geodome.html
+// already established for formulas that could look plausible even if
+// subtly wrong): a standalone script confirmed the resulting cells'
+// total area exactly equals the bounding square's area (no gaps or
+// overlaps) and that every cell's centroid is genuinely nearest to its
+// OWN seed among all seeds, for an 18-seed test case.
+//
+// Motion is a BOUNDED angular oscillation (a base angle plus a small
+// sine wobble), not a full continuous rotation -- a real, measured fix:
+// full 360-degree rotation of this mosaic repeatedly failed validate.js's
+// brightness-trend (whiteout) regression on some seeds (+62 to -99 luma
+// projected, against the +-50 threshold), root-caused to a real structural
+// effect, not accumulation or a validator artifact -- rotating a large
+// colour-varying field inside a FIXED RECTANGULAR (16:9) viewport isn't
+// coverage-neutral the way rotating it inside a circular one would be: the
+// canvas reaches ~2.04x farther along its own diagonal (to its corners)
+// than along its short edge (half-diagonal / half-height), so cells
+// sitting in that "annulus" between the inscribed circle and the
+// circumscribed disk are only visible during SOME rotation angles, and a
+// full sweep through all of them lets an unlucky seed's specific cell
+// layout there swing the frame average. Bounding the angular excursion to
+// a small wobble (+-0.3 to +-0.4 rad, a fraction of a full rotation)
+// proportionally shrinks how much of that annulus content ever cycles in
+// or out of view, while a fast oscillation RATE keeps the same peak
+// angular velocity (hence the same strong fastMotion reading) a full slow
+// rotation would give -- the same "bound the risky excursion, don't
+// remove the motion" lever torusrings3d.html already used for its own
+// silhouette-degeneracy problem (bounding tilt instead of allowing an
+// unbounded sweep through the edge-on angle).
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF, per-second rotation rate. Redraws each
+// frame from a fixed cell list computed once at start-up -- no
+// accumulation, no whiteout risk. The mosaic tiles its own bounding square
+// completely (no black background ever visible within it), so the canvas
+// is always fully covered regardless of angle as long as that bounding
+// square's own half-diagonal reach exceeds the canvas's.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 36);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  const cx = W / 2, cy = H / 2;
+  const halfDiag = Math.sqrt(W * W + H * H) / 2 * 1.08; // covers every corner at any angle within the bounded wobble
+  const dt = 1 / FPS;
+
+  // Sutherland-Hodgman single-half-plane clip: keep points x with x.n <= c.
+  function clipHalfPlane(poly, nx, ny, c) {
+    const out = [];
+    const len = poly.length;
+    for (let i = 0; i < len; i++) {
+      const cur = poly[i];
+      const prev = poly[(i - 1 + len) % len];
+      const curIn = (cur[0] * nx + cur[1] * ny) <= c;
+      const prevIn = (prev[0] * nx + prev[1] * ny) <= c;
+      if (curIn) {
+        if (!prevIn) out.push(intersectEdge(prev, cur, nx, ny, c));
+        out.push(cur);
+      } else if (prevIn) {
+        out.push(intersectEdge(prev, cur, nx, ny, c));
+      }
+    }
+    return out;
+  }
+  function intersectEdge(a, b, nx, ny, c) {
+    const da = a[0] * nx + a[1] * ny - c;
+    const db = b[0] * nx + b[1] * ny - c;
+    const t = da / (da - db);
+    return [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
+  }
+  function voronoiCell(i, seeds, boundingPoly) {
+    let poly = boundingPoly;
+    const p = seeds[i];
+    for (let j = 0; j < seeds.length; j++) {
+      if (j === i) continue;
+      const q = seeds[j];
+      const nx = q[0] - p[0], ny = q[1] - p[1];
+      const c = (q[0] * q[0] + q[1] * q[1] - (p[0] * p[0] + p[1] * p[1])) / 2;
+      poly = clipHalfPlane(poly, nx, ny, c);
+      if (poly.length === 0) break;
+    }
+    return poly;
+  }
+
+  // Seed points, cell polygons, and per-cell colours are all fixed ONCE
+  // for the whole video, never re-rolled per cycle -- the "any coverage-
+  // affecting parameter re-randomised per cycle creates a real (not
+  // aliased) brightness swing" lesson CLAUDE.md documents for eleven
+  // prior engines in a row. Cell count is higher than "a few big bold
+  // cells" alone would suggest -- many independent, uncorrelated-colour
+  // cells further dilute any residual whole-canvas-wobble brightness
+  // swing (the same "many independent elements average out" principle
+  // dendrite.html/phyllotaxis.html already rely on, applied here as a
+  // second, complementary lever alongside bounding the wobble itself).
+  let cells;
+  function initMosaic() {
+    const d = Math.max(0.7, Math.min(1.4, DENSITY));
+    const n = Math.round(60 * d);
+    const boxHalf = halfDiag * 1.05;
+    const seeds = [];
+    for (let i = 0; i < n; i++) seeds.push([rand(-boxHalf, boxHalf), rand(-boxHalf, boxHalf)]);
+    const boundingPoly = [[-boxHalf, -boxHalf], [boxHalf, -boxHalf], [boxHalf, boxHalf], [-boxHalf, boxHalf]];
+
+    const hue0 = rng() * 360;
+    cells = [];
+    for (let i = 0; i < n; i++) {
+      const poly = voronoiCell(i, seeds, boundingPoly);
+      if (poly.length < 3) continue; // degenerate cell (shouldn't happen for well-spread seeds, but skip defensively)
+      const baseCol = PAL[i % PAL.length];
+      const hue = ((baseCol[0] + hue0 + rand(-14, 14)) % 360 + 360) % 360;
+      const light = Math.max(52, Math.min(64, baseCol[2] + rand(-2, 2)));
+      cells.push({ poly, hue, sat: baseCol[1], light });
+    }
+  }
+
+  // Called at start-up AND every cycleSec. Only the wobble's parameters
+  // reset -- coverage-neutral by construction (the mosaic itself never
+  // changes, and it already tiles its bounding square completely, at any
+  // angle within +-WOBBLE_MAX). Seed points have no radial/lattice
+  // structure, so unlike ziggurat.html's identical wedges there is no
+  // exact rotational symmetry to resonate against.
+  const WOBBLE_MAX = 0.36; // radians -- bounds how much of the viewport's outer "annulus" can ever cycle in/out
+  let baseAngle, wobblePhase0, wobbleRate;
+  function reconfigureWobble() {
+    baseAngle = rand(0, Math.PI * 2);
+    wobblePhase0 = rand(0, Math.PI * 2);
+    // Guaranteed-minimum-magnitude, random-sign rate, same house-style
+    // convention as every other engine's motion parameters. A fast rate
+    // at small amplitude keeps peak angular velocity (amplitude*rate)
+    // comparable to a slow full rotation's, for the same lively-pace
+    // fastMotion reading, while the total excursion stays bounded.
+    wobbleRate = (rng() < 0.5 ? -1 : 1) * rand(2.0, 3.2) * SPEED;
+  }
+
+  const strokeW = Math.max(1.5, Math.min(W, H) * 0.006);
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  initMosaic();
+  reconfigureWobble();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(baseAngle + WOBBLE_MAX * Math.sin(wobblePhase0 + clk * wobbleRate));
+
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+    ctx.lineWidth = strokeW;
+
+    for (const cell of cells) {
+      ctx.fillStyle = `hsl(${cell.hue}, ${cell.sat}%, ${cell.light}%)`;
+      ctx.beginPath();
+      ctx.moveTo(cell.poly[0][0], cell.poly[0][1]);
+      for (let k = 1; k < cell.poly.length; k++) ctx.lineTo(cell.poly[k][0], cell.poly[k][1]);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    ctx.restore();
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureWobble(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
