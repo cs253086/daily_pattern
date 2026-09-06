@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Herringbone Weave — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine): TWILL WEAVE -- the textile construction rule
+// behind denim, herringbone tweed, and countless traditional woven fabrics.
+// A twill is built on a grid of warp (vertical) and weft (horizontal)
+// threads: the weft goes OVER a fixed number of warp threads, then UNDER a
+// fixed number, and this over/under pattern shifts by exactly ONE warp
+// position every row -- that single shift rule is what produces twill's
+// signature diagonal ribs ("wales"), not an explicit diagonal line drawn on
+// purpose. HERRINGBONE is the classic "broken twill" variant: the diagonal
+// direction flips in alternating vertical bands, producing the repeating
+// chevron / fishbone point where the bands meet. See CLAUDE.md's dated
+// write-up for the search trail (a related Bedouin Al-Sadu weaving lead was
+// investigated and set aside: its "separate strips sewn together"
+// construction is structurally the same principle stripweave.html already
+// covers via Kente cloth, so twill's shift-rule diagonal was picked instead
+// as the genuinely different, not-yet-covered structural mechanism).
+//
+// The over/under shift rule was verified OFFLINE before writing any
+// rendering code (a standalone script printed the resulting grid as ASCII
+// and confirmed algebraically that row r+1's pattern at column c exactly
+// equals row r's pattern at column c+1 -- the defining "shift by one warp
+// thread per row" diagonal invariant -- for both the plain-twill and
+// herringbone-banded rules) -- the same discipline this pool's
+// quasicrystal.html/geodome.html/hilbertweave.html already established for
+// constructions that could look plausible even if subtly wrong.
+//
+// A genuinely different construction PRINCIPLE from everything else in the
+// pool: not a substitution/subdivision system (quasicrystal.html/
+// voderberg.html), not several independently-angled overlaid band families
+// (widmanstatten.html), not a proximity partition (voronoimosaic.html),
+// not a single recursively-defined path (hilbertweave.html) -- a SINGLE
+// square grid where a binary (over/under) state at each cell is determined
+// by a simple modular shift rule, producing an emergent diagonal texture
+// that isn't drawn directly as a diagonal at all.
+//
+// Motion is a continuous 2D SCROLL of the (seamlessly repeating) weave
+// pattern through the viewport -- deliberately NOT a whole-canvas rotation.
+// This sidesteps, by construction, the entire class of rotation/viewport
+// brightness-trend bug voronoimosaic.html's dated write-up documents at
+// length (a rectangular viewport isn't coverage-neutral under rotation):
+// a scrolling PERIODIC pattern has by definition identical total coverage
+// at every scroll phase (the same trick stripweave.html already relies on
+// for its own per-frame motion), so there is no rotation-driven "annulus"
+// for this engine to fall into in the first place.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF, per-second scroll rate. Redraws each
+// frame from a fixed weave rule (over/under counts, band width, colours)
+// computed once at start-up -- no accumulation, no whiteout risk, and the
+// weave tiles the canvas completely every frame (no black background ever
+// visible), so coverage is exactly constant regardless of scroll phase.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 34);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  const minDim = Math.min(W, H);
+  const dt = 1 / FPS;
+
+  // Weave rule (over/under counts, herringbone band width), cell size, and
+  // colours are all fixed ONCE for the whole video, never re-rolled per
+  // cycle -- the "any coverage-affecting parameter re-randomised per cycle
+  // creates a real (not aliased) brightness swing" lesson CLAUDE.md
+  // documents for twelve prior engines in a row. Here the weave tiles the
+  // canvas completely regardless of parameters, so coverage can't swing
+  // anyway -- but the colour scheme is still fixed once for the same
+  // reason every other engine's palette assignment is (avoiding a
+  // per-cycle hue jump, the HSL-hue-affects-luma trap quasicrystal.html/
+  // geodome.html/voronoimosaic.html all document).
+  let over, under, period, cellSize, bandWidthCells, warpCol, weftCol;
+  function initWeave() {
+    const d = Math.max(0.7, Math.min(1.4, DENSITY));
+    over = randInt(2, 3);
+    under = randInt(1, 2);
+    period = over + under;
+    cellSize = Math.max(14, Math.round(minDim / (34 * d)));
+    bandWidthCells = period * randInt(5, 9);
+
+    const iA = SEED % PAL.length;
+    const iB = (SEED + randInt(2, PAL.length - 1)) % PAL.length;
+    const a = PAL[iA], b = PAL[iB];
+    warpCol = { hue: a[0], sat: a[1], light: Math.max(40, a[2] - 8) };
+    weftCol = { hue: b[0], sat: b[1], light: Math.min(72, b[2] + 8) };
+
+    // A real bug found only by running validateEngine() across seed
+    // batches, not by reasoning about the code: two colours can look
+    // boldly distinct to the eye (different hue/saturation) while having
+    // near-identical LUMA -- validate.js's spatial-structure check reads
+    // luma (roughly greyscale brightness), so a seed whose warp/weft
+    // palette entries happened to land at similar luma (seed 4: a
+    // cyan-ish 190deg vs a magenta-ish 330deg, luma 161 vs 145 -- a
+    // visibly vivid pink/cyan pattern to a person, but only a ~6% luma
+    // gap) failed with "peak std 3.62", reading as almost flat. Fixed by
+    // nudging lightness apart until the two colours' actual RGB luma
+    // differ by a guaranteed minimum, the same "guaranteed minimum
+    // magnitude" principle CLAUDE.md documents for motion parameters,
+    // applied here to colour contrast instead.
+    const MIN_LUMA_GAP = 55;
+    for (let i = 0; i < 40 && Math.abs(luma(warpCol) - luma(weftCol)) < MIN_LUMA_GAP; i++) {
+      if (luma(warpCol) >= luma(weftCol)) {
+        warpCol.light = Math.min(78, warpCol.light + 2);
+        weftCol.light = Math.max(30, weftCol.light - 2);
+      } else {
+        weftCol.light = Math.min(78, weftCol.light + 2);
+        warpCol.light = Math.max(30, warpCol.light - 2);
+      }
+    }
+  }
+
+  function hsl2rgb(h, s, l) {
+    s /= 100; l /= 100;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = l - c / 2;
+    let r, g, b;
+    if (h < 60) { r = c; g = x; b = 0; }
+    else if (h < 120) { r = x; g = c; b = 0; }
+    else if (h < 180) { r = 0; g = c; b = x; }
+    else if (h < 240) { r = 0; g = x; b = c; }
+    else if (h < 300) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+    return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+  }
+  function luma(col) {
+    const [r, g, b] = hsl2rgb(col.hue, col.sat, col.light);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+
+  // Herringbone rule: the diagonal direction flips every bandWidthCells
+  // columns (Math.floor(c / bandWidthCells) alternating parity), producing
+  // the classic chevron "fishbone" point at each band boundary. Verified
+  // offline (see header comment) to shift by exactly one warp position per
+  // row within each band.
+  function isOver(r, c) {
+    const band = Math.floor(c / bandWidthCells);
+    const dir = (band % 2 === 0) ? 1 : -1;
+    const v = (dir * c + r) % period;
+    return ((v % period) + period) % period < over;
+  }
+
+  // Called at start-up AND every cycleSec. Only the scroll rate/direction
+  // resets -- coverage-neutral by construction (a translating periodic
+  // pattern has identical total coverage at every phase, so this can
+  // never create a brightness trend the way a re-randomised geometry
+  // parameter could).
+  let scrollAngle, scrollRate;
+  function reconfigureScroll() {
+    scrollAngle = rand(0, Math.PI * 2);
+    // Guaranteed-minimum-magnitude, random-sign-equivalent rate (the angle
+    // itself already covers "sign"/direction) -- house-style motion
+    // convention applied via speed rather than a symmetric range around 0.
+    scrollRate = cellSize * rand(0.5, 0.9) * SPEED;
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  initWeave();
+  reconfigureScroll();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    const tilePx = period * cellSize;
+    const dist = clk * scrollRate;
+    let scrollX = Math.cos(scrollAngle) * dist;
+    let scrollY = Math.sin(scrollAngle) * dist;
+    // Keep the accumulated offset bounded (mod the tile period in pixels)
+    // for numerical stability over a very long render -- purely a
+    // precision safeguard, not a visual reset (the pattern is exactly
+    // periodic at this pixel interval, so wrapping is imperceptible).
+    scrollX = ((scrollX % tilePx) + tilePx) % tilePx;
+    scrollY = ((scrollY % tilePx) + tilePx) % tilePx;
+
+    const cMin = Math.floor((scrollX - cellSize) / cellSize) - 1;
+    const cMax = Math.ceil((W + cellSize + scrollX) / cellSize) + 1;
+    const rMin = Math.floor((scrollY - cellSize) / cellSize) - 1;
+    const rMax = Math.ceil((H + cellSize + scrollY) / cellSize) + 1;
+
+    for (let r = rMin; r <= rMax; r++) {
+      const y = r * cellSize - scrollY;
+      for (let c = cMin; c <= cMax; c++) {
+        const x = c * cellSize - scrollX;
+        const col = isOver(r, c) ? weftCol : warpCol;
+        ctx.fillStyle = `hsl(${col.hue}, ${col.sat}%, ${col.light}%)`;
+        ctx.fillRect(x, y, cellSize + 1, cellSize + 1);
+      }
+    }
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureScroll(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

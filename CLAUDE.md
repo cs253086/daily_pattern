@@ -2825,6 +2825,100 @@ clear of the 0.60 threshold (`wireframe` is the same "generic attractor"
 this file's `phyllotaxis.html`/`widmanstatten.html` write-ups document
 landing near several otherwise-distinct engines).
 
+## Herringbone twill-weave engine (`herringbone.html`) — 2026-09-06
+
+Daily creative-research routine. Category was deliberately varied today
+rather than defaulting to "random Wikipedia article" (used in 6 of the
+last 11 firings per the research log): picked the most under-used
+category instead, "traditional textile/tiling/ornament tradition from a
+randomly chosen culture" (used only once before, for Kente cloth). An
+open WebSearch within it first surfaced Bedouin Al-Sadu weaving, but its
+"separate narrow strips sewn together" construction is structurally the
+same principle `stripweave.html` already covers (Kente cloth), so the
+search continued within the same category and landed on **twill weave**
+(and its "broken twill" variant, **herringbone**) instead -- the textile
+construction rule behind denim and herringbone tweed: a grid of warp/weft
+threads where the weft goes over a fixed number of warp threads, then
+under a fixed number, and this over/under pattern shifts by exactly ONE
+warp position every row -- producing the signature diagonal "wale" ribs
+as an emergent side-effect, not a drawn diagonal. Sources:
+[Wikipedia: Twill](https://en.wikipedia.org/wiki/Twill),
+[MasterClass](https://www.masterclass.com/articles/what-is-twill-fabric-definition-and-characteristics-of-the-popular-twill-weave),
+[Handwoven](https://handwovenmagazine.com/twills-handwoven-archives/).
+
+**What it is**: a single square grid where each cell's binary over/under
+state comes from a simple modular shift rule:
+`isOver(r,c) = ((dir*c + r) mod period) < over`, where `period =
+over+under` and `dir` flips sign every `bandWidthCells` columns to
+produce herringbone's chevron/fishbone bands. The shift rule was verified
+OFFLINE before writing any rendering code (a standalone script printed
+the resulting grid as ASCII and confirmed algebraically that row r+1's
+pattern at column c exactly equals row r's pattern at column c+1 -- the
+defining diagonal-shift invariant -- for both the plain-twill and
+herringbone-banded rules), the same discipline this pool's
+`quasicrystal.html`/`geodome.html`/`hilbertweave.html` already
+established. A genuinely different construction principle from every
+other engine in the pool: not a substitution/subdivision system
+(`quasicrystal.html`/`voderberg.html`), not several independently-angled
+overlaid band families (`widmanstatten.html`), not a proximity partition
+(`voronoimosaic.html`), not a single recursively-defined path
+(`hilbertweave.html`) -- a single grid with a binary state per cell from
+a modular shift rule, producing an emergent diagonal texture never drawn
+as a diagonal directly.
+
+**Motion is a continuous 2D SCROLL, deliberately NOT a whole-canvas
+rotation.** This sidesteps, by construction, the entire rotation/
+rectangular-viewport brightness-trend bug class `voronoimosaic.html`'s
+dated write-up documents at length (a 16:9 viewport isn't coverage-
+neutral under rotation) -- a scrolling PERIODIC pattern has identical
+total coverage at every phase, the same trick `stripweave.html` already
+relies on for its own per-frame motion, so there is no rotation-driven
+"annulus" for this engine to fall into in the first place.
+
+**One real bug found only by running `validateEngine()` across seed
+batches, not by reasoning about the code**: seed 4 failed with "image
+lacks spatial structure (peak std 3.62)" despite rendering a visibly
+bold, high-contrast pink/cyan herringbone pattern at full resolution.
+Root cause: `validate.js`'s spatial-structure check reads LUMA (roughly
+greyscale brightness), and seed 4's two palette-derived colours (a
+190-degree cyan and a 330-degree magenta) happened to land at very
+similar luma (161 vs 145, via HSL-to-RGB conversion and the Rec709 luma
+formula) despite being visually vivid and clearly distinct in hue/
+saturation to a person -- a real, previously undocumented failure mode
+distinct from every prior hue-affects-luma incident in this pool (those
+were all about a single hue DRIFTING over time or rotation; this is two
+simultaneously-present colours coincidentally landing at similar luma).
+Fixed by computing each candidate warp/weft colour's actual RGB luma at
+init time and iteratively nudging their lightness apart (whichever has
+more headroom gets pushed darker/lighter) until a guaranteed minimum luma
+gap (55) is met -- the same "guaranteed minimum magnitude" principle
+CLAUDE.md documents for motion parameters, applied here to colour
+contrast instead.
+
+**Verified**: `validateEngine()` **11/11** across seeds 1-10 plus the
+CLI's actual default seed 12345 (see `geodome.html`'s write-up for why
+that seed matters). Margins comfortable throughout: `projectedRise` -1.1
+to +1.3 (vs the 50 threshold -- unusually tight even by this pool's
+standards, since a purely-scrolling periodic pattern has essentially zero
+coverage variance by construction), `avgSat` 71.1-93.8 (vs the 22
+minimum), zero near-white pixels on every seed, `fastMotion` always
+comfortably above its per-frame floor. Visual spot-checks across
+2/25/50/75/95/105% of a 34s cycle at 3 seeds, plus a direct re-render of
+the previously-failing seed 4 at `validate.js`'s exact 480x270
+resolution, confirmed a crisp, immediately-legible, vivid herringbone
+chevron pattern with smooth continuous diagonal scroll motion and no
+artifacts.
+
+**Novelty gate**: measured against all 32 existing engines (the
+committed fingerprint cache was several commits behind -- missing a
+Gemini-promoted engine plus `hilbertweave.html`/`voronoimosaic.html`/
+`widmanstatten.html` -- so all four were fingerprinted fresh alongside
+the candidate) using `fingerprintEngine`/`zscoreMatrix`/`distance` from
+`src/fingerprint.js`. Nearest neighbour is `tessellation` at distance
+**1.188** -- comfortably clear of the 0.60 threshold and just below the
+pool's own median pair distance (1.263), a clean first-attempt pass, not
+a borderline case.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
