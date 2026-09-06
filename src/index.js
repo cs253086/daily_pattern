@@ -115,10 +115,17 @@ function readRotationState() {
       // comment above) and repeated here until the test caught it.
       last3DArchetype: typeof data.last3DArchetype === 'string' ? data.last3DArchetype : null,
       last2DArchetype: typeof data.last2DArchetype === 'string' ? data.last2DArchetype : null,
+      // Per-archetype internal cursors (2026-09-06, see nextInBucket()
+      // above) -- read through the same explicit whitelist as every other
+      // field here, learned the hard way (see the comment just above)
+      // that this whitelist silently drops anything not listed even
+      // though writeRotationState() persisted it correctly.
+      last3DByArchetype: (data.last3DByArchetype && typeof data.last3DByArchetype === 'object') ? data.last3DByArchetype : {},
+      last2DByArchetype: (data.last2DByArchetype && typeof data.last2DByArchetype === 'object') ? data.last2DByArchetype : {},
     };
   } catch { /* missing or corrupt state file -- caller bootstraps instead */ }
   return {
-    last3D: null, last2D: null, last3DArchetype: null, last2DArchetype: null,
+    last3D: null, last2D: null, last3DArchetype: null, last2DArchetype: null, last3DByArchetype: {}, last2DByArchetype: {},
   };
 }
 
@@ -185,86 +192,121 @@ function hashStr(s) {
 // the same basic unit" as something already here, the same way
 // cascade.html was hand-added for the 2D case rather than waiting for an
 // automated detector to notice.
+// 2026-09-06 update: a real recurrence of the exact bug this map exists to
+// prevent. User complaint (screenshot of a dense cube/prism grid): "the
+// basic unit of the pattern is cube/prism, which has been used multiple
+// times before... this is the repetition that I'm talking about." Root
+// cause was NOT a flaw in archetypeSeparatedOrder()'s math -- it was that
+// this map had gone stale: two Gemini engines promoted into the pool
+// (auto-2026-08-30-scenic-view-of-gardens, ~20-150 individually
+// orbiting/clustered cubes; auto-2026-09-03-the-poets-henj-and-jichin-...,
+// 2-8 individually rotating cube shapes -- confirmed by reading their
+// source, not guessed) render the exact same "several individual
+// flat-shaded cube meshes" basic unit as solids3d/lattice3d/the aug-27
+// engine, but were never added here. The 2026-08-30 engine was promoted
+// BEFORE this map was even created and was missed during that fix; the
+// 2026-09-03 engine was promoted AFTER and nothing flagged it for review
+// (see the promotion-time warning added in promoteToCuratedPool() the same
+// day this comment was added, specifically to stop this from silently
+// recurring a third time). Consequence: the archetype-separated rotation
+// picked auto-2026-08-30-scenic-view-of-gardens on 2026-09-05 and lattice3d
+// on 2026-09-06 back to back -- both untagged-as-same-archetype at the
+// time, so the no-adjacent-repeat guarantee never triggered even though a
+// viewer correctly saw two consecutive cube/prism videos.
 const SHAPE_ARCHETYPES = {
   solids3d: 'discrete-3d-solids',
   lattice3d: 'discrete-3d-solids',
   'auto-2026-08-27-field-of-small-lit-3d-solids-drifting-th': 'discrete-3d-solids',
+  'auto-2026-08-30-scenic-view-of-gardens': 'discrete-3d-solids',
+  'auto-2026-09-03-the-poets-henj-and-jichin-from-stylus-il': 'discrete-3d-solids',
 };
 function archetypeOf(name) {
   return SHAPE_ARCHETYPES[name] || name;
 }
 
-// Build a visiting order for a bucket's members where consecutive entries
-// -- INCLUDING the wrap from the last entry back to the first, since this
-// order is walked lap after lap -- never share an archetype, whenever
-// that's achievable. A first version of this fix tried a simpler "skip
-// forward one slot on conflict" approach against the PLAIN alphabetical
-// order; direct verification (300 synthetic curatedOr() calls, not just
-// code review) caught a real bug in it: solids3d.html was PERMANENTLY
-// excluded from the rotation, never picked even once. Root cause: in a
-// fixed cyclic order, a given member's predecessor is always the SAME
-// member every lap, so if that predecessor always shares its archetype,
-// the skip-forward triggers identically every single lap forever --
-// "skip past a conflict" is not the same guarantee as "everybody still
-// gets a fair turn eventually." This function instead computes a full
-// reordering up front and verifies it, rather than reacting position by
-// position.
+// 2026-09-06 REDESIGN. The previous approach (archetypeSeparatedOrder(),
+// removed here) computed one fixed cyclic visiting order over individual
+// engines and tried to arrange it so no two ADJACENT engines shared an
+// archetype, falling back to plain alphabetical order when that was
+// mathematically infeasible. That fallback condition turned out not to be
+// a rare edge case: the moment SHAPE_ARCHETYPES correctly tagged all the
+// engines that actually share the "individual cube mesh" basic unit (see
+// the 2026-09-06 comment on SHAPE_ARCHETYPES above), discrete-3d-solids
+// held 5 of the 3D bucket's 7 members -- a strict majority (>floor(7/2)).
+// Verified directly (not assumed): with a majority that large, NO
+// arrangement of individual engines around a cycle can avoid at least one
+// run of 3+ consecutive same-archetype entries (pigeonhole: 2 minority
+// members can break at most 2 of the majority's internal adjacencies,
+// so >=3 of the 5 majority members must sit consecutively somewhere) --
+// confirmed by brute-checking both the greedy order and the plain-order
+// fallback, which both landed on exactly 3 unavoidable violations. So the
+// "separate individual engines" approach could never have solved this
+// bucket composition, no matter how the interleaving was computed.
 //
-// Algorithm: group members by archetype, then greedily place the
-// currently-largest remaining group next whenever doing so doesn't create
-// a same-archetype adjacency with what was just placed (ties broken by
-// original bucket order for determinism). This is the standard
-// "reorganize so no two adjacent are equal" construction; it's guaranteed
-// solvable whenever no archetype holds a majority of the bucket. The
-// result is verified (both the linear adjacencies AND the circular
-// wrap-around) before being trusted -- if verification fails (e.g. a
-// future bucket composition where one archetype genuinely holds more than
-// half the members, making full separation mathematically impossible),
-// this falls back to the members' plain original order rather than
-// shipping an arrangement that silently doesn't deliver what it promises.
-function archetypeSeparatedOrder(names) {
-  const groups = new Map();
-  names.forEach((n, i) => {
+// Fixed by changing what gets round-robinned. Instead of one round-robin
+// over N individual engines, this is now a round-robin over ARCHETYPES
+// (each archetype -- however many members it has -- gets exactly one
+// "turn" per lap), with a nested round-robin over that archetype's own
+// members advancing only when that archetype's turn comes up. This
+// guarantees no two consecutive picks share an archetype whenever the
+// bucket has >=2 distinct archetypes, REGARDLESS of how skewed the
+// member counts are -- unlike the old per-engine interleaving, this
+// invariant doesn't degrade as one archetype accumulates more members
+// (e.g. via future Gemini promotions), so it doesn't need re-verifying
+// every time SHAPE_ARCHETYPES grows. The real trade-off, and the point:
+// an over-represented archetype (discrete-3d-solids, 5 members) now gets
+// picked only 1/3 as often as before per fallback day (once per archetype
+// lap, same as every other archetype in this bucket), and any individual
+// member within it is visited only once every 5 times that archetype's
+// turn comes up -- directly suppressing the over-exposure the user
+// complained about, rather than just rearranging when it happens.
+function archetypeGroups(bucketPool) {
+  const names = bucketPool.map((p) => path.basename(p, '.html'));
+  const order = []; // distinct archetypes, first-seen order (stable/deterministic given curatedPool()'s alphabetical listing)
+  const members = new Map(); // archetype -> [engine names]
+  names.forEach((n) => {
     const a = archetypeOf(n);
-    if (!groups.has(a)) groups.set(a, []);
-    groups.get(a).push(i);
+    if (!members.has(a)) { members.set(a, []); order.push(a); }
+    members.get(a).push(n);
   });
-  const remaining = [...groups.entries()].map(([a, idxs]) => ({ a, idxs: [...idxs] }));
-
-  const order = [];
-  let prevArchetype = null;
-  for (let step = 0; step < names.length; step++) {
-    remaining.sort((x, y) => y.idxs.length - x.idxs.length);
-    let pick = remaining.find((g) => g.idxs.length > 0 && g.a !== prevArchetype);
-    if (!pick) pick = remaining.find((g) => g.idxs.length > 0); // unavoidable repeat
-    order.push(pick.idxs.shift());
-    prevArchetype = pick.a;
-  }
-
-  const ok = order.every((idx, i) => {
-    const nextIdx = order[(i + 1) % order.length];
-    return names.length < 2 || archetypeOf(names[idx]) !== archetypeOf(names[nextIdx]);
-  });
-  return ok ? order : names.map((_, i) => i);
+  return { names, archetypeOrder: order, membersByArchetype: members };
 }
 
-// Pick the next engine in round-robin order within a bucket, walking the
-// archetype-separated order above instead of the bucket's plain
-// alphabetical order -- guarantees the same basic unit (see
-// SHAPE_ARCHETYPES above) can't appear on two consecutive fallback days
-// within this bucket, not just the same exact file, while still visiting
-// every member once per full lap. `lastArchetype` is accepted for call-
-// site compatibility but unused: the separated order already encodes the
-// no-adjacent-repeat guarantee structurally, so only the last-used NAME
-// (to find the current position) is needed here.
-function nextInBucket(bucketPool, lastName, lastArchetype, seed) {
-  const names = bucketPool.map((p) => path.basename(p, '.html'));
-  const order = archetypeSeparatedOrder(names);
-  const lastPos = lastName ? order.findIndex((idx) => names[idx] === lastName) : -1;
-  const nextPos = lastPos === -1
-    ? (Number(String(seed).replace(/\D/g, '')) || 0) % order.length
-    : (lastPos + 1) % order.length;
-  return bucketPool[order[nextPos]];
+// Pick the next engine in the bucket via the two-level round-robin above.
+// `lastName`/`lastArchetype` are this bucket's persisted top-level cursor
+// (same convention as before: engine NAME, not index, since curatedPool()
+// re-sorts alphabetically and a numeric index would silently drift --
+// see the 2026-08-19 comment on ROTATION_STATE_PATH). `byArchetype` is a
+// NEW piece of persisted state: the last engine used FROM EACH archetype,
+// needed so a multi-member archetype's own internal rotation (e.g.
+// discrete-3d-solids's 5 members) can resume correctly on its next turn,
+// several picks later, rather than restarting or repeating. Returns the
+// updated `byArchetype` map for the caller to persist alongside the new
+// top-level cursor.
+function nextInBucket(bucketPool, lastName, lastArchetype, byArchetype, seed) {
+  const { archetypeOrder, membersByArchetype } = archetypeGroups(bucketPool);
+  const seedNum = Number(String(seed).replace(/\D/g, '')) || 0;
+
+  const lastArchetypeIdx = lastArchetype ? archetypeOrder.indexOf(lastArchetype) : -1;
+  const nextArchetypeIdx = lastArchetypeIdx === -1
+    ? seedNum % archetypeOrder.length
+    : (lastArchetypeIdx + 1) % archetypeOrder.length;
+  const archetype = archetypeOrder[nextArchetypeIdx];
+
+  const members = membersByArchetype.get(archetype);
+  const lastMemberName = (byArchetype || {})[archetype];
+  const lastMemberIdx = lastMemberName ? members.indexOf(lastMemberName) : -1;
+  const nextMemberIdx = lastMemberIdx === -1
+    ? seedNum % members.length
+    : (lastMemberIdx + 1) % members.length;
+  const name = members[nextMemberIdx];
+
+  return {
+    engine: bucketPool.find((p) => path.basename(p, '.html') === name),
+    name,
+    archetype,
+    byArchetype: { ...(byArchetype || {}), [archetype]: name },
+  };
 }
 
 // Fallback when Gemini isn't available or fails: pick the next curated
@@ -327,12 +369,17 @@ function curatedOr(reason, seed) {
   const bucketPool = want3D ? pool3D : pool2D;
   const bucketKey = want3D ? 'last3D' : 'last2D';
   const archetypeKey = `${bucketKey}Archetype`;
+  const byArchetypeKey = `${bucketKey}ByArchetype`;
 
-  const engine = nextInBucket(bucketPool, state[bucketKey], state[archetypeKey], seed);
-  const name = path.basename(engine, '.html');
-  writeRotationState({ ...state, [bucketKey]: name, [archetypeKey]: archetypeOf(name) });
-  if (reason) console.warn(`[index] ${reason} — using curated engine ${path.basename(engine)} (${want3D ? '3D' : '2D'} bucket).`);
-  return { engine, source: `curated:${name}` };
+  const picked = nextInBucket(bucketPool, state[bucketKey], state[archetypeKey], state[byArchetypeKey], seed);
+  writeRotationState({
+    ...state,
+    [bucketKey]: picked.name,
+    [archetypeKey]: picked.archetype,
+    [byArchetypeKey]: picked.byArchetype,
+  });
+  if (reason) console.warn(`[index] ${reason} — using curated engine ${picked.name} (${want3D ? '3D' : '2D'} bucket, archetype ${picked.archetype}).`);
+  return { engine: picked.engine, source: `curated:${picked.name}` };
 }
 
 // Decide which engine to render:
@@ -497,6 +544,30 @@ async function promoteToCuratedPool(enginePath, themeHint, date) {
   const destPath = path.join(MANUAL_DIR, destName);
   await copyFile(enginePath, destPath);
   console.log(`[index] promoted today's Gemini engine to the curated pool: engines/manual/${destName}`);
+
+  // 2026-09-06: SHAPE_ARCHETYPES (see above) requires a human to manually
+  // classify each new 3D engine's basic-unit "shape vocabulary" -- it has
+  // no way to do this automatically (a fully general "what is the repeated
+  // element" descriptor is a harder, unverified research problem, per the
+  // comment above). That manual step has already silently failed to happen
+  // twice for real promoted engines (auto-2026-08-30-scenic-view-of-gardens,
+  // auto-2026-09-03-the-poets-henj-and-jichin-...), both of which render
+  // individual cube meshes -- the same basic unit as solids3d/lattice3d --
+  // but sat unclassified until a user complaint (screenshot of a repeated
+  // cube/prism pattern) surfaced it. A silent gap that depends on someone
+  // remembering to check by hand, with nothing prompting the check, is
+  // exactly how it recurred. This warning makes the gap loud instead: any
+  // future WebGL promotion prints directly in the job log so it can't be
+  // missed the same way again -- it does not block promotion (an
+  // unclassified engine still ships and joins the pool; the fallback
+  // rotation just treats it as its own archetype until a human adds it
+  // here, same behaviour as before this warning existed).
+  if (isWebGLEngine(destPath) && !(destName in SHAPE_ARCHETYPES)) {
+    console.warn(`[index] NOTE: ${destName} is a new WebGL (3D) engine not yet classified in `
+      + `SHAPE_ARCHETYPES (src/index.js). If it renders the same basic unit as an existing `
+      + `entry (currently: ${[...new Set(Object.values(SHAPE_ARCHETYPES))].join(', ')}), add it `
+      + `by hand so the fallback rotation can't pick two same-basic-unit engines back to back.`);
+  }
   return destPath;
 }
 

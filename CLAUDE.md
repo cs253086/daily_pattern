@@ -2919,6 +2919,101 @@ the candidate) using `fingerprintEngine`/`zscoreMatrix`/`distance` from
 pool's own median pair distance (1.263), a clean first-attempt pass, not
 a borderline case.
 
+## Third recurrence fixed properly: archetype rotation redesigned from per-engine interleaving to a two-level round-robin — 2026-09-06
+
+A genuine human user complaint (not the daily research routine), with a
+screenshot of a dense grid of coloured 3D cubes/prisms: "the basic unit of
+the pattern is cube/prism, which has been used multiple times before...
+this is the repetition that I'm talking about." This is the *exact*
+complaint the 2026-09-02 `SHAPE_ARCHETYPES`/`archetypeSeparatedOrder()` fix
+was built to prevent -- it recurred anyway, so it needed a real root cause,
+not another patch guessed from the symptom.
+
+**Confirmed which engine, then which bug, before writing any fix.**
+`state/engine-rotation.json` showed `last3D: "lattice3d"` (a dense grid of
+independently-spinning cubes -- matches the screenshot) picked immediately
+after `auto-2026-08-30-scenic-view-of-gardens` (the previous day's 3D
+fallback pick). Reading that promoted file's source directly confirmed it
+renders 20-150 individual cube meshes clustered/orbiting -- the same
+"discrete-3d-solids" basic unit as `solids3d`/`lattice3d`, but it was
+**never added to `SHAPE_ARCHETYPES`** after the map was created (it had
+already been promoted into the pool before the fix shipped and was missed).
+A second promoted engine, `auto-2026-09-03-the-poets-henj-and-jichin-...`
+(confirmed by reading its source: 2-8 individually rotating cube shapes),
+was *also* missing -- promoted *after* the fix shipped with nothing to flag
+it for review. The archetype-separation math was never wrong; its input
+data (the manually-curated map) had silently gone stale twice.
+
+**Fixing the data gap immediately exposed a deeper, structural bug in the
+separation algorithm itself.** Adding both missing engines with the
+correct tag brought `discrete-3d-solids` to 5 of the 3D bucket's 7
+members -- a strict majority (>floor(7/2)=3). Verified directly (a script
+replicating `archetypeSeparatedOrder()` exactly, not assumed): with that
+majority, the function's own feasibility check returns `ok: false` and
+falls back to plain alphabetical order, which clusters three
+`discrete-3d-solids` engines consecutively -- and a brute check confirmed
+this isn't just a bad fallback choice, it's a hard pigeonhole limit: with
+only 2 non-majority members available as "spacers," at least one run of
+3+ consecutive same-archetype engines is mathematically unavoidable in
+*any* arrangement of individual engines around a cycle once one archetype
+holds 5 of 7 slots. No amount of re-tuning the interleaving heuristic
+could have fixed this -- the whole approach (round-robin over *individual
+engines*, arranged to avoid archetype adjacency) breaks down structurally
+the moment one archetype accumulates a big enough share of a small bucket,
+exactly the situation three Gemini-cube promotions had already created.
+
+**Real fix: round-robin over ARCHETYPES first, individual engines second**
+(`archetypeGroups()`/`nextInBucket()` in `src/index.js`, replacing
+`archetypeSeparatedOrder()` entirely). Each archetype gets exactly one
+turn per lap regardless of how many members it has; a nested cursor
+(`last3DByArchetype`/`last2DByArchetype` in `state/engine-rotation.json`,
+persisted the same name-keyed way as every other cursor in this file, for
+the same "pool composition changes shape over time" reason) advances that
+archetype's own internal round-robin only when its turn comes up. This
+guarantees zero consecutive same-archetype picks whenever a bucket has
+&gt;=2 distinct archetypes, **independent of how skewed the member counts
+are** -- unlike the old approach, this invariant doesn't degrade as
+`SHAPE_ARCHETYPES` grows, so a future 6th or 7th cube-vocabulary promotion
+can't silently reopen this bug the way the 4th and 5th did. The direct,
+intended consequence: `discrete-3d-solids` as a whole is now picked only
+1/3 as often in the 3D bucket (once per archetype lap, same as
+`torusrings3d`/`geodome`) instead of 5/7 as often, and any individual cube
+engine within it repeats only once every 5 times that archetype's turn
+comes around -- actively suppressing the over-represented vocabulary
+rather than just rearranging when it surfaces.
+
+**Verified** (temporarily exporting `curatedOr`/`archetypeOf` from
+`src/index.js`, backing up and restoring `state/engine-rotation.json`
+around the test, the same verification discipline this file already
+documents for `nextThemeHint()`/`curatedOr()`'s earlier tests -- exports
+removed again afterward): ran `curatedOr()` 600 times from a fresh
+(no-cursor) state across varying synthetic seeds. Result: **zero**
+consecutive-same-archetype violations across all 365 3D-bucket
+transitions (the old algorithm could not have achieved zero here even in
+principle, per the pigeonhole result above), every one of the 3D bucket's
+7 members picked at least once (the 5 `discrete-3d-solids` members ~24-25
+times each, `geodome`/`torusrings3d` ~122 times each out of 366 3D picks
+-- matching the intended 1-in-3-archetype-turns times 1-in-5-members
+math), and the 2D bucket's pre-existing "never repeat the same engine
+back to back" guarantee held with zero violations (unaffected, since every
+2D engine still defaults to its own singleton archetype). Also ran a full
+local dry run end to end (`DRY_RUN=1 DURATION=8 node src/index.js`, no
+`GEMINI_API_KEY` in this sandbox) and confirmed the curated-fallback path
+logs the new archetype-aware selection message and picks correctly
+(`geodome`, 3D bucket) -- render itself couldn't complete only because
+this sandbox has no `ffmpeg` binary installed, an unrelated, pre-existing
+environment limitation, not a regression from this change.
+
+Also added a promotion-time warning (`promoteToCuratedPool()` in
+`src/index.js`): any future WebGL engine promoted into the pool that isn't
+yet a key in `SHAPE_ARCHETYPES` now prints a loud note directly in the job
+log naming the existing archetypes, so the next stale-map gap gets caught
+by whoever's watching that day's log instead of silently waiting for
+another user complaint. It does not block promotion -- an unclassified
+engine still ships and joins the pool with its own default archetype,
+exactly as before this warning existed; it just can no longer fail
+*silently*.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
