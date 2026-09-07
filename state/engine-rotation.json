@@ -1,7 +1,11 @@
 {
   "last3D": "lattice3d",
-  "last2D": "ziggurat",
+  "last2D": "arcrings",
   "last3DArchetype": "discrete-3d-solids",
-  "last2DArchetype": "ziggurat",
-  "updatedAt": "2026-09-06T12:48:54.292Z"
+  "last2DArchetype": "arcrings",
+  "last3DByArchetype": {},
+  "last2DByArchetype": {
+    "arcrings": "arcrings"
+  },
+  "updatedAt": "2026-09-07T14:57:47.404Z"
 }
