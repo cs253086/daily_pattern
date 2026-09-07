@@ -1,19 +1,81 @@
 // Templated metadata generation for the long video and the Short.
-// Deterministic: the same seed produces the same title/description so a run is
-// reproducible. No network calls — purely local string templating.
+// No network calls — purely local string templating, plus one small persisted
+// state file (state/title-rotation.json) so titles don't collide across days;
+// see pickMood() below for why a pure seed-hash pick was not enough.
+
+import path from 'node:path';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(__dirname, '..');
 
 const MOODS = [
   'Hypnotic', 'Ambient', 'Mesmerizing', 'Calming', 'Dreamy',
   'Meditative', 'Soothing', 'Ethereal', 'Tranquil', 'Cosmic',
 ];
 
-// Kept engine-agnostic (titles are picked from the seed hash independently of
-// which engine actually renders), but biased toward the channel's geometric
-// house style now that the curated pool is geometric-first.
-const SUBJECTS = [
-  'Geometric Patterns', 'Sacred Geometry', 'Generative Geometry',
-  'Op-Art Motion', 'Kaleidoscope Patterns', 'Living Geometry',
-];
+// What the video ACTUALLY SHOWS, per engine (2026-09-07). This used to be a
+// flat 6-entry list picked from the seed hash, deliberately "engine-agnostic"
+// -- which meant the title routinely described something the viewer never
+// sees. Real, confirmed examples from production: 2026-08-31 rendered
+// solids3d.html (floating lit 3D cubes and octahedra) and was published as
+// "Meditative Kaleidoscope Patterns"; 2026-09-02 rendered the drifting-solids
+// engine and was published as "Hypnotic Kaleidoscope Patterns". Neither video
+// contains a kaleidoscope. User complaint, verbatim: "the title names are
+// repeated. based on the video patterns, the title should be different."
+//
+// Descriptions are kept short (house rule: title = mood + subject, a few
+// words) and searchable -- "Penrose Tiling" or "Prime Number Spiral" is both
+// more accurate AND a better SEO term than a generic "Geometric Patterns",
+// so this is a discovery win, not just a correctness fix. Engines not listed
+// here (notably the auto-<date>-<slug> engines Gemini writes, which are new
+// every day and whose slug comes from the source PHOTO's title, not from
+// what the engine draws) fall back to a dimension-aware generic below.
+const ENGINE_SUBJECTS = {
+  arcrings: 'Rotating Arc Rings',
+  automaton: 'Fractal Cell Growth',
+  cascade: 'Cascading Blocks',
+  chladni: 'Cymatic Wave Patterns',
+  composer: 'Geometric Composition',
+  dendrite: 'Fractal Branches',
+  geodome: 'Geodesic Dome',
+  geometric: 'Geometric Patterns',
+  grid: 'Op-Art Grid',
+  herringbone: 'Herringbone Weave',
+  hilbertweave: 'Hilbert Curve Weave',
+  kaleidoscope: 'Kaleidoscope Patterns',
+  lattice3d: 'Spinning Cube Lattice',
+  phyllotaxis: 'Golden Spiral Clusters',
+  primespiral: 'Prime Number Spiral',
+  quasicrystal: 'Penrose Tiling',
+  solids3d: 'Floating 3D Solids',
+  spaceframe: 'Octet Space Frame',
+  spirograph: 'Spirograph Curves',
+  starburst: 'Nested Starbursts',
+  stripweave: 'Woven Strip Patterns',
+  tessellation: 'Recursive Tessellation',
+  torusrings3d: 'Glowing 3D Rings',
+  voderberg: 'Voderberg Spiral',
+  voronoimosaic: 'Voronoi Mosaic',
+  widmanstatten: 'Crystal Lattice Bands',
+  wireframe: 'Wireframe Polytopes',
+  ziggurat: 'Art Deco Ziggurats',
+};
+
+// Fallback for engines with no entry above -- Gemini's daily auto-* engines.
+// Their filename slug describes the SOURCE PHOTO ("scenic-view-of-gardens"),
+// not the rendered visual, so it would produce actively wrong titles; the one
+// thing genuinely known about them is whether they render real lit 3D (see
+// isWebGLEngine() in src/index.js, which passes engineIs3D through).
+const GENERIC_SUBJECT_3D = 'Lit 3D Geometry';
+const GENERIC_SUBJECT_2D = 'Generative Geometry';
+
+function subjectFor(engineName, engineIs3D) {
+  const known = ENGINE_SUBJECTS[String(engineName || '').trim()];
+  if (known) return known;
+  return engineIs3D ? GENERIC_SUBJECT_3D : GENERIC_SUBJECT_2D;
+}
 
 const USE_CASES = [
   'for Focus & Study', 'for Sleep & Relaxation', 'for Deep Work',
@@ -56,6 +118,63 @@ function formatDate(d = new Date()) {
   return d.toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
 }
 
+// Recently-published titles, so a title can't repeat while it's still fresh
+// in a subscriber's feed (2026-09-07). The old scheme picked mood and subject
+// from independent slices of the seed hash, with no memory of what shipped
+// before -- exactly the same "a date-hash pick can coincidentally collide"
+// bug class already fixed twice in this project (curatedOr()'s engine
+// rotation, and the since-removed theme-hint rotation; see CLAUDE.md).
+// Measured before changing anything, by running the OLD buildMetadata across
+// 45 consecutive real dates: only 29 distinct titles, with "Mesmerizing
+// Kaleidoscope Patterns" and "Ambient Geometric Patterns" each shipping 3
+// times and twelve more titles shipping twice. That is a hash-collision
+// problem, not bad luck: 10 moods x 6 subjects = 60 combinations sampled
+// with replacement collides constantly (birthday paradox).
+//
+// Same persistence convention as state/engine-rotation.json and
+// state/image-source-rotation.json: the workflow's "Persist rotation state"
+// step does `git add state/`, so this file is picked up automatically with
+// no workflow change, and that step is already skipped on dry_run so test
+// invocations can't consume real titles.
+const TITLE_STATE_PATH = path.join(repoRoot, 'state', 'title-rotation.json');
+const RECENT_TITLE_MEMORY = 40;
+
+function readRecentTitles() {
+  try {
+    const data = JSON.parse(readFileSync(TITLE_STATE_PATH, 'utf8'));
+    return Array.isArray(data.recent) ? data.recent.filter((t) => typeof t === 'string') : [];
+  } catch {
+    return []; // missing/corrupt -- behave like a fresh checkout, no constraint
+  }
+}
+
+function writeRecentTitles(recent) {
+  try {
+    mkdirSync(path.dirname(TITLE_STATE_PATH), { recursive: true });
+    writeFileSync(
+      TITLE_STATE_PATH,
+      `${JSON.stringify({ recent: recent.slice(0, RECENT_TITLE_MEMORY), updatedAt: new Date().toISOString() }, null, 2)}\n`,
+    );
+  } catch (e) {
+    console.warn(`[metadata] could not persist title rotation state: ${e.message}`);
+  }
+}
+
+// Choose the mood that makes a title nobody has seen recently. The subject is
+// now pinned to whatever engine actually rendered (see ENGINE_SUBJECTS), so
+// mood is the free axis: pick, from the moods that would NOT reproduce a
+// recent title, the one the seed hash selects. Falls back to a plain
+// seed-hash pick over all moods if every combination for this subject is
+// already in recent memory (only reachable if one engine ships more than
+// MOODS.length times inside the memory window -- the archetype-aware engine
+// rotation makes that very unlikely, but the fallback keeps this total
+// rather than throwing).
+function pickMood(subject, seedHash, recent) {
+  const fresh = MOODS.filter((m) => !recent.includes(`${m} ${subject}`));
+  const from = fresh.length > 0 ? fresh : MOODS;
+  return pick(from, seedHash);
+}
+
 // Build metadata for both outputs.
 //   info: { seed, date?, durationSec?, engineName?, palette? }
 export function buildMetadata(info = {}) {
@@ -63,9 +182,17 @@ export function buildMetadata(info = {}) {
   const date = info.date ?? formatDate();
   const h = hashSeed(seed);
 
-  const mood = pick(MOODS, h);
-  const subject = pick(SUBJECTS, h >>> 3);
+  // Subject describes what actually rendered; mood is chosen to avoid
+  // repeating a recently-published title (see ENGINE_SUBJECTS / pickMood).
+  // `persistTitle: false` lets a caller preview a title without consuming it
+  // from the recent-memory window (used by the verification scripts).
+  const subject = subjectFor(info.engineName, info.engineIs3D);
+  const recent = readRecentTitles();
+  const mood = pickMood(subject, h, recent);
   const useCase = pick(USE_CASES, h >>> 6);
+  if (info.persistTitle !== false) {
+    writeRecentTitles([`${mood} ${subject}`, ...recent.filter((t) => t !== `${mood} ${subject}`)]);
+  }
 
   // Describe the actual render length for the description (kept out of the
   // title, which is intentionally just a few words: mood + subject).

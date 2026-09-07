@@ -115,6 +115,34 @@ them:
 4. **Titles are a few words** (mood + subject, e.g. "Calming Geometric
    Patterns") — not long tagged strings. Duration/use-case context belongs in
    the description, not the title (see `src/metadata.js`).
+   - **The subject must name what the video ACTUALLY SHOWS, and a title must
+     not repeat while it's still fresh in a subscriber's feed** (2026-09-07,
+     user complaint: "the title names are repeated. based on the video
+     patterns, the title should be different"). Both halves were real,
+     measured bugs. (a) `SUBJECTS` was a flat 6-entry list explicitly
+     documented as "engine-agnostic," so the title routinely described
+     something the viewer never sees — 2026-08-31 published floating lit 3D
+     cubes (`solids3d`) as "Meditative Kaleidoscope Patterns," and 2026-09-02
+     published the drifting-solids engine as "Hypnotic Kaleidoscope
+     Patterns." (b) Mood and subject were picked from independent slices of
+     the seed hash with no memory: running the OLD `buildMetadata()` across
+     45 consecutive real dates produced only **29 distinct titles**, with two
+     titles shipping 3x and twelve more shipping 2x — the same
+     "date-hash picks collide by coincidence" bug class already fixed twice
+     here (`curatedOr()`'s engine rotation; the since-removed theme-hint
+     rotation), just never applied to titles. Fixed with `ENGINE_SUBJECTS`
+     (engine name → what it draws: `quasicrystal` → "Penrose Tiling",
+     `solids3d` → "Floating 3D Solids", …), a dimension-aware generic
+     fallback for Gemini's daily `auto-*` engines (whose filename slug
+     describes the SOURCE PHOTO, not the visual, so it would title videos
+     actively wrongly), and `state/title-rotation.json` — a 40-entry
+     recently-used ring buffer that mood selection routes around. Re-ran the
+     same 45-day simulation against a realistic engine rotation afterward:
+     **45/45 distinct titles, zero repeats.** Accurate subjects are also a
+     straight SEO win — "Penrose Tiling" and "Prime Number Spiral" are better
+     search terms than a generic "Geometric Patterns," and they now feed the
+     tag list too. When adding a curated engine, add its `ENGINE_SUBJECTS`
+     entry in the same commit.
 5. **Lively pace, not glacial.** A real complaint: motion was technically
    present but too slow to read as exciting (e.g. a full rotation taking
    30-100+ seconds is imperceptible moment-to-moment). Any rotation/

@@ -728,6 +728,10 @@ async function main() {
     durationSec: cfg.duration,
     imageCredit,
     engineName,
+    // Lets metadata.js title a Gemini-generated engine (which has no entry in
+    // its ENGINE_SUBJECTS map -- a fresh file every day) as 3D vs 2D rather
+    // than guessing from its photo-derived filename slug.
+    engineIs3D: isWebGLEngine(engine),
     hasAudio: renderResult.hasAudio,
     musicCredit: renderResult.hasAudio ? musicCredit : null,
   });
