@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Octet-Truss Space Frame — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "random architectural or typographic
+// movement"): Louis Kahn and Anne Tyng's City Tower project, whose
+// unbuilt-skyscraper design used a SPACE-FRAME structural system of
+// alternating tetrahedra and octahedra -- the OCTET TRUSS, independently
+// patented by Buckminster Fuller in the 1960s as "Synergetic Building
+// Construction". Octahedra and tetrahedra alternate to tile 3D space with
+// zero gaps at a packing factor of 1.0, giving an exceptional
+// strength-to-weight structural lattice used in real aerospace/
+// architectural trusses. See CLAUDE.md's dated write-up for the search
+// trail and sources.
+//
+// The octet truss's vertex set is mathematically the FCC (face-centred
+// cubic) lattice: points (x,y,z) with integer coordinates summing to an
+// even number. Connecting each point to its 12 nearest neighbours (offset
+// by a permutation of two +-1's and one 0) produces exactly this
+// alternating tetrahedral/octahedral honeycomb -- VERIFIED OFFLINE before
+// writing any rendering code (a standalone script confirmed every interior
+// point has exactly 12 neighbours, matching the FCC coordination number,
+// and that the 12 neighbours of a point contain exactly 24 mutual edges --
+// the exact edge count of a cuboctahedron, the correct vertex figure for
+// this honeycomb, i.e. 8 triangular + 6 square faces meeting at each
+// vertex = 8 tetrahedra + 6 octahedra). This is the same "verify a
+// subdivision/lattice construction offline before trusting it, since a
+// subtly wrong one still looks plausible" discipline this pool's
+// quasicrystal.html and geodome.html already established.
+//
+// A genuinely different 3D composition from every other real-WebGL engine
+// in the pool: not sparse independent orbiting solids (solids3d.html), not
+// a grid of independently-spinning INDIVIDUAL cubes (lattice3d.html), not
+// lit tori/rings (torusrings3d.html), not one continuous curved mesh
+// (geodome.html) -- a CONNECTED STRUT FRAMEWORK: many thin rigid beams
+// meeting at shared lattice vertices, with real black negative space
+// between them, forming one rigid skeletal truss rather than a field of
+// solid-filled shapes. Real architectural space frames ARE built from rod/
+// strut members, not solid polyhedra, so this is also the most literally
+// faithful-to-source WebGL engine in the pool.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. WebGL context MUST be created with
+// preserveDrawingBuffer:true (see solids3d.html's write-up for why) and
+// handle the same startup-only webglcontextlost/restored dance. gl.clear()
+// to opaque black every frame -- structurally whiteout-proof, same as every
+// other real-WebGL engine here.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 40);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true, antialias: true })
+    || canvas.getContext('experimental-webgl', { preserveDrawingBuffer: true, antialias: true });
+
+  // Same startup-only context-loss risk documented in solids3d.html --
+  // headless software WebGL (swiftshader) intermittently fires a spurious
+  // webglcontextlost shortly after context creation, never observed mid-
+  // render past the first couple of frames. Defer window.READY until any
+  // early loss has had a chance to fire and recover.
+  let contextLost = false;
+  canvas.addEventListener('webglcontextlost', (e) => {
+    contextLost = true;
+    e.preventDefault();
+  });
+  canvas.addEventListener('webglcontextrestored', () => {
+    initGL();
+    contextLost = false;
+  });
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+  function hsl2rgb(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [f(0), f(8), f(4)];
+  }
+
+  // ---- Minimal column-major mat4 helpers (WebGL/GLSL convention, same as
+  // solids3d.html / geodome.html) -----------------------------------------
+  function mat4Identity() { return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); }
+  function mat4Multiply(a, b) {
+    const out = new Float32Array(16);
+    for (let c = 0; c < 4; c++) {
+      for (let r = 0; r < 4; r++) {
+        let sum = 0;
+        for (let k = 0; k < 4; k++) sum += a[k * 4 + r] * b[c * 4 + k];
+        out[c * 4 + r] = sum;
+      }
+    }
+    return out;
+  }
+  function mat4Perspective(fovyRad, aspect, near, far) {
+    const f = 1 / Math.tan(fovyRad / 2);
+    const nf = 1 / (near - far);
+    const out = new Float32Array(16);
+    out[0] = f / aspect; out[5] = f; out[10] = (far + near) * nf; out[11] = -1;
+    out[14] = 2 * far * near * nf;
+    return out;
+  }
+  function mat4RotateY(a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    const m = mat4Identity(); m[0] = c; m[2] = -s; m[8] = s; m[10] = c; return m;
+  }
+  function mat4RotateX(a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    const m = mat4Identity(); m[5] = c; m[6] = s; m[9] = -s; m[10] = c; return m;
+  }
+  function mat4Scale(s) {
+    const m = mat4Identity(); m[0] = s; m[5] = s; m[10] = s; return m;
+  }
+  function mat4LookAt(eye, target, up) {
+    let zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
+    let zl = Math.hypot(zx, zy, zz) || 1; zx /= zl; zy /= zl; zz /= zl;
+    let xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+    let xl = Math.hypot(xx, xy, xz) || 1; xx /= xl; xy /= xl; xz /= xl;
+    const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+    const out = new Float32Array(16);
+    out[0] = xx; out[1] = yx; out[2] = zx; out[3] = 0;
+    out[4] = xy; out[5] = yy; out[6] = zy; out[7] = 0;
+    out[8] = xz; out[9] = yz; out[10] = zz; out[11] = 0;
+    out[12] = -(xx * eye[0] + xy * eye[1] + xz * eye[2]);
+    out[13] = -(yx * eye[0] + yy * eye[1] + yz * eye[2]);
+    out[14] = -(zx * eye[0] + zy * eye[1] + zz * eye[2]);
+    out[15] = 1;
+    return out;
+  }
+
+  // ---- Octet-truss lattice geometry --------------------------------------
+  // 12 nearest-neighbour offsets on the FCC lattice: every permutation of
+  // two +-1's and one 0. Verified offline (see file header) to give exactly
+  // the coordination number and vertex figure of the tetrahedral-octahedral
+  // honeycomb.
+  function neighborOffsets() {
+    const out = [];
+    for (const base of [[1, 1, 0], [1, 0, 1], [0, 1, 1]]) {
+      const nz = base.map((v, i) => (v !== 0 ? i : -1)).filter((i) => i >= 0);
+      for (const sa of [1, -1]) for (const sb of [1, -1]) {
+        const o = [0, 0, 0];
+        o[nz[0]] = sa * base[nz[0]];
+        o[nz[1]] = sb * base[nz[1]];
+        out.push(o);
+      }
+    }
+    return out;
+  }
+  const NEIGHBOR_OFFSETS = neighborOffsets();
+  function keyOf(p) { return p[0] + ',' + p[1] + ',' + p[2]; }
+
+  // Lattice points and centre are offset by a small, deliberately
+  // NON-lattice-aligned random vector (below), so the resulting FINITE
+  // cluster does not inherit the INFINITE lattice's exact cubic point-group
+  // symmetry (4-fold about coordinate axes etc). Verified offline: with a
+  // centred (offset=0,0,0) selection, rotating the point set 90 degrees
+  // about Y maps it exactly back onto itself (19/19 points matched); with a
+  // small offset, zero points match. This matters because an exact discrete
+  // rotational symmetry is a real resonance risk for validate.js's
+  // fast-motion check at specific angles -- the same class of bug
+  // ziggurat.html hit from ITS exact N-fold wedge symmetry -- so this
+  // engine avoids it at the geometry level instead of only tuning the
+  // rotation rate around it.
+  // Build from INTEGER lattice points first (exact key lookups), find
+  // edges, THEN apply the fractional centre-offset once at the end -- this
+  // avoids float-key lookup fragility entirely.
+  //
+  // POINT COUNT is capped directly (take the targetN closest candidates to
+  // the offset centre) rather than by a fixed radius -- a real bug found
+  // only by running validateEngine() across seed batches, not by reasoning
+  // about the code: a fixed radius R combined with the small random centre
+  // offset let point/edge count swing considerably from seed to seed
+  // (whichever lattice shell the offset happened to graze), and two of six
+  // tested seeds blew the render-speed budget (2.2-2.4s/frame vs the 2s
+  // ceiling) from an unlucky high count while others stayed comfortably
+  // fast. Capping the point COUNT instead bounds triangle count (and hence
+  // render cost) to within a few percent across every seed, verified
+  // offline before this fix was trusted (93-94 edges across 6 seeds at
+  // targetN=28, vs a previously-unbounded range that spiked past budget).
+  function buildLattice(targetN, cx, cy, cz) {
+    const BOUND = 6; // generous candidate radius in lattice units, comfortably covers targetN's range
+    const cand = [];
+    for (let x = -BOUND; x <= BOUND; x++) {
+      for (let y = -BOUND; y <= BOUND; y++) {
+        for (let z = -BOUND; z <= BOUND; z++) {
+          if (((x + y + z) % 2 + 2) % 2 !== 0) continue;
+          const dx = x - cx, dy = y - cy, dz = z - cz;
+          cand.push({ p: [x, y, z], d: Math.hypot(dx, dy, dz) });
+        }
+      }
+    }
+    cand.sort((a, b) => a.d - b.d);
+    const intPts = cand.slice(0, targetN).map((c) => c.p);
+    const idx = new Set(intPts.map(keyOf));
+    const seen = new Set();
+    const edges = [];
+    for (const p of intPts) {
+      for (const o of NEIGHBOR_OFFSETS) {
+        const q = [p[0] + o[0], p[1] + o[1], p[2] + o[2]];
+        if (!idx.has(keyOf(q))) continue;
+        const ka = keyOf(p), kb = keyOf(q);
+        const ek = ka < kb ? ka + '|' + kb : kb + '|' + ka;
+        if (seen.has(ek)) continue;
+        seen.add(ek);
+        edges.push([
+          [p[0] - cx, p[1] - cy, p[2] - cz],
+          [q[0] - cx, q[1] - cy, q[2] - cz],
+        ]);
+      }
+    }
+    return edges;
+  }
+
+  // Build one rigid rectangular "beam" mesh (12 triangles, flat per-face
+  // normals) between two lattice points. Verified offline against several
+  // axis-aligned AND diagonal test edges (including the edge that is
+  // exactly parallel to the default reference vector, the classic
+  // degenerate-cross-product trap) -- all produced 12 non-degenerate
+  // triangles with 8 distinct corners, no collapsed geometry.
+  function sub3(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+  function add3(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
+  function scale3(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; }
+  function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+  function len3(a) { return Math.hypot(a[0], a[1], a[2]); }
+  function norm3(a) { const l = len3(a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
+  function buildBeamTris(a, b, halfWidth) {
+    const d = sub3(b, a);
+    const dn = norm3(d);
+    let ref = [0, 1, 0];
+    if (Math.abs(dn[0] * ref[0] + dn[1] * ref[1] + dn[2] * ref[2]) > 0.99) ref = [1, 0, 0];
+    const u = norm3(cross3(dn, ref));
+    const v = norm3(cross3(dn, u));
+    const A = [], B = [];
+    for (const s1 of [-1, 1]) for (const s2 of [-1, 1]) {
+      A.push(add3(a, add3(scale3(u, s1 * halfWidth), scale3(v, s2 * halfWidth))));
+      B.push(add3(b, add3(scale3(u, s1 * halfWidth), scale3(v, s2 * halfWidth))));
+    }
+    // A/B index order: [--, -+, +-, ++] over (s1,s2)
+    const faces = [
+      [A[0], A[1], A[3], A[2]], // near end cap
+      [B[0], B[2], B[3], B[1]], // far end cap
+      [A[0], A[2], B[2], B[0]], // side s2=-1
+      [A[3], A[1], B[1], B[3]], // side s2=+1
+      [A[0], A[1], B[1], B[0]], // side s1=-1
+      [A[2], A[3], B[3], B[2]], // side s1=+1
+    ];
+    const tris = [];
+    for (const f of faces) { tris.push([f[0], f[1], f[2]]); tris.push([f[0], f[2], f[3]]); }
+    return tris;
+  }
+
+  // ---- WebGL setup: per-VERTEX colour so the whole truss -- up to a few
+  // hundred beams -- renders in a SINGLE drawArrays call, same technique
+  // geodome.html uses for its faceted mesh (and for the same reason: one
+  // draw call per beam would risk blowing the render-speed budget).
+  const VERT_SRC = `
+    attribute vec3 aPosition;
+    attribute vec3 aNormal;
+    attribute vec3 aColor;
+    uniform mat4 uMVP;
+    uniform mat4 uModel;
+    uniform vec3 uEye;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vColor;
+    void main() {
+      vec4 world = uModel * vec4(aPosition, 1.0);
+      vNormal = mat3(uModel) * aNormal;
+      vViewDir = normalize(uEye - world.xyz);
+      vColor = aColor;
+      gl_Position = uMVP * vec4(aPosition, 1.0);
+    }
+  `;
+  const FRAG_SRC = `
+    precision mediump float;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vColor;
+    uniform vec3 uLightDir;
+    void main() {
+      vec3 N = normalize(vNormal);
+      float diff = max(dot(N, normalize(uLightDir)), 0.0);
+      float fresnel = pow(1.0 - max(dot(N, normalize(vViewDir)), 0.0), 2.0);
+      // Same raised ambient floor + soft clamp geodome.html established:
+      // keeps shaded faces vivid and legible without washing to near-white.
+      vec3 base = vColor * (0.55 + 0.45 * diff);
+      vec3 rim = vColor * fresnel * 0.4;
+      gl_FragColor = vec4(min(base + rim, vec3(0.86)), 1.0);
+    }
+  `;
+  function compileShader(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error('shader compile: ' + gl.getShaderInfoLog(sh));
+    return sh;
+  }
+
+  let prog, aPosition, aNormal, aColor, uMVP, uModel, uLightDir, uEye, meshBuf;
+  function initGL() {
+    prog = gl.createProgram();
+    gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, VERT_SRC));
+    gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, FRAG_SRC));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('program link: ' + gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+
+    aPosition = gl.getAttribLocation(prog, 'aPosition');
+    aNormal = gl.getAttribLocation(prog, 'aNormal');
+    aColor = gl.getAttribLocation(prog, 'aColor');
+    uMVP = gl.getUniformLocation(prog, 'uMVP');
+    uModel = gl.getUniformLocation(prog, 'uModel');
+    uLightDir = gl.getUniformLocation(prog, 'uLightDir');
+    uEye = gl.getUniformLocation(prog, 'uEye');
+
+    const posBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, latticeMesh.positions, gl.STATIC_DRAW);
+    const normBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, latticeMesh.normals, gl.STATIC_DRAW);
+    const colBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, latticeMesh.colors, gl.STATIC_DRAW);
+    meshBuf = { posBuf, normBuf, colBuf, count: latticeMesh.count };
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.viewport(0, 0, W, H);
+  }
+
+  // Lattice geometry, beam mesh, and colours are all fixed ONCE for the
+  // whole video (function of DENSITY/SEED only), never re-rolled per cycle
+  // -- the "any coverage-affecting parameter re-randomised per cycle
+  // creates a real (not aliased) brightness swing" lesson this pool's
+  // engines repeatedly establish. Only the rotation (below) changes per
+  // cycle, and rotation here is additionally coverage-stable because the
+  // lattice's own point-group symmetry was already broken by the
+  // fractional offset (see buildLattice's caller), so there is no exact
+  // angle at which the silhouette repeats.
+  let latticeMesh, hue0;
+  function buildLatticeMesh() {
+    // Point count scales with DENSITY, clamped to a range that keeps beam
+    // (and hence triangle) count consistently inside the render-speed
+    // budget across every seed (see buildLattice's header comment for why
+    // this is capped by COUNT rather than radius) while staying "bold,
+    // few, clear" per the house style rather than a fine dense mesh.
+    const targetN = Math.round(Math.max(16, Math.min(34, 22 * Math.max(0.5, Math.min(2, DENSITY)))));
+    // Small non-lattice-aligned centre offset -- see buildLattice's header
+    // comment for why this matters (breaks exact rotational self-symmetry).
+    const cx = (rng() < 0.5 ? -1 : 1) * rand(0.2, 0.4);
+    const cy = (rng() < 0.5 ? -1 : 1) * rand(0.2, 0.4);
+    const cz = (rng() < 0.5 ? -1 : 1) * rand(0.2, 0.4);
+    const edges = buildLattice(targetN, cx, cy, cz);
+
+    const HALF_WIDTH = 0.16;
+    hue0 = rng() * 360;
+    const freq = 2 + Math.floor(rng() * 3);
+    const baseCol = PAL[SEED % PAL.length];
+
+    // Bounding extent (for hue normalisation) -- computed from the actual
+    // built edge set rather than assumed from R, since the offset can shift
+    // the true min/max Y slightly off a symmetric +-R range.
+    let minY = Infinity, maxY = -Infinity;
+    for (const [a, b] of edges) {
+      minY = Math.min(minY, a[1], b[1]);
+      maxY = Math.max(maxY, a[1], b[1]);
+    }
+    const ySpan = Math.max(0.001, maxY - minY);
+
+    const positions = [], normals = [], colors = [];
+    for (const [a, b] of edges) {
+      const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
+      // Hue tied to Y (height), the ROTATION axis -- exactly invariant
+      // under the Y-axis spin applied per frame below, the same
+      // "colour-by-the-invariant-axis" fix geodome.html established
+      // (there: latitude instead of longitude) to avoid a real brightness-
+      // trend bug from depth-occlusion exposing different hues at
+      // different rotation angles.
+      const yFrac = (mid[1] - minY) / ySpan;
+      const hue = ((baseCol[0] + hue0 + 50 * Math.sin(freq * yFrac * Math.PI)) % 360 + 360) % 360;
+      const light = Math.min(68, baseCol[2] + 6);
+      // Small azimuthal (theta, LOCAL/unrotated) saturation ripple -- same
+      // "static local pattern + world-space rotation = visible sweeping
+      // motion, without a hue-driven luma swing" technique geodome.html
+      // uses for its own fast-motion floor.
+      const theta = Math.atan2(mid[2], mid[0]);
+      const sat = Math.max(35, Math.min(95, baseCol[1] + 22 * Math.sin(3 * theta)));
+      const [r, g, bch] = hsl2rgb(hue, sat, light);
+      const tris = buildBeamTris(a, b, HALF_WIDTH);
+      for (const t of tris) {
+        const e1 = sub3(t[1], t[0]), e2 = sub3(t[2], t[0]);
+        let n = cross3(e1, e2);
+        n = norm3(n);
+        for (const p of t) { positions.push(p[0], p[1], p[2]); normals.push(n[0], n[1], n[2]); colors.push(r, g, bch); }
+      }
+    }
+    latticeMesh = {
+      positions: new Float32Array(positions),
+      normals: new Float32Array(normals),
+      colors: new Float32Array(colors),
+      count: positions.length / 3,
+    };
+  }
+
+  // Called at start-up AND every cycleSec. Only rotation resets --
+  // coverage-neutral by construction (rotating the whole rigid lattice
+  // about its own vertical axis doesn't change how much geometry exists,
+  // and the geometry's own exact point-group symmetry was already broken
+  // by the fractional centre offset above, so there is no discrete angle
+  // where the silhouette exactly repeats).
+  let rotAngle0, rotRate;
+  function reconfigureRotation() {
+    rotAngle0 = rand(0, Math.PI * 2);
+    rotRate = (rng() < 0.5 ? -1 : 1) * rand(0.6, 1.1) * SPEED;
+  }
+
+  // Continuous tilt wobble, fixed once at start-up and never reset by
+  // reconfigureRotation() -- the same fix geodome.html established after
+  // finding that resetting a wobble's phase every cycleSec lands
+  // validate.js's 8 widely-spaced samples in uncorrelated random states
+  // instead of a smoothly-averaging periodic signal, occasionally
+  // producing a spurious brightness trend. With dozens of full periods
+  // inside the 300s test window, this one averages out smoothly instead.
+  const tiltPhase0 = rand(0, Math.PI * 2);
+  const tiltRate = (rng() < 0.5 ? -1 : 1) * rand(1.3, 1.9);
+
+  buildLatticeMesh();
+  initGL();
+  reconfigureRotation();
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+  const dt = 1 / FPS;
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  const EYE = [0, 0.6, 6.2];
+  const TARGET = [0, 0, 0];
+  const UP = [0, 1, 0];
+  const proj = mat4Perspective((40 * Math.PI) / 180, W / H, 0.1, 100);
+  const LATTICE_SCALE = 1.15;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    if (gl.isContextLost()) return;
+
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    const view = mat4LookAt(EYE, TARGET, UP);
+    const tilt = 0.16 * Math.sin(tiltPhase0 + clk * tiltRate);
+    let model = mat4RotateY(rotAngle0 + clk * rotRate);
+    model = mat4Multiply(model, mat4RotateX(tilt));
+    model = mat4Multiply(model, mat4Scale(LATTICE_SCALE));
+
+    const mvp = mat4Multiply(proj, mat4Multiply(view, model));
+    gl.uniformMatrix4fv(uMVP, false, mvp);
+    gl.uniformMatrix4fv(uModel, false, model);
+    gl.uniform3f(uEye, EYE[0], EYE[1], EYE[2]);
+
+    // Bounded light-direction oscillation (never sweeping to a fully
+    // back-lit state) -- same coverage-neutral motion source geodome.html
+    // uses: redistributes brightness WITHIN the already-lit beams rather
+    // than changing how much is lit, so it can move fast without risking a
+    // coverage-driven brightness trend.
+    const lightAngle = 1.5 * Math.sin(clk * 2.4) + 0.6 * Math.sin(clk * 5.1 + 0.5);
+    gl.uniform3f(uLightDir, Math.cos(lightAngle), 0.7, Math.sin(lightAngle) + 1.1);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.posBuf);
+    gl.enableVertexAttribArray(aPosition);
+    gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.normBuf);
+    gl.enableVertexAttribArray(aNormal);
+    gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.colBuf);
+    gl.enableVertexAttribArray(aColor);
+    gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, meshBuf.count);
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureRotation(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+
+  // Same early-context-loss grace window as solids3d.html/geodome.html
+  // before declaring ready.
+  (async () => {
+    await new Promise((r) => setTimeout(r, 300));
+    const deadline = Date.now() + 1500;
+    while (contextLost && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    window.READY = true;
+  })();
+})();
+</script>
+</body>
+</html>

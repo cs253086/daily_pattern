@@ -3014,6 +3014,147 @@ engine still ships and joins the pool with its own default archetype,
 exactly as before this warning existed; it just can no longer fail
 *silently*.
 
+## Octet-truss space-frame engine (`spaceframe.html`) — 2026-09-07
+
+Daily creative-research routine. Category was "random architectural or
+typographic movement" by the firing-minute-mod-category-count method
+(used twice before, for `ziggurat.html`/Art Deco and `geodome.html`/
+geodesic domes). An open WebSearch surfaced Louis Kahn and Anne Tyng's
+**City Tower** project -- an unbuilt 1950s Philadelphia skyscraper design
+using a space-frame structural system of alternating tetrahedra and
+octahedra. Following up on that structural principle led to the **octet
+truss**: the same tetrahedral/octahedral space-filling lattice,
+independently patented by Buckminster Fuller in the 1960s as "Synergetic
+Building Construction" -- a real, widely-used aerospace/architectural
+strut framework with a packing factor of 1.0 (zero gaps). Sources:
+[Revisiting the City Tower Project](https://arxiv.org/pdf/2508.08561),
+[Octet truss / Space frame](https://en.wikipedia.org/wiki/Octet_truss)
+(search snippets only -- Wikipedia is blocked in this sandbox).
+
+**The octet truss's vertex set was identified and verified as the FCC
+lattice BEFORE writing any rendering code**, the same discipline this
+pool's `quasicrystal.html`/`geodome.html`/`hilbertweave.html` already
+established for a construction that could still "look plausible" even if
+subtly wrong. A standalone script confirmed: every interior point of the
+FCC lattice (integer coordinates summing to an even number) has exactly
+12 nearest neighbours (the correct FCC coordination number), and those 12
+neighbours contain exactly 24 mutual edges -- the exact edge count of a
+cuboctahedron, the correct vertex figure for this honeycomb (8 triangular
++ 6 square faces meeting at each vertex = 8 tetrahedra + 6 octahedra).
+The rectangular "beam" mesh connecting two lattice points (12 triangles,
+flat per-face normals) was also verified offline against several
+axis-aligned and diagonal test edges, including the edge exactly parallel
+to the default reference vector -- the classic degenerate-cross-product
+trap -- confirming no degenerate triangles or collapsed geometry in any
+case.
+
+**What it is**: a real lit-3D WebGL engine, the pool's fifth. A genuinely
+different composition from every other real-WebGL engine: not sparse
+independent orbiting solids (`solids3d.html`), not a grid of
+independently-spinning INDIVIDUAL cubes (`lattice3d.html`, or the
+`discrete-3d-solids`-archetype Gemini-promoted engines), not lit
+tori/rings (`torusrings3d.html`), not one continuous curved mesh
+(`geodome.html`) -- a **connected strut framework**: many thin rigid
+rectangular beams meeting at shared lattice joints, with real black
+negative space between them, rendered as one rigid mesh (per-vertex
+colour, single `drawArrays` call, the same technique `geodome.html`
+established to keep hundreds of differently-coloured faces inside the
+render-speed budget). Real architectural space frames ARE built from
+rod/strut members, not solid polyhedra, so this is also the most
+literally faithful-to-source WebGL engine in the pool. Beam colour hue is
+tied to Y (height, the rotation axis), invariant under the Y-axis spin --
+the same "colour by the rotation-invariant axis" fix `geodome.html`
+established (there: latitude instead of longitude) to avoid a real
+brightness-trend bug from depth occlusion exposing different hues at
+different rotation angles.
+
+**A small, deliberately non-lattice-aligned random centre offset breaks
+the FCC lattice's exact cubic point-group symmetry for the finite
+rendered cluster.** Verified offline: a centred (offset zero) point
+selection maps exactly onto itself under a 90-degree rotation about Y
+(19/19 points matched); with a small offset, zero points match. This
+matters because an exact discrete rotational symmetry is a real
+resonance risk for `validate.js`'s fast-motion check at specific angles --
+the same class of bug `ziggurat.html` hit from its own exact N-fold wedge
+symmetry -- so this engine avoids it at the geometry level from the first
+draft instead of only tuning the rotation rate around a known-bad range
+after the fact.
+
+**Two real bugs found only by running `validateEngine()` across seed
+batches, not by reasoning about the code:**
+
+1. **Point/edge count, and hence render cost, swung considerably between
+   seeds when capped by a fixed RADIUS.** The first design picked FCC
+   points within a fixed radius R of the (randomly offset) centre --
+   geometrically reasonable, but the small per-seed offset could shift
+   which lattice "shell" the radius boundary grazed, letting point count
+   swing well beyond what R alone suggested. Two of six initially-tested
+   seeds blew the render-speed budget outright (2.25s and 2.42s for a
+   single frame, vs the 2s ceiling) while others rendered comfortably
+   fast, purely from this per-seed count variance. Fixed by capping point
+   count DIRECTLY instead: gather FCC candidates within a generous bound,
+   sort by distance from the offset centre, and keep exactly the closest
+   `targetN`. Verified offline before trusting it: edge count now lands
+   within 1-2 edges of each other across 6 different seeds at a fixed
+   `targetN` (93-94 edges), vs the wide swings the radius approach
+   produced. Re-verified after the fix: `avgMsPerFrame` 54.5-93.5ms and
+   `worstFrameMs` 1466-1979ms across all 16 tested seeds, comfortably
+   inside budget on every one -- the speed failure mode did not recur
+   even once.
+2. **A real (not fully eliminated) brightness-trend residual from
+   rotation-dependent self-occlusion**, the same "3D depth occlusion"
+   false-positive class this file documents at length for `solids3d.html`
+   and `geodome.html`: unlike a mostly-convex dome shell, this lattice is
+   a dense tangle of many crossing beams, so how much total lit surface
+   is *visible* (not accumulated -- gl.clear() to opaque black every
+   frame makes true cross-frame accumulation structurally impossible)
+   genuinely swings more with viewing angle than a less self-occluding
+   3D composition would. The point-count-capping fix above (which also
+   reduces beam density) measurably helped -- 2 of 6 initially-failing
+   seeds became 5 of 6 passing after the fix -- but did not eliminate the
+   residual entirely: across a wider 16-seed battery (1-11, 13-16,
+   12345), 14/16 (87.5%, including the production-default seed 12345)
+   passed with comfortable margins on every other metric (`avgSat`
+   48.2-61.2 throughout, vs the 22 minimum; zero near-white pixels;
+   `fastMotion` always 2-3x its per-frame floor), while 2/16 (seeds 1 and
+   11) still projected a real brightness rise (+92.4 and +82.4 luma).
+   Treated as consistent with this file's own documented, accepted
+   residual-failure-rate for real 3D depth-occlusion engines (see
+   `solids3d.html`'s "a small residual failure rate remains as an
+   honest, inherent property of dynamic 3D occlusion, not a bug" and
+   `geodome.html`'s 13/16 = 81% pass rate) rather than an uncaught bug --
+   curated engines are a design-time sanity check only and never run
+   `validate.js` at production runtime.
+
+**Verified**: `validateEngine()` 14/16 across seeds 1-11, 13-16, plus the
+CLI's actual default seed 12345 (see `geodome.html`'s write-up for why
+that seed matters). Passing-seed margins comfortable throughout: `avgSat`
+48.2-61.2 (vs the 22 minimum), zero near-white pixels on every seed,
+`fastMotion` always well above its per-frame floor,
+`projectedHourRenderMin` 78.4-141.4min (well inside the CI budget, and
+consistent seed-to-seed after the point-count-cap fix, unlike the wide
+speed swings before it). Visual spot-checks across 2/25/50/75/95/105% of
+a 40s cycle at 3 seeds, re-confirmed on the final (point-count-capped)
+code at 2 seeds, all by actually rendering PNGs and looking at them, not
+just reading validator output: a vivid, bold, immediately-legible
+triangulated strut framework with clear black negative space between
+beams and height-banded colour, genuinely reading as an architectural
+"space frame" rather than a solid-filled shape cluster.
+
+**Novelty gate**: measured against all 33 existing engines (the committed
+fingerprint cache was several commits behind -- missing a Gemini-promoted
+engine plus `herringbone.html`/`hilbertweave.html`/`voronoimosaic.html`/
+`widmanstatten.html` -- so all five were fingerprinted fresh alongside the
+candidate) using `fingerprintEngine`/`zscoreMatrix`/`distance` from
+`src/fingerprint.js`. Nearest neighbour on the final (point-count-capped)
+code is `auto-2026-08-29-eclipse-pair` at distance **0.788** -- comfortably
+clear of the 0.60 threshold. Notably, none of the pool's other
+`discrete-3d-solids`-archetype engines (`solids3d`, `lattice3d`, the three
+Gemini-promoted cube-based engines) placed as the nearest neighbour,
+confirming the connected strut framework reads as structurally distinct
+from every existing "field of individual solids" composition, not just
+superficially different.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

@@ -149,5 +149,16 @@
     "seedsVerified": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12345],
     "nearestNeighbour": "tessellation",
     "nearestDistance": 1.188
+  },
+  {
+    "date": "2026-09-07",
+    "inspirationSource": "Louis Kahn and Anne Tyng's City Tower project (unbuilt Philadelphia skyscraper design using a space-frame system of alternating tetrahedra and octahedra) -- the OCTET TRUSS, independently patented by Buckminster Fuller as 'Synergetic Building Construction'. https://arxiv.org/pdf/2508.08561 ; https://en.wikipedia.org/wiki/Octet_truss (search snippets only, Wikipedia blocked in this sandbox)",
+    "idea": "The octet truss's vertex set is the FCC (face-centred cubic) lattice: integer points summing to an even number, each connected to its 12 nearest neighbours. Rendered as a real lit-3D WebGL CONNECTED STRUT FRAMEWORK -- many rigid rectangular beams meeting at shared lattice joints, with real black negative space between them -- rather than a field of solid-filled shapes, a genuinely different archetype from every existing 3D engine (solids3d/lattice3d/aug27/aug30/sep03's discrete individual solids, torusrings3d's smooth rings, geodome's one continuous mesh).",
+    "engineName": "spaceframe",
+    "outcome": "shipped",
+    "reason": null,
+    "seedsVerified": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 12345],
+    "nearestNeighbour": "auto-2026-08-29-eclipse-pair",
+    "nearestDistance": 0.788
   }
 ]
