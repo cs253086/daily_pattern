@@ -171,7 +171,82 @@ them:
      against a synthetic fixture that clears/redraws cleanly every frame
      (zero whiteout risk) but rotates once per 240s: correctly rejected for
      motion even though its brightness trend is perfectly flat.
-6. **Video descriptions never reveal that the pipeline is automated.**
+6. **The composition must keep EVOLVING for the whole hour, not just move.**
+   User request 2026-09-07, clarified in their own words: "more consistent
+   visual changes which makes visually fun to watch. dynamic doesn't
+   necessarily means fast movement." Movement and change are different
+   things, and only movement was ever measured — `minFastMotionStdFrac`
+   asks "are pixels changing right now", which a fixed arrangement spinning
+   in place satisfies completely.
+   - **This gap was systemic, not accidental.** `maxProjectedRise` (item 3)
+     rejects engines whose coverage changes between cycles, so engine after
+     engine was written to compute its geometry ONCE per video and only spin
+     it afterwards — `initTiling`/`initSpiral`/`initClusters`/`initDendrites`/
+     `initStrips`/`initRosette` plus a `reconfigure*()` that resets nothing
+     but angle and phase. Every one of those was individually the correct
+     fix for a real brightness bug (see their write-ups below); together
+     they produced a pool of videos that stop developing after a few
+     seconds. When a guard shapes what gets written, check what it's
+     selecting FOR, not just what it's blocking.
+   - **Measured, not assumed.** New `compositionDrift` check in
+     `validate.js`: it reuses the luma grids the 8 fraction samples already
+     capture (so it costs no extra rendering) and compares them with the
+     **rotation-invariant subset** of `fingerprint.js`'s descriptor
+     (`radial0..5`, `coverage`, `edgeDensity`, `angularUneven`,
+     `rotSym2..8`, `largestBlobFrac`). That subset is load-bearing: a first
+     version used every bounded feature and scored a synthetic frozen
+     fixture at 0.022 — HIGHER than real engines — because `mirrorLR/UD`
+     (symmetry about fixed SCREEN axes), `orient0..7` (a gradient histogram
+     whose bins rotate with the image) and `periodX/periodY` (axis-aligned)
+     are not rotation-invariant at all, so the metric was measuring spin,
+     i.e. precisely what it must ignore. Only a synthetic fixture caught
+     this — the real-engine numbers alone looked plausible.
+   - **Threshold calibrated against a synthetic frozen fixture** (a fixed
+     arrangement that does nothing but rotate, deliberately vivid and fast
+     so drift is its ONLY defect): fixture 0.0107-0.0127 across seeds,
+     closest passing real engine (`ziggurat`) 0.0181-0.0398, so
+     `minCompositionDrift: 0.015` sits in the gap. Verified the check
+     actually FIRES: the fixture is rejected on all 3 seeds with the drift
+     reason as its only reason. Deliberately set to catch the genuinely
+     FROZEN, not to demand high dynamism — this gate runs on every Gemini
+     engine daily, and over-tightening it just pushes more days onto the
+     curated fallback pool, which is itself the main driver of "I keep
+     seeing the same pattern."
+   - **`generate.js` has an "EVOLVE OVER THE HOUR" prompt section** that
+     states the requirement AND, critically, spells out five coverage-neutral
+     ways to satisfy it without tripping the brightness trend (constant-count
+     morphing; rank-select a fixed fraction — `chladni.html`'s `TARGET_FRAC`
+     trick, which holds lit area constant by construction so the underlying
+     pattern can morph completely freely; cross-fade between two fixed
+     configurations; pan across a field larger than the frame; continuous
+     turnover at fixed population). A gate without that guidance would just
+     raise Gemini's failure rate, and Gemini failures are what put the
+     repetitive curated fallbacks on screen in the first place.
+   - **Measured across the whole 33-engine pool** (seed 12345, validator
+     units): range 0.0069 → 0.2107, median ≈ 0.06. Exactly **3 engines fail
+     the new check**, all of them `init*()`-once + rotate-only by
+     construction: `voderberg` 0.0069, `quasicrystal` 0.0114,
+     `voronoimosaic` 0.0123 — all at or below the frozen fixture, i.e.
+     genuinely no more evolving than a fixture that does nothing but spin.
+     The most dynamic are `kaleidoscope` 0.211, `grid` 0.163, `automaton`
+     0.142, `solids3d` 0.134. A targeted gate, not a disruptive one: 30 of
+     33 pass unchanged. (Three engines fail for *other*, pre-existing
+     reasons unrelated to this check — `spaceframe` and two Gemini-promoted
+     WebGL engines — consistent with the documented residual failure rate
+     for real 3D depth-occlusion engines.)
+   - **Not the same thing as pixel churn**, which is the whole point of the
+     user's clarification. `tessellation` has among the highest raw
+     frame-to-frame churn in the pool (51.1 in a separate full-hour audit)
+     but only middling drift — lots of movement, little development —
+     while `kaleidoscope` has the LOWEST churn (7.2) and the HIGHEST drift.
+     Ranking by movement would have picked exactly the wrong engines to fix.
+   - **Fixing those 3 engines is follow-up work.** Each needs a real,
+     coverage-neutral redesign (one of the five techniques above) plus the
+     usual 10-seed re-validation — not a parameter nudge, since their
+     compute-once structure is what makes them frozen. Until then they
+     remain in rotation (curated engines don't run `validate.js` at
+     runtime — it's a design-time gate), so they still ship occasionally.
+7. **Video descriptions never reveal that the pipeline is automated.**
    User request 2026-08-15: no "generated automatically," "fully automated
    pipeline," "AI-and-code generated," or raw `Seed:`/`Engine:` debug
    fields in the public-facing description — viewers care what the video

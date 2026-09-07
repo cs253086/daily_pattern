@@ -14,6 +14,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import puppeteer from 'puppeteer';
+import { frameFeatures, FEATURE_NAMES } from './fingerprint.js';
 
 const DEFAULTS = {
   // Visual phase config — small canvas, longer virtual timeline so
@@ -79,6 +80,44 @@ const DEFAULTS = {
   minFastMotionAbs: 1.0,
   minFastMotionStdFrac: 0.12,
 
+  // Composition-evolution check (2026-09-07). User request: make the videos
+  // "more dynamic... more consistent visual changes which makes visually fun
+  // to watch. dynamic doesn't necessarily means fast movement."
+  //
+  // The fastMotion check above only asks "are pixels changing RIGHT NOW",
+  // which a fixed shape spinning in place satisfies completely. Nothing
+  // asked the different question: does the COMPOSITION still evolve, or is
+  // the viewer watching one frozen arrangement rotate for a full hour?
+  // That gap was systemic, not accidental: the maxProjectedRise guard above
+  // rejects engines whose coverage changes between cycles, so engine after
+  // engine was written to compute its geometry ONCE per video and only spin
+  // it afterwards (initTiling/initSpiral/initClusters/initDendrites/
+  // initStrips/initRosette + a reconfigure*() that resets nothing but angle
+  // and phase -- see CLAUDE.md). Each of those was individually correct and
+  // collectively produced a pool of videos that stop developing after the
+  // first few seconds.
+  //
+  // Measured with the rotation-invariant SUBSET of fingerprint.js's
+  // descriptor (see DRIFT_FEATURES below -- most of that descriptor is NOT
+  // rotation-invariant, and using all of it measured spin instead of
+  // change), so a fixed arrangement that merely spins scores near the floor
+  // while genuine structural change scores high. That is exactly the
+  // distinction between "fast movement" and "visual change". Costs no extra
+  // rendering: it reuses the luma grids the fraction samples already
+  // captured for the brightness trend.
+  //
+  // Calibrated against a synthetic frozen fixture (a fixed arrangement that
+  // does nothing but rotate, deliberately vivid and fast so the ONLY thing
+  // wrong with it is that it never develops): the fixture measures
+  // 0.0107-0.0127 across seeds, and real engines sit above it, with the
+  // closest passing engine (ziggurat) at 0.0181-0.0398. 0.015 sits in that
+  // gap. Deliberately set to catch the genuinely FROZEN rather than to
+  // demand high dynamism: this gate runs on every Gemini engine daily, and
+  // over-tightening it would just push more days onto the curated fallback
+  // pool, which is itself the main driver of "I keep seeing the same
+  // pattern" (see CLAUDE.md).
+  minCompositionDrift: 0.015,
+
   // Speed phase config — real render resolution.
   speedWidth: 1920,
   speedHeight: 1080,
@@ -138,9 +177,75 @@ function frameStats(selector) {
     mean,
     std: Math.sqrt(varAcc / n),
     luma,
+    // Grid dimensions travel with the samples so callers (compositionDrift)
+    // don't have to re-derive them from the canvas aspect ratio.
+    w: sw,
+    h: sh,
     nearWhiteFrac: nearWhite / n,
     avgSat: satCount > 0 ? (satSum / satCount) * 100 : 0,
   };
+}
+
+// How much an engine's COMPOSITION changes across the sampled timeline,
+// as opposed to how much it moves. Uses fingerprint.js's frameFeatures --
+// built to survive rotation and cycle phase (see its own header), which is
+// precisely what separates "a fixed arrangement spinning" from "the
+// arrangement itself developing".
+//
+// ONLY the rotation-invariant features, and this list is load-bearing: a
+// synthetic fixture (a fixed arrangement that does nothing but spin) scored
+// 0.022 when every bounded feature was used -- HIGHER than real evolving
+// engines like quasicrystal (0.0139) -- because most of the descriptor is
+// not rotation-invariant at all. mirrorLR/mirrorUD are symmetry about fixed
+// SCREEN axes, orient0..7 is a gradient-orientation histogram whose bins
+// rotate with the image, and periodX/periodY are axis-aligned. Including
+// them measured rotation, i.e. exactly the thing this check must ignore.
+// What is left is invariant under rotation about the frame centre:
+//   radial0..5     mass profile by radius
+//   coverage       fraction of the frame lit
+//   edgeDensity    fraction of pixels on an edge
+//   angularUneven  spread of mass across angles (a std over ALL angles)
+//   rotSym2..8     polar autocorrelation over angular shifts
+//   largestBlobFrac  share of lit area in the biggest connected shape
+// blobCount/blobSizeCV are rotation-invariant too but are a raw count and
+// an unbounded ratio, so they would dominate a plain mean-absolute-diff;
+// every feature kept below is bounded ~0..1, which makes the result an
+// ABSOLUTE number comparable across engines.
+//
+// Deliberately NOT z-scored across the samples either: normalising by an
+// engine's own variance rescales a nearly-frozen engine's noise up to look
+// identical to a genuinely evolving one (the first version of this
+// measurement did exactly that, and reported every engine as equally
+// dynamic).
+const DRIFT_FEATURES = new Set([
+  'rotSym2', 'rotSym3', 'rotSym4', 'rotSym5', 'rotSym6', 'rotSym8',
+  'radial0', 'radial1', 'radial2', 'radial3', 'radial4', 'radial5',
+  'angularUneven', 'edgeDensity', 'coverage', 'largestBlobFrac',
+]);
+const DRIFT_FEATURE_IDX = FEATURE_NAMES
+  .map((n, i) => (DRIFT_FEATURES.has(n) ? i : -1))
+  .filter((i) => i >= 0);
+
+function compositionDrift(lumaGrids, w, h) {
+  const usable = lumaGrids.filter((g) => Array.isArray(g) || ArrayBuffer.isView(g));
+  if (usable.length < 2) return null;
+  let feats;
+  try {
+    feats = usable.map((g) => frameFeatures(g, w, h));
+  } catch {
+    return null; // never fail a render over a diagnostic
+  }
+  let sum = 0;
+  let pairs = 0;
+  for (let i = 0; i < feats.length; i++) {
+    for (let j = i + 1; j < feats.length; j++) {
+      let d = 0;
+      for (const k of DRIFT_FEATURE_IDX) d += Math.abs(feats[i][k] - feats[j][k]);
+      sum += d / DRIFT_FEATURE_IDX.length;
+      pairs++;
+    }
+  }
+  return pairs > 0 ? sum / pairs : null;
 }
 
 function meanAbsDiff(a, b) {
@@ -346,6 +451,28 @@ async function runVisual(enginePath, cfg) {
       );
     }
 
+    // Does the composition actually DEVELOP over the timeline, or is it one
+    // fixed arrangement spinning? See minCompositionDrift in DEFAULTS for
+    // the full reasoning. Reuses the fraction samples' luma grids, so this
+    // costs no extra rendering. Returns null (skipped, never a failure) if
+    // the descriptor can't be computed -- a diagnostic must not be the thing
+    // that loses a day's video.
+    const drift = compositionDrift(
+      samples.map((s) => s.luma),
+      samples[0]?.w ?? 64,
+      samples[0]?.h ?? 36,
+    );
+    if (drift !== null && drift < cfg.minCompositionDrift) {
+      reasons.push(
+        `the composition never develops: structural change of only ${drift.toFixed(4)} across the `
+        + `${cfg.visualDuration}s timeline (need >= ${cfg.minCompositionDrift}) — measured with a `
+        + `rotation-invariant descriptor, so this is NOT about speed: the arrangement itself is `
+        + `frozen and merely spinning/scrolling in place, which reads as the same picture for the `
+        + `whole hour. Make the composition itself evolve (see the prompt's EVOLVE OVER THE HOUR `
+        + `section), not just move`,
+      );
+    }
+
     return {
       ok: reasons.length === 0,
       reasons,
@@ -357,6 +484,7 @@ async function runVisual(enginePath, cfg) {
         projectedRise: Number(projectedRise.toFixed(1)),
         fastMotion: Number(fastMotion.toFixed(2)),
         fastMotionFloor: Number(fastMotionFloor.toFixed(2)),
+        compositionDrift: drift === null ? null : Number(drift.toFixed(4)),
       },
     };
   } finally {
