@@ -246,6 +246,53 @@ them:
      compute-once structure is what makes them frozen. Until then they
      remain in rotation (curated engines don't run `validate.js` at
      runtime — it's a design-time gate), so they still ship occasionally.
+   - **The gate was the wrong lever, and the next day's video proved it
+     (2026-09-08).** User, with a screenshot of `geodome`: "I don't see
+     much dynamics here. It just spins for a hour. without dynamics, there
+     is no fun." `geodome` had PASSED the drift gate at 0.034 — its tilt
+     wobble and light oscillation registered as "change" — and, more
+     fundamentally, the gate only runs on Gemini engines while ~75-80% of
+     published videos are curated fallbacks that never run it in
+     production. A gate cannot make the curated pool dynamic, and
+     rewriting 33 engines by hand is not realistic. Fixed at the
+     **renderer** instead, for every engine at once: **scene-based
+     rendering** in `src/render.js`. The hour is split into ~15 scenes of
+     `sceneSec` (default 240s); every scene reloads the SAME engine with a
+     fresh deterministic per-scene seed (`sceneSeedFor()`: scene 0 keeps
+     the day seed unchanged, so the opening/thumbnail/Short stay
+     reproducible and a single-scene render is unchanged from before),
+     joined by `crossfadeSec` (2s) cross-dissolves. Because every engine
+     derives arrangement/counts/layout from its seed, each scene is a
+     genuinely new composition of the same pattern family, while the
+     image-of-the-day `colors`/`lum` params stay fixed across scenes so
+     the palette — the video's identity — stays coherent. Crossfades are
+     composited on a separate offscreen canvas (`captureBlendedFrame`),
+     never on the engine's own canvas: an accumulating engine would
+     otherwise carry the overlay into its next frame. Frame accounting is
+     exact by construction (`fade` extra frames are captured off the end
+     of scene k and blended under the first `fade` written frames of scene
+     k+1, so written frames always sum to `totalFrames` — asserted at the
+     end of the loop). Short local renders degrade to one scene and no
+     fade automatically. Escape hatch: repo variable `SCENE_SEC=0`.
+   - **Verified**: `planScenes()` exact across 5 cases (1h/24fps → 15
+     scenes + 48-frame fades; 30s test → 4 scenes; 8s test → 1 scene, no
+     fade; `sceneSec=0` → 1 scene; fade longer than scene → clamped),
+     frame sums exact in every case. Real end-to-end renders with a real
+     `ffmpeg` (installed in this sandbox for this): `geodome` 30s at
+     8s-scenes → exactly 720 frames/30.0s by `ffprobe`; `voronoimosaic`
+     (layout is seed-driven) and `kaleidoscope` (an accumulating,
+     fade-based engine) → exactly 576 each; and the real production path
+     `DRY_RUN=1 SCENE_SEC=6 CROSSFADE_SEC=1 node src/index.js` → 480, with
+     the env plumbing engaging (3 scenes, 24-frame fades). Extracted
+     frames and LOOKED at them (per the standing rule): `geodome` — the
+     least seed-varying engine in the pool, its seed only drives hue
+     offset/ripple/rotation/tilt — showed four clearly different colour
+     schemes and orientations with genuine dissolves at the boundaries
+     (both scenes visible mid-fade). Its seed-driven `hue0` is ADDED to
+     the fixed image colour, so it varies per scene even with `colors`
+     pinned; engines whose geometry is seed-driven change far more.
+     Honest limit: scenes give each engine exactly as much variety as its
+     seed controls — an engine that ignores its seed would not benefit.
 7. **Video descriptions never reveal that the pipeline is automated.**
    User request 2026-08-15: no "generated automatically," "fully automated
    pipeline," "AI-and-code generated," or raw `Seed:`/`Engine:` debug

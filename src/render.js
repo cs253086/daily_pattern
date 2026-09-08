@@ -68,6 +68,30 @@ export function resolveConfig(cli = {}) {
     canvasSelector: pick(cli, 'canvas', 'CANVAS_SELECTOR', 'canvas'),
     jpegQuality: pick(cli, 'jpegQuality', 'JPEG_QUALITY', 0.92, num),
 
+    // Scene-based rendering (2026-09-08). User complaint about a geodesic-
+    // dome video, verbatim: "I don't see much dynamics here. It just spins
+    // for a hour. without dynamics, there is no fun." That engine had
+    // PASSED the previous day's composition-drift gate -- its tilt wobble
+    // and light oscillation registered as "change" -- and, more to the
+    // point, that gate only runs on Gemini engines, while ~75-80% of
+    // published videos come from the curated fallback pool, which never
+    // runs it in production. A gate cannot make the pool dynamic. Fixing
+    // 33 engines by hand isn't realistic either.
+    //
+    // This fixes it at the renderer instead, for every engine at once: the
+    // hour is split into scenes of sceneSec each, and every scene reloads
+    // the SAME engine with a fresh, deterministic per-scene seed. Every
+    // engine derives its arrangement/counts/layout from the seed, so each
+    // scene is a genuinely new composition of the same pattern family --
+    // while the image-of-the-day `colors`/`lum` params stay fixed across
+    // scenes, so the palette (the video's identity) stays coherent. Scenes
+    // are joined by a crossfadeSec cross-dissolve. Scene 0 keeps the
+    // original day seed exactly, so the opening, thumbnail and Short stay
+    // reproducible. Set sceneSec=0 (or SCENE_SEC=0, wired to a repo var
+    // in daily.yml) to get the old single-scene behaviour back.
+    sceneSec: pick(cli, 'sceneSec', 'SCENE_SEC', 240, num),
+    crossfadeSec: pick(cli, 'crossfadeSec', 'CROSSFADE_SEC', 2, num),
+
     // ffmpeg encode settings
     crf: pick(cli, 'crf', 'CRF', 20, num),
     preset: pick(cli, 'preset', 'PRESET', 'medium'),
@@ -122,13 +146,15 @@ function defaultSeed() {
 // Engine URL
 // ---------------------------------------------------------------------------
 
-function buildEngineUrl(cfg) {
+// `seed` overrides cfg.seed for scene-based rendering (see planScenes); the
+// default keeps the single-scene call sites unchanged.
+function buildEngineUrl(cfg, seed = cfg.seed) {
   if (!existsSync(cfg.enginePath)) {
     throw new Error(`Engine HTML not found: ${cfg.enginePath}`);
   }
   const url = pathToFileURL(cfg.enginePath);
   const p = url.searchParams;
-  p.set('seed', cfg.seed);
+  p.set('seed', String(seed));
   if (cfg.palette !== '') p.set('palette', cfg.palette);
   p.set('width', String(cfg.width));
   p.set('height', String(cfg.height));
@@ -140,6 +166,94 @@ function buildEngineUrl(cfg) {
   if (cfg.colors !== '') p.set('colors', cfg.colors);
   if (cfg.lum !== '') p.set('lum', cfg.lum);
   return url.href;
+}
+
+// ---------------------------------------------------------------------------
+// Scenes (see resolveConfig's sceneSec comment for the why)
+// ---------------------------------------------------------------------------
+
+function hashStr(s) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h >>> 0;
+}
+
+// Scene 0 uses the day's seed unchanged (so the opening, thumbnail region
+// and Short stay exactly reproducible, and a single-scene render is
+// byte-identical to the pre-scenes renderer). Later scenes derive a fresh
+// integer seed deterministically from it, so the whole hour is still a
+// pure function of the date.
+function sceneSeedFor(baseSeed, k) {
+  return k === 0 ? String(baseSeed) : String(hashStr(`${baseSeed}:scene:${k}`));
+}
+
+// Split totalFrames into ~equal scenes of about sceneSec each, plus the
+// crossfade length in frames. Every scene's frame count is what gets
+// WRITTEN for it; the fade between scene k and k+1 is built from `fade`
+// extra frames captured off the end of scene k (never written directly)
+// blended onto the first `fade` frames of scene k+1 -- so written frames
+// always sum to exactly totalFrames. A duration too short for two scenes
+// (every local test render, e.g. DURATION=8) degrades to one scene and no
+// fade, i.e. exactly the old behaviour.
+function planScenes(totalFrames, fps, sceneSec, crossfadeSec) {
+  if (!(sceneSec > 0)) return { scenes: [totalFrames], fade: 0 };
+  const perScene = Math.max(1, Math.round(sceneSec * fps));
+  const count = Math.max(1, Math.round(totalFrames / perScene));
+  const base = Math.floor(totalFrames / count);
+  const extra = totalFrames - base * count;
+  const scenes = Array.from({ length: count }, (_, k) => base + (k < extra ? 1 : 0));
+  let fade = count > 1 ? Math.max(0, Math.round((crossfadeSec || 0) * fps)) : 0;
+  const shortest = Math.min(...scenes);
+  if (fade * 2 >= shortest) fade = Math.max(0, Math.floor((shortest - 1) / 2));
+  return { scenes, fade };
+}
+
+// In-page helpers. Each is passed to page.evaluate as a function value, so
+// it must be self-contained (no closure over Node-side variables).
+
+// Per-scene setup: an offscreen 2D canvas for compositing crossfades, so the
+// engine's own canvas is never drawn on (an accumulating engine would
+// otherwise carry the overlay into its next frame).
+function installSceneHelpers() {
+  window.__scene = { off: document.createElement('canvas'), tails: [] };
+}
+
+// Decode the previous scene's tail frames (JPEG data URLs) into Image objects
+// once per scene, instead of once per blended frame.
+async function loadTailImages(urls) {
+  const imgs = await Promise.all(urls.map((u) => new Promise((resolve, reject) => {
+    const im = new Image();
+    im.onload = () => resolve(im);
+    im.onerror = () => reject(new Error('crossfade tail frame failed to decode'));
+    im.src = u;
+  })));
+  window.__scene.tails = imgs;
+}
+
+function captureFrame(q, quality) {
+  window.advanceFrame();
+  return document.querySelector(q).toDataURL('image/jpeg', quality);
+}
+
+// Advance the (new) scene one frame, then composite: previous scene's tail
+// frame underneath at full opacity, this scene's live canvas on top at
+// alpha t. Result = tail*(1-t) + live*t. Reading a WebGL canvas via
+// drawImage relies on preserveDrawingBuffer, which the engine contract
+// already requires (validate.js/fingerprint.js read canvases the same way).
+function captureBlendedFrame(q, quality, tailIdx, t) {
+  window.advanceFrame();
+  const live = document.querySelector(q);
+  const { off, tails } = window.__scene;
+  if (off.width !== live.width || off.height !== live.height) {
+    off.width = live.width; off.height = live.height;
+  }
+  const c = off.getContext('2d');
+  c.globalAlpha = 1;
+  c.drawImage(tails[tailIdx], 0, 0, off.width, off.height);
+  c.globalAlpha = t;
+  c.drawImage(live, 0, 0);
+  c.globalAlpha = 1;
+  return off.toDataURL('image/jpeg', quality);
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +415,17 @@ export async function render(cli = {}) {
   console.log(`[render] engine : ${cfg.enginePath}`);
   console.log(`[render] params : seed=${cfg.seed} ${cfg.width}x${cfg.height} ${cfg.fps}fps ${cfg.duration}s palette=${cfg.palette || 'auto'}`);
 
+  // Shared by every scene: navigate, wait for READY, install helpers.
+  const loadScene = async (page, sceneUrl, pageErrors) => {
+    await page.goto(sceneUrl, { waitUntil: 'load', timeout: cfg.readyTimeoutMs });
+    await page.waitForFunction('window.READY === true', { timeout: cfg.readyTimeoutMs })
+      .catch((e) => {
+        const extra = pageErrors.length ? `\nPage errors:\n${pageErrors.join('\n')}` : '';
+        throw new Error(`Engine never set window.READY=true within ${cfg.readyTimeoutMs}ms.${extra}\n${e.message}`);
+      });
+    await page.evaluate(installSceneHelpers);
+  };
+
   const browser = await puppeteer.launch({
     headless: true,
     args: [
@@ -322,26 +447,25 @@ export async function render(cli = {}) {
     page.on('pageerror', (e) => pageErrors.push(String(e)));
     page.on('console', (msg) => { if (msg.type() === 'error') pageErrors.push(msg.text()); });
 
-    await page.goto(url, { waitUntil: 'load', timeout: cfg.readyTimeoutMs });
-
-    // Wait for the engine to signal it is ready to be driven.
-    await page.waitForFunction('window.READY === true', { timeout: cfg.readyTimeoutMs })
-      .catch((e) => {
-        const extra = pageErrors.length ? `\nPage errors:\n${pageErrors.join('\n')}` : '';
-        throw new Error(`Engine never set window.READY=true within ${cfg.readyTimeoutMs}ms.${extra}\n${e.message}`);
-      });
+    // Scene 0 uses the day's seed unchanged. Load it first so TOTAL_FRAMES
+    // and the canvas can be validated before anything long-running starts.
+    await loadScene(page, url, pageErrors);
 
     const totalFrames = await page.evaluate('window.TOTAL_FRAMES');
     if (!Number.isFinite(totalFrames) || totalFrames <= 0) {
       throw new Error(`Engine reported invalid TOTAL_FRAMES: ${totalFrames}`);
     }
-    console.log(`[render] frames : ${totalFrames}`);
 
     // Confirm the canvas exists before we start the (long) loop.
     const hasCanvas = await page.evaluate((q) => !!document.querySelector(q), cfg.canvasSelector);
     if (!hasCanvas) {
       throw new Error(`No element matches canvas selector "${cfg.canvasSelector}".`);
     }
+
+    const { scenes, fade } = planScenes(totalFrames, cfg.fps, cfg.sceneSec, cfg.crossfadeSec);
+    console.log(`[render] frames : ${totalFrames}`);
+    console.log(`[render] scenes : ${scenes.length} x ~${(scenes[0] / cfg.fps).toFixed(0)}s`
+      + (fade ? `, ${fade}-frame crossfades` : ' (single scene, no crossfade)'));
 
     const videoOnlyPath = `${cfg.longPath}.noaudio.mp4`;
     const { proc: ff, done: ffDone } = spawnFfmpegPipe(cfg, videoOnlyPath);
@@ -351,31 +475,58 @@ export async function render(cli = {}) {
     ff.stdin.on('error', (e) => { ffmpegError = ffmpegError || e; });
 
     const logEvery = Math.max(1, Math.round(totalFrames / 100));
-    for (let i = 0; i < totalFrames; i++) {
+    let written = 0;
+    const emit = async (dataUrl) => {
       if (ffmpegError) throw ffmpegError;
-
-      // Advance one frame and read the canvas back as a JPEG data URL in a
-      // single round-trip to minimise CDP overhead per frame.
-      const dataUrl = await page.evaluate(
-        (q, quality) => {
-          window.advanceFrame();
-          return document.querySelector(q).toDataURL('image/jpeg', quality);
-        },
-        cfg.canvasSelector,
-        cfg.jpegQuality,
-      );
-
       const buf = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
       await writeChunk(ff.stdin, buf);
-
-      if (i % logEvery === 0 || i === totalFrames - 1) {
-        const pct = (((i + 1) / totalFrames) * 100).toFixed(1);
+      written++;
+      if (written % logEvery === 0 || written === totalFrames) {
+        const pct = ((written / totalFrames) * 100).toFixed(1);
         const elapsed = (Date.now() - startedAt) / 1000;
-        const eta = elapsed > 0 ? (elapsed / (i + 1)) * (totalFrames - i - 1) : 0;
-        process.stdout.write(`\r[render] ${pct}%  frame ${i + 1}/${totalFrames}  elapsed ${elapsed.toFixed(0)}s  eta ${eta.toFixed(0)}s   `);
+        const eta = elapsed > 0 ? (elapsed / written) * (totalFrames - written) : 0;
+        process.stdout.write(`\r[render] ${pct}%  frame ${written}/${totalFrames}  elapsed ${elapsed.toFixed(0)}s  eta ${eta.toFixed(0)}s   `);
+      }
+    };
+
+    // Tail frames of the previous scene (JPEG data URLs), blended onto the
+    // head of the next one. Empty for scene 0.
+    let tails = [];
+    for (let k = 0; k < scenes.length; k++) {
+      if (k > 0) await loadScene(page, buildEngineUrl(cfg, sceneSeedFor(cfg.seed, k)), pageErrors);
+      const isLast = k === scenes.length - 1;
+      const head = k > 0 ? fade : 0;
+
+      // 1) Crossfade in: blend the previous scene's tail under this scene's
+      //    first `head` frames, t rising from ~0 to ~1.
+      if (head > 0) {
+        await page.evaluate(loadTailImages, tails);
+        for (let j = 0; j < head; j++) {
+          const t = (j + 1) / (head + 1);
+          await emit(await page.evaluate(captureBlendedFrame, cfg.canvasSelector, cfg.jpegQuality, j, t));
+        }
+      }
+
+      // 2) The scene proper. Each capture advances one frame and reads the
+      //    canvas back in a single round-trip to minimise CDP overhead.
+      const plain = scenes[k] - head;
+      for (let j = 0; j < plain; j++) {
+        await emit(await page.evaluate(captureFrame, cfg.canvasSelector, cfg.jpegQuality));
+      }
+
+      // 3) Capture (but don't write) `fade` more frames as this scene's
+      //    natural continuation, to dissolve under the next scene's opening.
+      tails = [];
+      if (!isLast && fade > 0) {
+        for (let j = 0; j < fade; j++) {
+          tails.push(await page.evaluate(captureFrame, cfg.canvasSelector, cfg.jpegQuality));
+        }
       }
     }
     process.stdout.write('\n');
+    if (written !== totalFrames) {
+      throw new Error(`scene planner wrote ${written} frames, expected ${totalFrames}`);
+    }
 
     ff.stdin.end();
     await ffDone;

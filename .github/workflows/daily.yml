@@ -91,6 +91,15 @@ jobs:
           # MUSIC=0 to disable entirely if ever needed again.
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
           MUSIC: ${{ vars.MUSIC }}
+          # Scene-based rendering (src/render.js, 2026-09-08): the hour is
+          # split into ~4-minute scenes, each re-seeding the same engine for
+          # a fresh composition, joined by 2s crossfades -- so every engine
+          # keeps evolving instead of spinning one arrangement for an hour
+          # (user request: "we need more dynamics"). Blank = the code's
+          # defaults (240s scenes, 2s fades). Set repo variable SCENE_SEC=0
+          # to get the old single-scene render back without a code change.
+          SCENE_SEC: ${{ vars.SCENE_SEC }}
+          CROSSFADE_SEC: ${{ vars.CROSSFADE_SEC }}
           # Default 3600s (1 hour). REQUIRES a verified YouTube channel —
           # unverified channels reject uploads >15 min ("Processing abandoned:
           # Video is too long"). Override via repo variable RENDER_DURATION

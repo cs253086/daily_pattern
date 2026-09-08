@@ -219,7 +219,10 @@ export function buildMetadata(info = {}) {
   const audioHookFragment = hasAudio ? ' with calming ambient music' : ', silent & looping';
   const hook = `${mood} ${subject} — ${durLabel.phrase} of vivid, ever-shifting geometric visuals${audioHookFragment}, perfect ${useCase.toLowerCase()}, deep sleep, or focus.`;
 
-  const visualParagraph = 'Watch bold, saturated colour and crisp rotating geometry slowly shift and evolve across the full runtime — expect kaleidoscopic symmetry, sharp-edged polygons, and a palette that drifts and deepens the longer you watch. No two days look quite the same, so there\'s always something new if you check back tomorrow.';
+  // "every few minutes" is literally true now: src/render.js re-seeds the
+  // engine into a fresh composition each scene (~4 min) with a crossfade
+  // between them, so this is an accurate description, not marketing spin.
+  const visualParagraph = 'Watch bold, saturated colour and crisp geometry keep transforming across the full runtime — every few minutes the pattern dissolves into a fresh arrangement of the same design, so it never settles into a loop. Expect kaleidoscopic symmetry, sharp-edged polygons, and a palette that drifts and deepens the longer you watch. No two days look quite the same, so there\'s always something new if you check back tomorrow.';
 
   const audioParagraph = hasAudio
     ? 'This video features a soft ambient soundtrack that plays quietly in the background alongside the visuals. Works great as animated wallpaper, a TV or desktop screensaver, or company while you work, study, code, read, journal, do yoga, or wind down before sleep.'
