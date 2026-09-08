@@ -1,11 +1,13 @@
 {
-  "last3D": "lattice3d",
+  "last3D": "geodome",
   "last2D": "arcrings",
-  "last3DArchetype": "discrete-3d-solids",
+  "last3DArchetype": "geodome",
   "last2DArchetype": "arcrings",
-  "last3DByArchetype": {},
+  "last3DByArchetype": {
+    "geodome": "geodome"
+  },
   "last2DByArchetype": {
     "arcrings": "arcrings"
   },
-  "updatedAt": "2026-09-07T14:57:47.404Z"
+  "updatedAt": "2026-09-08T13:28:19.013Z"
 }
