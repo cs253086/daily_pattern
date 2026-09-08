@@ -44,6 +44,7 @@ const ENGINE_SUBJECTS = {
   grid: 'Op-Art Grid',
   herringbone: 'Herringbone Weave',
   hilbertweave: 'Hilbert Curve Weave',
+  hoppercrystal: 'Hopper Crystal Staircase',
   kaleidoscope: 'Kaleidoscope Patterns',
   lattice3d: 'Spinning Cube Lattice',
   phyllotaxis: 'Golden Spiral Clusters',
