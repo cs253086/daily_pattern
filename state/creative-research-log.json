@@ -160,5 +160,16 @@
     "seedsVerified": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 12345],
     "nearestNeighbour": "auto-2026-08-29-eclipse-pair",
     "nearestDistance": 0.788
+  },
+  {
+    "date": "2026-09-08",
+    "inspirationSource": "Hopper (skeletal) crystals -- most famously bismuth's rainbow staircase specimens, where edge-preferential growth leaves each face receding inward as self-similar nested steps. https://en.wikipedia.org/wiki/Hopper_crystal (search snippets only, Wikipedia blocked in this sandbox); https://www.geologyin.com/2019/06/what-is-hopper-crystal.html ; https://www.zmescience.com/feature-post/natural-sciences/geology-and-paleontology/rocks-and-minerals/the-bismuth-crystal-why-it-looks-so-amazingly-trippy-and-why-its-actually-a-big-deal-for-science/",
+    "idea": "A concave, self-similar RECEDING STAIRCASE: nested square tread (flat) and riser (vertical wall) bands shrinking in size and stepping deeper into the screen down to a flat floor cap, rendered as one rigid real lit-3D WebGL mesh viewed looking down into the pit. Hue tied to tier depth (rotation-invariant under the pit's own Z-axis spin). A genuinely different composition from every other 3D engine in the pool: not a field of discrete solids, not a strut lattice, not a continuous convex mesh, not smooth rings -- a single concave excavation.",
+    "engineName": "hoppercrystal",
+    "outcome": "shipped",
+    "reason": null,
+    "seedsVerified": [1, 2, 3, 4, 5, 12345],
+    "nearestNeighbour": "lattice3d",
+    "nearestDistance": 0.79
   }
 ]

@@ -3258,6 +3258,109 @@ confirming the connected strut framework reads as structurally distinct
 from every existing "field of individual solids" composition, not just
 superficially different.
 
+## Hopper-crystal receding staircase engine (`hoppercrystal.html`) — 2026-09-08
+
+Daily creative-research routine. Category was "random natural structure" by
+the firing-minute-mod-category-count method (used before for `chladni.html`
+via fallback, `dendrite.html`, and `widmanstatten.html`). An open WebSearch
+for unusual crystal geometry surfaced **hopper (skeletal) crystals** --
+most famously bismuth's rainbow "staircase" specimens. Real mineralogy:
+when a crystal grows so fast that material deposits preferentially along
+its edges and corners (which have more available high-energy attachment
+sites) rather than filling in each face's centre, the face recedes inward
+as a series of progressively smaller, self-similar, stepped-down copies of
+the crystal's own outline -- literally a staircase sunk into what would
+otherwise be a flat face. Sources:
+[Hopper crystal](https://en.wikipedia.org/wiki/Hopper_crystal) (search
+snippets only -- Wikipedia is blocked in this sandbox),
+[GeologyIn](https://www.geologyin.com/2019/06/what-is-hopper-crystal.html),
+[ZME Science](https://www.zmescience.com/feature-post/natural-sciences/geology-and-paleontology/rocks-and-minerals/the-bismuth-crystal-why-it-looks-so-amazingly-trippy-and-why-its-actually-a-big-deal-for-science/).
+Bismuth's famous rainbow colouring is a separate, unrelated mechanism (an
+oxide film refracting light by thickness) -- borrowed here only as licence
+for tying hue to step DEPTH, not as something literally simulated.
+
+**What it is**: a real lit-3D WebGL engine, the pool's sixth. A single
+CONCAVE, self-similar receding staircase -- nested square "tread" (flat)
+and "riser" (vertical wall) bands shrinking in size and stepping deeper
+into the screen, tier after tier, down to a flat floor cap -- rendered as
+one rigid mesh in a single `drawArrays` call (per-vertex colour, the same
+technique `geodome.html`/`spaceframe.html` use). A genuinely different 3D
+composition from every other real-WebGL engine in the pool: not sparse
+independent orbiting solids (`solids3d.html`), not a grid of individually-
+spinning cubes (`lattice3d.html`), not lit tori/rings (`torusrings3d.html`),
+not one continuous CONVEX mesh (`geodome.html`), not a connected strut
+framework of separate beams (`spaceframe.html`) -- the pool's first CONCAVE
+excavation, viewed looking down into it rather than at an outward-facing
+solid. Also a genuinely different construction PRINCIPLE from every 2D
+engine: not a substitution/subdivision tiling (`quasicrystal.html`/
+`voderberg.html`), not several overlaid band families (`widmanstatten.html`),
+not a proximity partition (`voronoimosaic.html`), not a recursively-defined
+path (`hilbertweave.html`), not an arithmetic sieve (`primespiral.html`),
+not a branching growth process (`dendrite.html`), not an FCC strut lattice
+(`spaceframe.html`).
+
+**The tread+riser tier mesh was verified OFFLINE before writing any
+rendering code**, the same discipline this pool's `quasicrystal.html`/
+`geodome.html`/`spaceframe.html` already established: a standalone script
+confirmed zero degenerate triangles across all tiers, and -- the part that
+would still "look plausible" even if subtly wrong -- that every tread's
+inner edge and every riser's top/bottom edges exactly coincide with their
+neighbouring tier's edges (no gaps in the receding staircase).
+
+**Applied two hard-won lessons from `spaceframe.html` (the previous day's
+engine) from the first draft, instead of rediscovering them the slow way**:
+1. Hue is tied to tier DEPTH (Z), the engine's own rotation axis -- exactly
+   invariant under the Z-axis spin, the same "colour by the rotation-
+   invariant axis" fix `geodome.html`/`spaceframe.html` established, to
+   avoid a brightness-trend bug from depth occlusion exposing different
+   hues at different rotation angles.
+2. A small per-(tier, corner) jitter (+-6%) breaks the receding pit's
+   otherwise-exact 4-fold rotational symmetry -- the same "break exact
+   symmetry at the geometry level" fix `spaceframe.html` established
+   (there: a fractional FCC-lattice-centre offset) to avoid the resonance
+   risk `ziggurat.html` hit from its own exact N-fold wedge symmetry.
+   Jittering per CORNER rather than per SIDE means the two sides meeting
+   at any corner both read the same jittered value there, so the jitter
+   can't itself introduce a gap.
+
+**No bugs found -- `validateEngine()` passed 6/6 on the first attempt**
+across seeds 1-5 plus the CLI's actual default seed 12345 (see
+`geodome.html`'s write-up for why that seed matters), the third engine in
+a row (`primespiral.html`/`stripweave.html`/`widmanstatten.html`/
+`hilbertweave.html` were the others) to pass cleanly without iteration --
+real evidence that applying this pool's established coverage-stability and
+symmetry-breaking lessons from the first draft, rather than discovering
+them empirically per engine, is now a reliably reproducible default.
+
+**Verified**: `validateEngine()` 6/6 across seeds 1-5 plus 12345. Margins
+comfortable throughout: `projectedRise` -35.4 to +40 (vs the 50 threshold),
+`avgSat` 47-60.9 (vs the 22 minimum), zero near-white pixels on every seed,
+`fastMotion` above its per-frame floor on every seed (tightest margin
+9.86 vs a 9.52 floor on seed 1, comfortable elsewhere), `avgMsPerFrame`
+22.4-35.2ms (very fast -- a single concave mesh is far cheaper than
+`spaceframe.html`'s many separate beams), `projectedHourRenderMin`
+32.2-50.7min (comfortably inside the CI budget). Visual spot-checks across
+2/25/50/75/95/105% of a 40s cycle at 3 seeds, actually rendering PNGs and
+looking at them (not just reading validator output): a vivid, bold,
+immediately-legible nested-square staircase receding into the screen, with
+clear tier-banded rainbow colour, crisp geometric edges, and generous black
+negative space at every rotation angle checked -- genuinely reads as
+looking down into a stepped excavation, not a flat pattern.
+
+**Novelty gate**: measured against all 34 existing engines (the committed
+fingerprint cache was several commits behind -- missing a Gemini-promoted
+engine plus `herringbone.html`/`hilbertweave.html`/`spaceframe.html`/
+`voronoimosaic.html`/`widmanstatten.html` -- so all six were fingerprinted
+fresh alongside the candidate) using `fingerprintEngine`/`zscoreMatrix`/
+`distance` from `src/fingerprint.js`. Nearest neighbour is `lattice3d` at
+distance **0.790** -- comfortably clear of the 0.60 threshold (a clean
+pass, not a thin-margin case warranting iteration the way `voderberg.html`'s
+0.633 or `hilbertweave.html`'s first-draft 0.619 did). Notably `geodome`
+and `spaceframe` (the pool's other recent real-WebGL engines) did not
+place among the nearest neighbours, confirming the concave receding
+staircase reads as structurally distinct from every existing 3D
+composition, not just superficially different.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

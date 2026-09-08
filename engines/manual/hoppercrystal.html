@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hopper Crystal Staircase — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "random natural structure"):
+// HOPPER (SKELETAL) CRYSTALS, most famously bismuth's rainbow "staircase"
+// specimens. Real mineralogy, not folklore: when a crystal grows so fast
+// that material deposits preferentially along its edges and corners (which
+// have more available high-energy attachment sites) rather than filling in
+// the centre of each face, the result is a face that recedes inward as a
+// series of progressively smaller, self-similar, stepped-down miniature
+// copies of the original crystal outline -- literally a staircase sunk
+// into what would otherwise be a flat face. Bismuth's famous rainbow
+// colouring is a separate, unrelated mechanism (a thin oxide film that
+// forms on exposure to air, refracting light differently by thickness) --
+// borrowed here only as licence for tying hue to STEP DEPTH, not as
+// something being literally simulated. Sources:
+// https://en.wikipedia.org/wiki/Hopper_crystal (search snippets only --
+// Wikipedia is blocked in this sandbox),
+// https://www.geologyin.com/2019/06/what-is-hopper-crystal.html,
+// https://www.zmescience.com/feature-post/natural-sciences/geology-and-paleontology/rocks-and-minerals/the-bismuth-crystal-why-it-looks-so-amazingly-trippy-and-why-its-actually-a-big-deal-for-science/
+//
+// A genuinely different construction PRINCIPLE from every other engine in
+// the pool: not a substitution/subdivision tiling that repartitions a
+// fixed area (quasicrystal.html/voderberg.html), not several overlaid
+// band families (widmanstatten.html), not a proximity partition
+// (voronoimosaic.html), not a recursively-defined path (hilbertweave.html),
+// not an arithmetic sieve (primespiral.html), not a branching growth
+// process (dendrite.html), not an FCC strut lattice (spaceframe.html) --
+// a single CONCAVE, self-similar RECEDING STAIRCASE: nested square
+// "tread" (flat, horizontal) and "riser" (vertical wall) bands shrinking
+// in size and stepping deeper into the screen, tier after tier, down to a
+// flat floor cap. Also a genuinely different 3D COMPOSITION from every
+// other real-WebGL engine: not sparse independent orbiting solids
+// (solids3d.html), not a grid of individually-spinning cubes
+// (lattice3d.html), not lit tori/rings (torusrings3d.html), not one
+// continuous convex mesh (geodome.html), not a connected strut framework
+// of separate beams (spaceframe.html) -- ONE single concave excavation,
+// viewed looking down into it, rendered as one rigid mesh in a single
+// WebGL draw call (per-vertex colour via aColor, the same technique
+// geodome.html/spaceframe.html use to keep many differently-coloured
+// faces inside the render-speed budget).
+//
+// The tread+riser tier mesh was VERIFIED OFFLINE before writing any
+// rendering code (a standalone script confirmed: zero degenerate
+// triangles across all tiers, and -- the part that would still "look
+// plausible" even if subtly wrong -- that every tread's inner edge and
+// every riser's edges exactly coincide with their neighbouring tier's
+// edges, i.e. no gaps in the receding staircase), the same discipline
+// this pool's quasicrystal.html/geodome.html/hilbertweave.html already
+// established for a geometric construction that could otherwise ship
+// with an invisible seam or hole.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. WebGL context MUST be created with
+// preserveDrawingBuffer:true (see solids3d.html's write-up for why) and
+// handle the same startup-only webglcontextlost/restored dance. gl.clear()
+// to opaque black every frame -- structurally whiteout-proof, same as
+// every other real-WebGL engine here.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 40);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true, antialias: true })
+    || canvas.getContext('experimental-webgl', { preserveDrawingBuffer: true, antialias: true });
+
+  // Same startup-only context-loss risk documented in solids3d.html --
+  // headless software WebGL (swiftshader) intermittently fires a spurious
+  // webglcontextlost shortly after context creation, never observed mid-
+  // render past the first couple of frames. Defer window.READY until any
+  // early loss has had a chance to fire and recover.
+  let contextLost = false;
+  canvas.addEventListener('webglcontextlost', (e) => {
+    contextLost = true;
+    e.preventDefault();
+  });
+  canvas.addEventListener('webglcontextrestored', () => {
+    initGL();
+    contextLost = false;
+  });
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+  function hsl2rgb(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [f(0), f(8), f(4)];
+  }
+
+  // ---- Minimal column-major mat4 helpers (WebGL/GLSL convention, same as
+  // solids3d.html / geodome.html / spaceframe.html) ------------------------
+  function mat4Identity() { return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); }
+  function mat4Multiply(a, b) {
+    const out = new Float32Array(16);
+    for (let c = 0; c < 4; c++) {
+      for (let r = 0; r < 4; r++) {
+        let sum = 0;
+        for (let k = 0; k < 4; k++) sum += a[k * 4 + r] * b[c * 4 + k];
+        out[c * 4 + r] = sum;
+      }
+    }
+    return out;
+  }
+  function mat4Perspective(fovyRad, aspect, near, far) {
+    const f = 1 / Math.tan(fovyRad / 2);
+    const nf = 1 / (near - far);
+    const out = new Float32Array(16);
+    out[0] = f / aspect; out[5] = f; out[10] = (far + near) * nf; out[11] = -1;
+    out[14] = 2 * far * near * nf;
+    return out;
+  }
+  function mat4RotateZ(a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    const m = mat4Identity(); m[0] = c; m[1] = s; m[4] = -s; m[5] = c; return m;
+  }
+  function mat4RotateX(a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    const m = mat4Identity(); m[5] = c; m[6] = s; m[9] = -s; m[10] = c; return m;
+  }
+  function mat4Scale(s) {
+    const m = mat4Identity(); m[0] = s; m[5] = s; m[10] = s; return m;
+  }
+  function mat4LookAt(eye, target, up) {
+    let zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
+    let zl = Math.hypot(zx, zy, zz) || 1; zx /= zl; zy /= zl; zz /= zl;
+    let xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+    let xl = Math.hypot(xx, xy, xz) || 1; xx /= xl; xy /= xl; xz /= xl;
+    const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+    const out = new Float32Array(16);
+    out[0] = xx; out[1] = yx; out[2] = zx; out[3] = 0;
+    out[4] = xy; out[5] = yy; out[6] = zy; out[7] = 0;
+    out[8] = xz; out[9] = yz; out[10] = zz; out[11] = 0;
+    out[12] = -(xx * eye[0] + xy * eye[1] + xz * eye[2]);
+    out[13] = -(yx * eye[0] + yy * eye[1] + yz * eye[2]);
+    out[14] = -(zx * eye[0] + zy * eye[1] + zz * eye[2]);
+    out[15] = 1;
+    return out;
+  }
+  function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+  function sub3(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+  function norm3(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
+
+  // ---- WebGL setup: per-VERTEX colour so the whole staircase renders in a
+  // SINGLE drawArrays call, same technique geodome.html/spaceframe.html use.
+  const VERT_SRC = `
+    attribute vec3 aPosition;
+    attribute vec3 aNormal;
+    attribute vec3 aColor;
+    uniform mat4 uMVP;
+    uniform mat4 uModel;
+    uniform vec3 uEye;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vColor;
+    void main() {
+      vec4 world = uModel * vec4(aPosition, 1.0);
+      vNormal = mat3(uModel) * aNormal;
+      vViewDir = normalize(uEye - world.xyz);
+      vColor = aColor;
+      gl_Position = uMVP * vec4(aPosition, 1.0);
+    }
+  `;
+  const FRAG_SRC = `
+    precision mediump float;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vColor;
+    uniform vec3 uLightDir;
+    void main() {
+      vec3 N = normalize(vNormal);
+      float diff = max(dot(N, normalize(uLightDir)), 0.0);
+      float fresnel = pow(1.0 - max(dot(N, normalize(vViewDir)), 0.0), 2.0);
+      // Same raised ambient floor + soft clamp geodome.html/spaceframe.html
+      // established: keeps shaded faces vivid and legible without washing
+      // to near-white, and keeps the deep interior of the pit from reading
+      // as a featureless black hole.
+      vec3 base = vColor * (0.56 + 0.44 * diff);
+      vec3 rim = vColor * fresnel * 0.4;
+      gl_FragColor = vec4(min(base + rim, vec3(0.86)), 1.0);
+    }
+  `;
+  function compileShader(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error('shader compile: ' + gl.getShaderInfoLog(sh));
+    return sh;
+  }
+
+  let prog, aPosition, aNormal, aColor, uMVP, uModel, uLightDir, uEye, meshBuf;
+  function initGL() {
+    prog = gl.createProgram();
+    gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, VERT_SRC));
+    gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, FRAG_SRC));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('program link: ' + gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+
+    aPosition = gl.getAttribLocation(prog, 'aPosition');
+    aNormal = gl.getAttribLocation(prog, 'aNormal');
+    aColor = gl.getAttribLocation(prog, 'aColor');
+    uMVP = gl.getUniformLocation(prog, 'uMVP');
+    uModel = gl.getUniformLocation(prog, 'uModel');
+    uLightDir = gl.getUniformLocation(prog, 'uLightDir');
+    uEye = gl.getUniformLocation(prog, 'uEye');
+
+    const posBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, staircaseMesh.positions, gl.STATIC_DRAW);
+    const normBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, staircaseMesh.normals, gl.STATIC_DRAW);
+    const colBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, staircaseMesh.colors, gl.STATIC_DRAW);
+    meshBuf = { posBuf, normBuf, colBuf, count: staircaseMesh.count };
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.viewport(0, 0, W, H);
+  }
+
+  // Build one flat quad (4 corners, CCW when viewed from its lit side) as
+  // two triangles with a shared flat face normal, pushed into the
+  // positions/normals/colors arrays with a given RGB colour.
+  function pushQuad(positions, normals, colors, a, b, c, d, rgb) {
+    let n = cross3(sub3(b, a), sub3(c, a));
+    n = norm3(n);
+    for (const p of [a, b, c, a, c, d]) {
+      positions.push(p[0], p[1], p[2]);
+      normals.push(n[0], n[1], n[2]);
+      colors.push(rgb[0], rgb[1], rgb[2]);
+    }
+  }
+
+  // Staircase geometry, per-tier colours, and the small per-side symmetry-
+  // breaking jitter are all fixed ONCE for the whole video (function of
+  // DENSITY/SEED only), never re-rolled per cycle -- the "any coverage-
+  // affecting parameter re-randomised per cycle creates a real, not
+  // aliased, brightness swing" lesson this pool's engines repeatedly
+  // establish. Only the rotation (below) changes per cycle.
+  let staircaseMesh;
+  function buildStaircase() {
+    const N = Math.max(4, Math.min(9, Math.round(4 + 3.5 * Math.max(0.5, Math.min(2, DENSITY)))));
+    const SHRINK = rand(0.72, 0.82);
+    const STEP_DEPTH = rand(0.19, 0.26);
+    const HW0 = 1.0;
+
+    const hw = [HW0];
+    for (let i = 1; i < N; i++) hw.push(hw[i - 1] * SHRINK);
+    const z = [];
+    for (let i = 0; i < N; i++) z.push(-i * STEP_DEPTH);
+
+    const hue0 = rng() * 360;
+    const baseCol = PAL[SEED % PAL.length];
+    const zSpan = Math.max(0.001, -z[N - 1]);
+
+    const positions = [], normals = [], colors = [];
+    // Small per-(tier, corner) jitter (+-6%) breaks the receding pit's
+    // otherwise-exact 4-fold rotational symmetry -- the same "break exact
+    // symmetry at the geometry level" fix spaceframe.html established
+    // (there: a fractional lattice-centre offset) to avoid the resonance
+    // risk ziggurat.html hit from its own exact N-fold wedge symmetry.
+    // Jittering per CORNER (not per side) means the two sides meeting at
+    // any corner both use the same jittered value there, so there is no
+    // gap -- verified by construction, since corner() below is the only
+    // place either a tread or a riser reads a tier's half-width.
+    const cornerJitter = [];
+    for (let i = 0; i < N; i++) cornerJitter.push([rand(0.94, 1.06), rand(0.94, 1.06), rand(0.94, 1.06), rand(0.94, 1.06)]);
+    // corners ordered: 0=(+,+) 1=(+,-) 2=(-,-) 3=(-,+) matching (x sign, y sign)
+    function corner(i, idx) {
+      const h = hw[i] * cornerJitter[i][idx];
+      const sx = (idx === 0 || idx === 1) ? 1 : -1;
+      const sy = (idx === 0 || idx === 3) ? 1 : -1;
+      return [sx * h, sy * h, z[i]];
+    }
+
+    for (let i = 0; i < N - 1; i++) {
+      const zi = z[i + 1];
+      const yFrac = (-z[i] - 0) / zSpan;
+      const hue = ((baseCol[0] + hue0 + 130 * yFrac) % 360 + 360) % 360;
+      const light = Math.min(66, baseCol[2] + 4);
+      const sat = Math.max(35, Math.min(95, baseCol[1]));
+      const rgb = hsl2rgb(hue, sat, light);
+
+      // Outer corners at tier i, inner corners at tier i+1 (using tier
+      // i+1's own jitter, so the tread's inner edge exactly matches the
+      // NEXT riser's top edge, which is built from the same tier i+1
+      // corners below).
+      const o0 = corner(i, 0), o1 = corner(i, 1), o2 = corner(i, 2), o3 = corner(i, 3);
+      const in0 = corner(i + 1, 0), in1 = corner(i + 1, 1), in2 = corner(i + 1, 2), in3 = corner(i + 1, 3);
+
+      // Tread: 4 trapezoids, one per side, at constant z=z[i].
+      pushQuad(positions, normals, colors, o0, o3, in3, in0, rgb); // top (+y side)
+      pushQuad(positions, normals, colors, o1, o0, in0, in1, rgb); // right (+x side)
+      pushQuad(positions, normals, colors, o2, o1, in1, in2, rgb); // bottom (-y side)
+      pushQuad(positions, normals, colors, o3, o2, in2, in3, rgb); // left (-x side)
+
+      // Riser: 4 vertical rectangles at tier i+1's (inner) half-width,
+      // from z[i] down to z[i+1].
+      const rHue = ((baseCol[0] + hue0 + 130 * yFrac + 18) % 360 + 360) % 360;
+      const rRgb = hsl2rgb(rHue, sat, Math.max(28, light - 14));
+      const b0 = [in0[0], in0[1], zi], b1 = [in1[0], in1[1], zi], b2 = [in2[0], in2[1], zi], b3 = [in3[0], in3[1], zi];
+      pushQuad(positions, normals, colors, in0, in3, b3, b0, rRgb); // +y wall
+      pushQuad(positions, normals, colors, in1, in0, b0, b1, rRgb); // +x wall
+      pushQuad(positions, normals, colors, in2, in1, b1, b2, rRgb); // -y wall
+      pushQuad(positions, normals, colors, in3, in2, b2, b3, rRgb); // -x wall
+    }
+    // Flat floor cap at the innermost tier.
+    const lastYFrac = 1;
+    const floorHue = ((baseCol[0] + hue0 + 130 * lastYFrac) % 360 + 360) % 360;
+    const floorRgb = hsl2rgb(floorHue, Math.max(35, Math.min(95, baseCol[1])), Math.min(66, baseCol[2] + 4));
+    const f0 = corner(N - 1, 0), f1 = corner(N - 1, 1), f2 = corner(N - 1, 2), f3 = corner(N - 1, 3);
+    pushQuad(positions, normals, colors, f0, f1, f2, f3, floorRgb);
+
+    staircaseMesh = {
+      positions: new Float32Array(positions),
+      normals: new Float32Array(normals),
+      colors: new Float32Array(colors),
+      count: positions.length / 3,
+    };
+  }
+
+  // Called at start-up AND every cycleSec. Only rotation resets --
+  // coverage-neutral by construction (rotating the whole rigid staircase
+  // about its own depth axis, Z, doesn't change how much geometry exists,
+  // and the geometry's own near-exact 4-fold symmetry was already broken
+  // by the per-corner jitter above).
+  let rotAngle0, rotRate;
+  function reconfigureRotation() {
+    rotAngle0 = rand(0, Math.PI * 2);
+    rotRate = (rng() < 0.5 ? -1 : 1) * rand(0.6, 1.1) * SPEED;
+  }
+
+  // Continuous tilt wobble, fixed once at start-up and never reset by
+  // reconfigureRotation() -- the same fix geodome.html/spaceframe.html
+  // established after finding that resetting a wobble's phase every
+  // cycleSec lands validate.js's 8 widely-spaced samples in uncorrelated
+  // random states instead of a smoothly-averaging periodic signal.
+  const tiltPhase0 = rand(0, Math.PI * 2);
+  const tiltRate = (rng() < 0.5 ? -1 : 1) * rand(1.3, 1.9);
+
+  buildStaircase();
+  initGL();
+  reconfigureRotation();
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+  const dt = 1 / FPS;
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  // Camera looks down and slightly across into the pit (positive Z, since
+  // the staircase recedes toward negative Z), so the depth/step read is
+  // clearly visible rather than face-on (which would foreshorten it to a
+  // flat square).
+  const EYE = [0.9, 1.7, 3.4];
+  const TARGET = [0, 0, -0.55];
+  const UP = [0, 1, 0];
+  const proj = mat4Perspective((42 * Math.PI) / 180, W / H, 0.1, 100);
+  const SCALE = 1.35;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    if (gl.isContextLost()) return;
+
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    const view = mat4LookAt(EYE, TARGET, UP);
+    const tilt = 0.14 * Math.sin(tiltPhase0 + clk * tiltRate);
+    let model = mat4RotateZ(rotAngle0 + clk * rotRate);
+    model = mat4Multiply(mat4RotateX(tilt), model);
+    model = mat4Multiply(model, mat4Scale(SCALE));
+
+    const mvp = mat4Multiply(proj, mat4Multiply(view, model));
+    gl.uniformMatrix4fv(uMVP, false, mvp);
+    gl.uniformMatrix4fv(uModel, false, model);
+    gl.uniform3f(uEye, EYE[0], EYE[1], EYE[2]);
+
+    // Bounded light-direction oscillation (never sweeping to a fully
+    // back-lit state) -- same coverage-neutral motion source geodome.html/
+    // spaceframe.html use: redistributes brightness WITHIN the already-lit
+    // surfaces rather than changing how much is lit.
+    const lightAngle = 1.5 * Math.sin(clk * 2.4) + 0.6 * Math.sin(clk * 5.1 + 0.5);
+    gl.uniform3f(uLightDir, Math.cos(lightAngle), 1.1, Math.sin(lightAngle) + 0.6);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.posBuf);
+    gl.enableVertexAttribArray(aPosition);
+    gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.normBuf);
+    gl.enableVertexAttribArray(aNormal);
+    gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.colBuf);
+    gl.enableVertexAttribArray(aColor);
+    gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, meshBuf.count);
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureRotation(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+
+  // Same early-context-loss grace window as solids3d.html/geodome.html/
+  // spaceframe.html before declaring ready.
+  (async () => {
+    await new Promise((r) => setTimeout(r, 300));
+    const deadline = Date.now() + 1500;
+    while (contextLost && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    window.READY = true;
+  })();
+})();
+</script>
+</body>
+</html>
