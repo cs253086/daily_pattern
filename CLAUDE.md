@@ -257,7 +257,8 @@ them:
      rewriting 33 engines by hand is not realistic. Fixed at the
      **renderer** instead, for every engine at once: **scene-based
      rendering** in `src/render.js`. The hour is split into ~15 scenes of
-     `sceneSec` (default 240s); every scene reloads the SAME engine with a
+     `sceneSec` (default 240s, since lowered to 150s — see the follow-up
+     below); every scene reloads the SAME engine with a
      fresh deterministic per-scene seed (`sceneSeedFor()`: scene 0 keeps
      the day seed unchanged, so the opening/thumbnail/Short stay
      reproducible and a single-scene render is unchanged from before),
@@ -293,6 +294,70 @@ them:
      pinned; engines whose geometry is seed-driven change far more.
      Honest limit: scenes give each engine exactly as much variety as its
      seed controls — an engine that ignores its seed would not benefit.
+   - **Same day, follow-up ("You do whatever you need to do to generate
+     more dynamics"): scenes now rotate through DIFFERENT engines, not
+     just different seeds of one.** Re-seeding gives each scene exactly
+     as much variety as the engine's seed controls, and for most engines
+     that is arrangement, not identity — a geodesic dome is still a
+     geodesic dome at every seed. `buildPlaylist()` in `src/render.js`
+     picks an engine per scene: scene 0 is the day's headline engine
+     (it owns the title, thumbnail and Short — all three are now cut
+     from inside scene 0, `thumbnailFraction` is a fraction of the FIRST
+     SCENE and the Short starts ~30% into it, so they always show the
+     engine the title names); every later scene is drawn from the
+     curated pool by a seeded shuffle WITHOUT replacement, with no two
+     consecutive scenes sharing a `SHAPE_ARCHETYPES` archetype (the
+     user's "same basic unit" definition of repetition), a per-video cap
+     of `maxScenesPerArchetype` (2) appearances per archetype (so the
+     five cube-vocabulary engines contribute at most two cube scenes per
+     hour, never adjacent), and 3D scenes PACED evenly across the hour.
+     `src/index.js` supplies the pool as `scenePool` (path, `isWebGLEngine`
+     dimension, `archetypeOf` archetype), leaving out any file byte-
+     identical to the headline (its just-promoted copy on a Gemini day).
+     All scenes share the day's image palette — on a Gemini day the
+     headline keeps its own colours but the curated scenes after it
+     still get `sceneColors`/`sceneLum`, so the hour stays one coherent
+     video. Scene length default is now 150s (24 scenes/hour) with a
+     deterministic ±30% per-scene wobble (`sceneJitter`, antithetic
+     pairs so the total is exact and the bound is strict) so the cuts
+     don't land on a metronome. A pool engine that fails to load in
+     production falls back to the headline engine for that scene with a
+     warning rather than failing the day's render. Escape hatches: repo
+     variable `SCENE_MIX=0` (one engine, re-seeded scenes),
+     `SCENE_SEC=0` (no scenes at all). `metadata.js` describes the hour
+     as a journey through many designs when the playlist has more than
+     one distinct engine (`sceneMix`).
+   - **Two things the first draft got wrong, both caught by measuring
+     rather than reasoning.** (a) Jittered scene lengths were drawn as
+     random weights then normalised to the frame total — when the draws
+     happened to sum low, the longest scene came out at 222s against a
+     150s mean, well past the intended ±30%. Antithetic pairs (w, 2−w)
+     make the weights sum to exactly the scene count so the bound holds
+     by construction (measured 105–195s across seeds afterwards). (b) A
+     "prefer the other dimension than the previous scene" rule used
+     every eligible 3D engine in the first 12 scenes and left the
+     second half of the hour all-2D. Replaced with pacing: prefer
+     whichever dimension is behind its target share (up to half the
+     scenes, bounded by what the archetype cap allows — 6 of 24 with the
+     current pool), which lands 3D at scenes 0/6/10/14/18/22.
+   - **Verified**: playlist unit battery (3 headlines × 8 seeds, 24
+     scenes): deterministic, scene 0 = headline, no engine reused, zero
+     same-archetype adjacencies, cap respected; a 3-engine tiny pool
+     refills without playing the same engine twice in a row; an empty
+     pool degrades to headline-only. Real ffmpeg renders: a 36s/6-scene
+     mixed render → exactly 864 frames, montage LOOKED at (kaleidoscope →
+     lattice3d → hoppercrystal → solids3d → spaceframe → geodome, real
+     dissolves with both scenes visible mid-fade, one shared palette);
+     an 18s render with an un-recoloured geodome headline and an all-red
+     `sceneColors` → headline kept its own colours, both following
+     scenes came out red; the production path `DRY_RUN=1 DURATION=30
+     SCENE_SEC=6 CROSSFADE_SEC=1 node src/index.js` → 720/720 frames,
+     playlist logged, thumbnail confirmed to be the headline
+     (hoppercrystal) matching the title "Dreamy Hopper Crystal
+     Staircase". Honest limit: scenes are only as varied as the pool —
+     34 engines today, so a 24-scene hour never repeats an engine, but
+     the same engines recur across days (with new seeds) until the pool
+     grows further.
 7. **Video descriptions never reveal that the pipeline is automated.**
    User request 2026-08-15: no "generated automatically," "fully automated
    pipeline," "AI-and-code generated," or raw `Seed:`/`Engine:` debug

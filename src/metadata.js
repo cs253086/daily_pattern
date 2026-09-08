@@ -223,7 +223,9 @@ export function buildMetadata(info = {}) {
   // "every few minutes" is literally true now: src/render.js re-seeds the
   // engine into a fresh composition each scene (~4 min) with a crossfade
   // between them, so this is an accurate description, not marketing spin.
-  const visualParagraph = 'Watch bold, saturated colour and crisp geometry keep transforming across the full runtime — every few minutes the pattern dissolves into a fresh arrangement of the same design, so it never settles into a loop. Expect kaleidoscopic symmetry, sharp-edged polygons, and a palette that drifts and deepens the longer you watch. No two days look quite the same, so there\'s always something new if you check back tomorrow.';
+  const visualParagraph = info.sceneMix
+    ? `It opens with today's ${subject.toLowerCase()}, then keeps moving: every couple of minutes the scene dissolves into a completely different pattern — tilings, lattices, spirals, lit 3D forms and more, all sharing one colour palette — so the hour is a journey through dozens of designs, never a loop. Expect bold, saturated colour, sharp-edged geometry, and something new on screen whenever you glance back. No two days play the same sequence.`
+    : 'Watch bold, saturated colour and crisp geometry keep transforming across the full runtime — every few minutes the pattern dissolves into a fresh arrangement of the same design, so it never settles into a loop. Expect kaleidoscopic symmetry, sharp-edged polygons, and a palette that drifts and deepens the longer you watch. No two days look quite the same, so there\'s always something new if you check back tomorrow.';
 
   const audioParagraph = hasAudio
     ? 'This video features a soft ambient soundtrack that plays quietly in the background alongside the visuals. Works great as animated wallpaper, a TV or desktop screensaver, or company while you work, study, code, read, journal, do yoga, or wind down before sleep.'

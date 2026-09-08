@@ -7,7 +7,7 @@
 
 import { spawn } from 'node:child_process';
 import { mkdir, rename, unlink } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import puppeteer from 'puppeteer';
@@ -89,15 +89,44 @@ export function resolveConfig(cli = {}) {
     // original day seed exactly, so the opening, thumbnail and Short stay
     // reproducible. Set sceneSec=0 (or SCENE_SEC=0, wired to a repo var
     // in daily.yml) to get the old single-scene behaviour back.
-    sceneSec: pick(cli, 'sceneSec', 'SCENE_SEC', 240, num),
+    //
+    // 2026-09-08 follow-up, same day, user: "You do whatever you need to do
+    // to generate more dynamics." Re-seeding the SAME engine only gives
+    // each scene as much variety as that engine's seed controls (a
+    // geodesic dome is still a geodesic dome at every seed). So scenes now
+    // also rotate through DIFFERENT engines: scene 0 is the day's headline
+    // engine (it owns the title, thumbnail and Short), every later scene
+    // is drawn from `scenePool` (the curated pool, described by
+    // src/index.js with its 3D/2D dimension and shape archetype) by
+    // buildPlaylist(): a seeded shuffle with no engine reused, no two
+    // consecutive scenes sharing an archetype, a per-video cap on any
+    // archetype's appearances, and a preference for alternating 3D and 2D
+    // for contrast. All scenes share the day's image palette (`colors`/
+    // `lum`), so it stays one coherent video. Scene lengths get a
+    // deterministic +-sceneJitter wobble so the rhythm isn't metronomic.
+    // sceneMix=0 (SCENE_MIX=0) keeps the headline engine for every scene.
+    sceneSec: pick(cli, 'sceneSec', 'SCENE_SEC', 150, num),
     crossfadeSec: pick(cli, 'crossfadeSec', 'CROSSFADE_SEC', 2, num),
+    sceneJitter: pick(cli, 'sceneJitter', 'SCENE_JITTER', 0.3, num),
+    sceneMix: pick(cli, 'sceneMix', 'SCENE_MIX', 1, num) !== 0,
+    // [{ path, is3D, archetype }] -- only ever supplied programmatically
+    // (src/index.js); a bare `node src/render.js` renders one engine.
+    scenePool: Array.isArray(cli.scenePool) ? cli.scenePool : [],
+    // Palette for playlist scenes when the headline engine itself isn't
+    // recoloured (a Gemini engine draws its own colours, but the curated
+    // engines that follow it should still share the day's image palette).
+    sceneColors: pick(cli, 'sceneColors', null, '', (v) => String(v)),
+    sceneLum: pick(cli, 'sceneLum', null, '', (v) => String(v)),
+    maxScenesPerArchetype: pick(cli, 'maxScenesPerArchetype', 'MAX_SCENES_PER_ARCHETYPE', 2, num),
 
     // ffmpeg encode settings
     crf: pick(cli, 'crf', 'CRF', 20, num),
     preset: pick(cli, 'preset', 'PRESET', 'medium'),
 
-    // short cut: a 30s clip taken from a dense section (default 35:00)
-    shortStart: pick(cli, 'shortStart', 'SHORT_START', 2100, num), // seconds
+    // short cut: a 30s clip. Default (blank) = derived from the FIRST scene
+    // so the Short always shows the headline engine the title names (see
+    // shortWindow); an explicit value is an absolute offset in seconds.
+    shortStart: pick(cli, 'shortStart', 'SHORT_START', '', (v) => String(v)),
     shortDuration: pick(cli, 'shortDuration', 'SHORT_DURATION', 30, num),
     // short aspect ratio: 'fill' = scale-and-crop to vertical 9:16 (best for
     // centered generative art); 'pad' = letterbox the source inside 9:16;
@@ -108,7 +137,9 @@ export function resolveConfig(cli = {}) {
     shortHeight: pick(cli, 'shortHeight', 'SHORT_HEIGHT', 1920, num),
 
     // thumbnail: extract a single JPEG from the long video for YouTube upload.
-    // Default to 65% of duration — past the build-up, before fade-out.
+    // Fraction of the FIRST SCENE (the headline engine, so the thumbnail
+    // matches the title) -- past the build-up, before the first crossfade.
+    // For a single-scene render that is the whole video, as before.
     thumbnailFraction: pick(cli, 'thumbnailFraction', 'THUMB_FRACTION', 0.65, num),
 
     outDir: pick(cli, 'outDir', 'OUT_DIR', path.join(repoRoot, 'output')),
@@ -146,15 +177,19 @@ function defaultSeed() {
 // Engine URL
 // ---------------------------------------------------------------------------
 
-// `seed` overrides cfg.seed for scene-based rendering (see planScenes); the
-// default keeps the single-scene call sites unchanged.
-function buildEngineUrl(cfg, seed = cfg.seed) {
-  if (!existsSync(cfg.enginePath)) {
-    throw new Error(`Engine HTML not found: ${cfg.enginePath}`);
+// `over` holds per-scene overrides for scene-based rendering (see
+// planScenes/buildPlaylist): seed, enginePath, colors, lum. No overrides =
+// the headline engine with the day's seed.
+function buildEngineUrl(cfg, over = {}) {
+  const enginePath = over.enginePath || cfg.enginePath;
+  if (!existsSync(enginePath)) {
+    throw new Error(`Engine HTML not found: ${enginePath}`);
   }
-  const url = pathToFileURL(cfg.enginePath);
+  const colors = cfg.colors !== '' ? cfg.colors : (over.colors || '');
+  const lum = cfg.lum !== '' ? cfg.lum : (over.lum || '');
+  const url = pathToFileURL(enginePath);
   const p = url.searchParams;
-  p.set('seed', String(seed));
+  p.set('seed', String(over.seed ?? cfg.seed));
   if (cfg.palette !== '') p.set('palette', cfg.palette);
   p.set('width', String(cfg.width));
   p.set('height', String(cfg.height));
@@ -163,8 +198,8 @@ function buildEngineUrl(cfg, seed = cfg.seed) {
   if (cfg.speed !== '') p.set('speed', cfg.speed);
   if (cfg.density !== '') p.set('density', cfg.density);
   if (cfg.cycleSec !== '') p.set('cycleSec', cfg.cycleSec);
-  if (cfg.colors !== '') p.set('colors', cfg.colors);
-  if (cfg.lum !== '') p.set('lum', cfg.lum);
+  if (colors !== '') p.set('colors', colors);
+  if (lum !== '') p.set('lum', lum);
   return url.href;
 }
 
@@ -195,17 +230,106 @@ function sceneSeedFor(baseSeed, k) {
 // always sum to exactly totalFrames. A duration too short for two scenes
 // (every local test render, e.g. DURATION=8) degrades to one scene and no
 // fade, i.e. exactly the old behaviour.
-function planScenes(totalFrames, fps, sceneSec, crossfadeSec) {
+//
+// `jitter` (0..0.5) varies each scene's length deterministically from the
+// seed by up to +-jitter of the mean, so scene changes don't land on a
+// metronome; the frame total is still exact. jitter=0 gives equal scenes.
+export function planScenes(totalFrames, fps, sceneSec, crossfadeSec, seed = '', jitter = 0) {
   if (!(sceneSec > 0)) return { scenes: [totalFrames], fade: 0 };
   const perScene = Math.max(1, Math.round(sceneSec * fps));
   const count = Math.max(1, Math.round(totalFrames / perScene));
-  const base = Math.floor(totalFrames / count);
-  const extra = totalFrames - base * count;
-  const scenes = Array.from({ length: count }, (_, k) => base + (k < extra ? 1 : 0));
+  const j = Math.max(0, Math.min(0.5, Number(jitter) || 0));
+  // Antithetic pairs (w, 2-w) so the weights sum to exactly `count` and
+  // every scene stays within +-jitter of the mean -- a plain random draw
+  // normalised afterwards can overshoot when the draws happen to sum low.
+  const weights = Array.from({ length: count }, (_, k) => {
+    if (k % 2 === 1) return 2 - (1 + j * (2 * (hashStr(`${seed}:len:${k - 1}`) / 4294967296) - 1));
+    if (k === count - 1) return 1; // odd count: last scene takes the mean
+    return 1 + j * (2 * (hashStr(`${seed}:len:${k}`) / 4294967296) - 1);
+  });
+  const sumW = weights.reduce((a, b) => a + b, 0);
+  const scenes = weights.map((w) => Math.max(1, Math.floor((totalFrames * w) / sumW)));
+  let extra = totalFrames - scenes.reduce((a, b) => a + b, 0);
+  for (let k = 0; extra > 0; k = (k + 1) % count) { scenes[k]++; extra--; }
+  for (let k = 0; extra < 0; k = (k + 1) % count) { if (scenes[k] > 1) { scenes[k]--; extra++; } }
   let fade = count > 1 ? Math.max(0, Math.round((crossfadeSec || 0) * fps)) : 0;
   const shortest = Math.min(...scenes);
   if (fade * 2 >= shortest) fade = Math.max(0, Math.floor((shortest - 1) / 2));
   return { scenes, fade };
+}
+
+// Which engine plays in each scene. Scene 0 is always the headline engine
+// (`headline` = { path, is3D, archetype }); later scenes come from `pool`
+// (same shape) via a seeded shuffle drawn WITHOUT replacement, subject to:
+//   - no two consecutive scenes share a shape archetype (the "same basic
+//     unit" notion of repetition from src/index.js's SHAPE_ARCHETYPES, so
+//     e.g. two cube-vocabulary engines never play back to back);
+//   - no archetype appears more than `maxPerArchetype` times per video
+//     (multi-member archetypes are exactly the ones that look alike);
+//   - 3D scenes are PACED evenly across the hour rather than front-loaded
+//     (soft: whichever dimension is behind its target share is preferred,
+//     relaxed when it has nothing eligible left). A naive "alternate 3D
+//     and 2D" preference used every 3D engine in the first half and left
+//     the second half all-2D -- measured, not guessed.
+// The pool is only refilled (allowing a repeat, with a new seed) if it is
+// smaller than the scene count -- never in production (34 engines vs ~24
+// scenes), only for tiny test pools. Pure function of its inputs, so the
+// whole hour is still reproducible from the date.
+export function buildPlaylist(headline, pool, count, seed, maxPerArchetype = 2) {
+  const out = [headline];
+  if (count <= 1 || !pool.length) {
+    while (out.length < count) out.push(headline);
+    return out;
+  }
+  // Mulberry32 seeded shuffle -- deterministic, same PRNG family the
+  // engines themselves use.
+  let a = hashStr(`${seed}:playlist`) >>> 0;
+  const rng = () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const shuffled = (arr) => { const c = arr.slice(); for (let i = c.length - 1; i > 0; i--) { const k = Math.floor(rng() * (i + 1)); [c[i], c[k]] = [c[k], c[i]]; } return c; };
+
+  let deck = shuffled(pool.filter((e) => e.path !== headline.path));
+  const used = new Map([[headline.archetype, 1]]);
+  // How many 3D scenes this video can hold under the cap (so pacing aims
+  // at a reachable share instead of one the deck can't supply).
+  const perArch3D = new Map();
+  for (const e of deck) if (e.is3D) perArch3D.set(e.archetype, (perArch3D.get(e.archetype) || 0) + 1);
+  let target3D = headline.is3D ? 1 : 0;
+  for (const [arch, n] of perArch3D) target3D += Math.min(n, maxPerArchetype - (used.get(arch) || 0));
+  // ...aiming for up to half the scenes in 3D (the channel prefers 3D, but
+  // a short test render shouldn't come out all-3D just because the pool
+  // could supply it).
+  target3D = Math.min(target3D, Math.ceil(count / 2));
+  let refills = 0;
+  while (out.length < count) {
+    const prev = out[out.length - 1];
+    const k = out.length;
+    const used3D = out.filter((e) => e.is3D).length;
+    const want3D = (used3D + 0.5) / (k + 1) < target3D / count;
+    const okArch = (e) => e.archetype !== prev.archetype;
+    const underCap = (e) => (used.get(e.archetype) || 0) < maxPerArchetype;
+    const passes = [
+      (e) => okArch(e) && underCap(e) && e.is3D === want3D,
+      (e) => okArch(e) && underCap(e),
+      (e) => okArch(e),
+      () => true,
+    ];
+    let idx = -1;
+    for (const pass of passes) { idx = deck.findIndex(pass); if (idx !== -1) break; }
+    if (idx === -1) {
+      // Deck exhausted (pool smaller than the scene count): refill,
+      // excluding the current scene's engine so it can't play twice in a
+      // row, and reset the per-archetype cap for the new lap.
+      if (++refills > count) break; // defensive: can't happen with a non-empty pool
+      deck = shuffled(pool.filter((e) => e.path !== prev.path));
+      used.clear();
+      continue;
+    }
+    const [e] = deck.splice(idx, 1);
+    used.set(e.archetype, (used.get(e.archetype) || 0) + 1);
+    out.push(e);
+  }
+  while (out.length < count) out.push(headline);
+  return out;
 }
 
 // In-page helpers. Each is passed to page.evaluate as a function value, so
@@ -351,10 +475,22 @@ function shortFilter(cfg) {
 // in (see muxStockTrack) -- carry it into the Short when present,
 // otherwise keep the Short silent as before rather than asking ffmpeg to
 // encode an audio stream that doesn't exist.
-async function cutShort(cfg, hasAudio) {
+//
+// `scene0Sec` is the headline scene's length: by default the Short is cut
+// from inside it (starting ~30% in, past any accumulation warm-up, and
+// ending before the first crossfade when the scene is long enough), so
+// the Short always shows the engine the title names. An explicit
+// shortStart is an absolute offset and wins.
+async function cutShort(cfg, hasAudio, scene0Sec = cfg.duration) {
   const total = cfg.duration;
   const dur = Math.min(cfg.shortDuration, total);
-  const start = Math.max(0, Math.min(cfg.shortStart, total - dur));
+  let start;
+  if (cfg.shortStart !== '' && Number.isFinite(Number(cfg.shortStart))) {
+    start = Number(cfg.shortStart);
+  } else {
+    start = Math.min(scene0Sec * 0.3, Math.max(0, scene0Sec - dur));
+  }
+  start = Math.max(0, Math.min(start, total - dur));
   const vf = shortFilter(cfg);
 
   const args = [
@@ -376,8 +512,9 @@ async function cutShort(cfg, hasAudio) {
 }
 
 // Extract a single JPEG thumbnail from the long video at a configurable point.
-async function extractThumbnail(cfg) {
-  const t = Math.max(0, Math.min(cfg.duration - 0.1, cfg.duration * cfg.thumbnailFraction));
+// Taken from inside the first (headline) scene -- see thumbnailFraction.
+async function extractThumbnail(cfg, scene0Sec = cfg.duration) {
+  const t = Math.max(0, Math.min(cfg.duration - 0.1, scene0Sec * cfg.thumbnailFraction));
   const args = [
     '-y',
     '-ss', String(t),
@@ -462,10 +599,26 @@ export async function render(cli = {}) {
       throw new Error(`No element matches canvas selector "${cfg.canvasSelector}".`);
     }
 
-    const { scenes, fade } = planScenes(totalFrames, cfg.fps, cfg.sceneSec, cfg.crossfadeSec);
+    const { scenes, fade } = planScenes(totalFrames, cfg.fps, cfg.sceneSec, cfg.crossfadeSec, cfg.seed, cfg.sceneJitter);
     console.log(`[render] frames : ${totalFrames}`);
-    console.log(`[render] scenes : ${scenes.length} x ~${(scenes[0] / cfg.fps).toFixed(0)}s`
-      + (fade ? `, ${fade}-frame crossfades` : ' (single scene, no crossfade)'));
+    const secs = scenes.map((f) => (f / cfg.fps).toFixed(0));
+    console.log(`[render] scenes : ${scenes.length}`
+      + (scenes.length > 1 ? ` (${Math.min(...secs)}-${Math.max(...secs)}s each, ${fade}-frame crossfades)` : ' (single scene, no crossfade)'));
+
+    // Engine per scene. The headline entry's archetype/dimension come from
+    // the caller when it knows them (index.js); a bare render() call gets
+    // a headline that is simply its own archetype.
+    const headline = cfg.scenePool.find((e) => e.path === cfg.enginePath)
+      || { path: cfg.enginePath, is3D: /getContext\(\s*['"]webgl2?['"]/.test(readFileSync(cfg.enginePath, 'utf8')), archetype: path.basename(cfg.enginePath, '.html') };
+    const pool = cfg.sceneMix ? cfg.scenePool.filter((e) => e.path && existsSync(e.path)) : [];
+    const playlist = buildPlaylist(headline, pool, scenes.length, cfg.seed, cfg.maxScenesPerArchetype);
+    const playlistNames = playlist.map((e) => path.basename(e.path, '.html'));
+    if (scenes.length > 1) {
+      const distinct = new Set(playlistNames).size;
+      console.log(`[render] playlist: ${distinct} engine${distinct === 1 ? '' : 's'} across ${scenes.length} scenes`
+        + (pool.length ? '' : ' (scene mix off or no pool: headline engine only)'));
+      playlist.forEach((e, k) => console.log(`[render]   scene ${String(k).padStart(2)}  ${secs[k].padStart(4)}s  ${e.is3D ? '3D' : '2D'}  ${playlistNames[k]}`));
+    }
 
     const videoOnlyPath = `${cfg.longPath}.noaudio.mp4`;
     const { proc: ff, done: ffDone } = spawnFfmpegPipe(cfg, videoOnlyPath);
@@ -493,7 +646,21 @@ export async function render(cli = {}) {
     // head of the next one. Empty for scene 0.
     let tails = [];
     for (let k = 0; k < scenes.length; k++) {
-      if (k > 0) await loadScene(page, buildEngineUrl(cfg, sceneSeedFor(cfg.seed, k)), pageErrors);
+      if (k > 0) {
+        const seed = sceneSeedFor(cfg.seed, k);
+        const over = { seed, enginePath: playlist[k].path, colors: cfg.sceneColors, lum: cfg.sceneLum };
+        try {
+          await loadScene(page, buildEngineUrl(cfg, over), pageErrors);
+        } catch (e) {
+          // One bad pool engine must not cost the whole day's video: fall
+          // back to the headline engine for this scene (same seed), and
+          // only fail if even that won't load.
+          if (playlist[k].path === cfg.enginePath) throw e;
+          console.warn(`\n[render] scene ${k}: ${playlistNames[k]} failed to load (${e.message.split('\n')[0]}); using ${playlistNames[0]} instead`);
+          playlist[k] = headline; playlistNames[k] = playlistNames[0];
+          await loadScene(page, buildEngineUrl(cfg, { ...over, enginePath: cfg.enginePath }), pageErrors);
+        }
+      }
       const isLast = k === scenes.length - 1;
       const head = k > 0 ? fade : 0;
 
@@ -556,10 +723,11 @@ export async function render(cli = {}) {
       }
     }
 
-    const shortInfo = await cutShort(cfg, hasAudio);
+    const scene0Sec = scenes[0] / cfg.fps;
+    const shortInfo = await cutShort(cfg, hasAudio, scene0Sec);
     console.log(`[render] wrote ${cfg.shortPath} (start ${shortInfo.start}s, ${shortInfo.dur}s, fit=${shortInfo.fit}, audio=${hasAudio})`);
 
-    const thumbInfo = await extractThumbnail(cfg);
+    const thumbInfo = await extractThumbnail(cfg, scene0Sec);
     console.log(`[render] wrote ${cfg.thumbnailPath} (frame at ${thumbInfo.at.toFixed(1)}s)`);
 
     return {
@@ -573,6 +741,8 @@ export async function render(cli = {}) {
       duration: cfg.duration,
       totalFrames,
       hasAudio,
+      scenes: scenes.length,
+      playlist: playlistNames,
     };
   } finally {
     await browser.close();

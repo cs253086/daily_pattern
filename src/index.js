@@ -678,6 +678,17 @@ async function main() {
   // engines generate their own colours. An explicit --colors/COLORS
   // override always wins.
   const renderCli = { ...cli, engine };
+  // Scene playlist (src/render.js buildPlaylist, 2026-09-08): describe the
+  // whole curated pool -- path, dimension, shape archetype -- so the hour
+  // can rotate through different engines after the headline scene, never
+  // playing two same-archetype engines back to back. A file byte-identical
+  // to today's headline (its just-promoted copy, on a Gemini day) is left
+  // out so the "different" engine isn't secretly the same one.
+  const headlineBytes = readFileSync(engine);
+  renderCli.scenePool = [engine, ...curatedPool()]
+    .filter((p, i, arr) => arr.indexOf(p) === i)
+    .filter((p) => p === engine || !readFileSync(p).equals(headlineBytes))
+    .map((p) => ({ path: p, is3D: isWebGLEngine(p), archetype: archetypeOf(path.basename(p, '.html')) }));
   let imageCredit = null;
   const wantRecolor = imageInfo && !source.startsWith('gemini') && !cli.colors && !process.env.COLORS;
   if (wantRecolor) {
@@ -693,6 +704,13 @@ async function main() {
     }
   } else if (!imageInfo) {
     console.log('[index] no image palette today; using engine default palette.');
+  }
+  // Playlist scenes after a Gemini headline still share the day's palette
+  // (the Gemini engine draws its own colours; the curated engines that
+  // follow it would otherwise each fall back to a different built-in one).
+  if (imageInfo && !renderCli.colors && !cli.colors && !process.env.COLORS) {
+    renderCli.sceneColors = encodeColors(imageInfo.colors);
+    if (imageInfo.structure) renderCli.sceneLum = encodeStructure(imageInfo.structure, imageInfo.gridW, imageInfo.gridH);
   }
 
   // Optional license-free (CC0) background music, fetched from Freesound.org
@@ -734,7 +752,13 @@ async function main() {
     engineIs3D: isWebGLEngine(engine),
     hasAudio: renderResult.hasAudio,
     musicCredit: renderResult.hasAudio ? musicCredit : null,
+    // >1 distinct engine in the scene playlist: the description can say the
+    // hour moves through a series of different patterns, not one design.
+    sceneMix: new Set(renderResult.playlist || []).size > 1,
   });
+  if (renderResult.playlist && renderResult.playlist.length > 1) {
+    console.log(`[index] scene playlist: ${renderResult.playlist.join(' > ')}`);
+  }
   console.log(`[index] long title : ${metadata.long.title}`);
   console.log(`[index] short title: ${metadata.short.title}`);
 
