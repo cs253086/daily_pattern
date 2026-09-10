@@ -36,6 +36,32 @@
 // CONTINUOUSLY outward along a spiral path, radius and angle both growing
 // together, with a second point-symmetric copy interlocking into the gaps.
 //
+// UNIT CHOREOGRAPHY (2026-09-10). User definition of "dynamic": "dynamic
+// movements with the basic pattern units", not whole-pattern spin and not
+// cutting to a different pattern. Before this, the two-arm segment list was
+// computed once and only rotated rigidly (audit-unit-motion: residual 1.8,
+// 33% non-rigid). Now every ribbon SEGMENT also moves relative to its
+// neighbours, on top of the rigid rotation, from two travelling waves keyed
+// to each segment's own spiral parameter (theta) on the shared clock:
+//   - a PULSE running along each arm: per-segment scale about its own
+//     centroid (+-24%), a micro-rotation about that centroid (+-0.15 rad),
+//     a SLIDE along the arm of +-30% of the local ribbon width (segments
+//     bunch ahead of the swell and spread behind it, like a compression
+//     wave along a chain) and a small lightness pulse, so a swell visibly
+//     travels out along the ribbon;
+//   - a radial BREATHING wave: each segment slides in/out along its own
+//     radial direction by +-30% of the ribbon's local width, with the two
+//     arms in ANTIPHASE so the interlocking gap between them opens and
+//     closes as the wave sweeps round.
+// Wave rates have guaranteed minimum magnitude and random sign (periods
+// ~3-5s). Because the waves are keyed to position along the arm, unit
+// phases are spread uniformly at every instant, so total lit coverage
+// (and mean luma) is constant in time -- coverage-neutral by construction,
+// so validate.js's brightness-trend regression is unaffected. Hue stays
+// purely SPATIAL. All motion parameters are drawn once in buildSpiral()
+// (AFTER the colour draws, so a seed keeps the palette look it had
+// before); reconfigureRotation() still resets only the rigid rotation.
+//
 // Headless contract (see src/render.js):
 //   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
 //   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
@@ -106,6 +132,8 @@
   // re-rolling either mid-video would swing average frame brightness
   // between cycles exactly like a randomised subdivision depth did.
   let arms, hue0;
+  // Unit-choreography parameters (see file header), fixed once per video.
+  let kPulse, omegaPulse, kBreath, omegaBreath, scaleAmp, rotAmp, breathAmp, slideAmp, lightAmp;
   function buildSpiral() {
     const d = Math.max(0.7, Math.min(1.4, DENSITY));
     const turns = rand(4.0, 5.0);
@@ -154,7 +182,19 @@
         const frac = k / nSegs;
         const hue = ((baseCol[0] + hue0 + 50 * Math.sin(frac * Math.PI * 3)) % 360 + 360) % 360;
         const light = Math.min(72, baseCol[2] + frac * 10);
-        segs.push({ p1, p2, p3, p4, hue, sat: baseCol[1], light });
+        // Per-unit data for the choreography: centroid, the corners RELATIVE
+        // to it (so scale/rotation act about the segment's own centre), the
+        // outward radial unit vector at the segment's mid-angle, the local
+        // ribbon width (the breathing amplitude is a fraction of it), and
+        // the spiral parameter the waves are keyed to.
+        const gx = (p1[0] + p2[0] + p3[0] + p4[0]) / 4, gy = (p1[1] + p2[1] + p3[1] + p4[1]) / 4;
+        const am = (a0 + a1) / 2;
+        segs.push({
+          gx, gy, ux: Math.cos(am), uy: Math.sin(am),
+          rel: [p1, p2, p3, p4].map((q) => [q[0] - gx, q[1] - gy]),
+          width: (w0 + w1) / 2, theta: (th0 + th1) / 2, armSign: phaseOffset === 0 ? 0 : Math.PI,
+          hue, sat: baseCol[1], light,
+        });
       }
       return segs;
     }
@@ -162,6 +202,29 @@
     const baseA = PAL[SEED % PAL.length];
     const baseB = PAL[(SEED + Math.round(armHueOffset / 60)) % PAL.length];
     arms = [buildArm(0, baseA), buildArm(Math.PI, baseB)];
+
+    // Motion-wave parameters (drawn AFTER every colour/geometry draw above
+    // so the seed->look mapping is unchanged). kPulse/kBreath are wave
+    // numbers in units of the spiral parameter theta: ~2-2.6 crests per
+    // turn. Two constraints pull on that number. Coherence wants it LOW
+    // (adjacent segments, 2*pi/segsPerTurn apart, should sit within ~1
+    // rad of phase so the swell reads as a wave along the ribbon, not
+    // segment-level jitter). Coverage-stationarity wants it HIGH: segment
+    // area grows exponentially with theta, so the OUTER turn dominates
+    // total lit area, and the mix of phases inside that one turn must
+    // stay uniform as the clock advances -- at ~1 crest per turn it does
+    // not (the same aliasing risk quasicrystal.html hit with its radial
+    // wave), at 2+ crests it nearly does. ~2-2.6 satisfies both. Rates
+    // carry a guaranteed minimum magnitude and a random sign.
+    kPulse = rand(2.0, 2.6);
+    omegaPulse = (rng() < 0.5 ? -1 : 1) * rand(1.4, 2.1) * SPEED;
+    kBreath = rand(1.6, 2.2);
+    omegaBreath = (rng() < 0.5 ? -1 : 1) * rand(1.3, 2.0) * SPEED;
+    scaleAmp = 0.24;
+    rotAmp = 0.15;
+    breathAmp = 0.30;
+    slideAmp = 0.30;
+    lightAmp = 6;
   }
 
   // Called at start-up AND every cycleSec. Only rotation resets --
@@ -174,7 +237,11 @@
   let rotAngle0, rotRate;
   function reconfigureRotation() {
     rotAngle0 = rand(0, Math.PI * 2);
-    rotRate = (rng() < 0.5 ? -1 : 1) * rand(0.5, 1.0) * SPEED;
+    // 2026-09-10: 0.42-0.7 rad/s (one revolution in ~9-15s, inside the
+    // lively 4-15s band), down from 0.5-1.0: the per-segment choreography
+    // now supplies the fast frame-to-frame change, and a slower rigid spin
+    // lets the unit-level motion dominate what the viewer sees.
+    rotRate = (rng() < 0.5 ? -1 : 1) * rand(0.42, 0.7) * SPEED;
   }
 
   const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
@@ -201,12 +268,34 @@
 
     for (const arm of arms) {
       for (const s of arm) {
-        ctx.fillStyle = `hsl(${s.hue}, ${s.sat}%, ${s.light}%)`;
+        // Unit choreography (see file header). Both waves are keyed to the
+        // segment's spiral parameter, so phases are spread uniformly along
+        // each arm at every instant (coverage-neutral); the breathing wave
+        // carries the arm's own sign so the two arms move in antiphase.
+        const phP = kPulse * s.theta - omegaPulse * clk;
+        const phB = kBreath * s.theta - omegaBreath * clk + s.armSign;
+        const sP = Math.sin(phP), sB = Math.sin(phB);
+        const sc = 1 + scaleAmp * sP;
+        const ur = rotAmp * Math.cos(phP);
+        const cr = Math.cos(ur), sr = Math.sin(ur);
+        // Breathing (radial, arms in antiphase) plus a SLIDE along the arm
+        // in quadrature with the pulse: segments bunch up ahead of the
+        // swell and spread out behind it, the way a compression wave runs
+        // along a chain. Both are translations of the unit (area-
+        // preserving), and the tangential direction is the radial one
+        // rotated a quarter turn.
+        const off = breathAmp * s.width * sB;
+        const slide = slideAmp * s.width * Math.cos(phP);
+        const ox = s.gx + s.ux * off - s.uy * slide, oy = s.gy + s.uy * off + s.ux * slide;
+        const light = Math.max(30, Math.min(78, s.light + lightAmp * sP));
+        ctx.fillStyle = `hsl(${s.hue}, ${s.sat}%, ${light}%)`;
         ctx.beginPath();
-        ctx.moveTo(s.p1[0], s.p1[1]);
-        ctx.lineTo(s.p2[0], s.p2[1]);
-        ctx.lineTo(s.p3[0], s.p3[1]);
-        ctx.lineTo(s.p4[0], s.p4[1]);
+        for (let i = 0; i < 4; i++) {
+          const q = s.rel[i];
+          const x = ox + (q[0] * cr - q[1] * sr) * sc;
+          const y = oy + (q[0] * sr + q[1] * cr) * sc;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
         ctx.closePath();
         ctx.fill();
       }

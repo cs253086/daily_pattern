@@ -44,6 +44,31 @@
 // and redraws the same list under a rotation transform that resets every
 // cycleSec (see reconfigureRotation()).
 //
+// UNIT CHOREOGRAPHY (2026-09-10). User definition of "dynamic": "dynamic
+// movements with the basic pattern units", not whole-pattern spin and not
+// cutting to a different pattern. Before this, the tiling was computed once
+// and only rotated rigidly (audit-unit-motion: residual 5.8, 22% non-rigid).
+// Now every Penrose triangle also moves RELATIVE to its neighbours, on top
+// of the rigid rotation, driven by two travelling waves keyed to the unit's
+// position on the shared clock (see renderFrame):
+//   - a 5-fold angular wave (tied to the tiling's own symmetry) pulses each
+//     triangle's SCALE about its own centroid (+-22%), drifts it radially
+//     by +-20% of its own size and pulses its lightness (+-7), so five
+//     swelling lobes sweep round the disk;
+//   - a radial wave sweeping through the disk gives each triangle a
+//     micro-ROTATION about its centroid (+-0.18 rad) -- a coherent twist
+//     rippling outward through the tiling.
+// Wave rates have guaranteed minimum magnitude and random sign (periods
+// ~3-5s). Because the waves are keyed to position, unit phases are spread
+// uniformly across the disk at every instant, so total lit coverage (and
+// mean luma) is constant in time -- coverage-neutral by construction, so
+// the brightness-trend regression in validate.js is unaffected (every
+// area/luma-affecting modulation rides the angular wave; see renderFrame
+// for why the radial wave carries only the area-preserving rotation). Hue stays
+// purely SPATIAL (hue affects luma; see CLAUDE.md). All motion parameters
+// are fixed once in initTiling(); reconfigureRotation() still resets only
+// the rigid rotation per cycle.
+//
 // Headless contract (see src/render.js):
 //   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
 //   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
@@ -152,6 +177,8 @@
   }
 
   let triangles, hue0, thinIdx, thickIdx, rotAngle0, rotRate;
+  // Per-unit choreography parameters (see file header), fixed once per video.
+  let omegaAng, omegaRad, kRad, scaleAmp, rotAmp, lightAmp;
 
   // Called ONCE. The triangle list and colour scheme (hue0, thinIdx,
   // thickIdx) never change again after this -- see reconfigureRotation()
@@ -174,8 +201,6 @@
       for (const t of tris) next.push(...splitOne(t));
       tris = next;
     }
-    triangles = tris;
-
     // hue0/thinIdx/thickIdx are picked ONCE per video, not re-rolled every
     // cycle. An earlier version re-rolled them in the same per-cycle
     // function as the rotation reset, reasoning it was just "more variety,
@@ -198,6 +223,47 @@
     hue0 = rng() * 360;
     thinIdx = randInt(0, PAL.length - 1);
     thickIdx = (thinIdx + randInt(2, PAL.length - 2)) % PAL.length;
+
+    // NOTE: everything below draws from rng() AFTER the colour picks above,
+    // so a given seed still produces the same palette choice it did before
+    // the choreography was added (the day seed's look stays reproducible).
+    // Precompute what the per-frame choreography needs: each triangle's
+    // centroid (in polar form too, since the waves are keyed to angle and
+    // radius), its vertices RELATIVE to that centroid (so scale/rotation
+    // can be applied about the unit's own centre), its own size (so the
+    // radial offset is a fraction of the unit, not an absolute pixel
+    // count), and a small per-unit phase jitter so neighbouring triangles
+    // never move in perfect lockstep.
+    triangles = tris.map(([kind, v1, v2, v3]) => {
+      const gx = (v1[0] + v2[0] + v3[0]) / 3, gy = (v1[1] + v2[1] + v3[1]) / 3;
+      const size = Math.max(Math.hypot(v1[0] - v2[0], v1[1] - v2[1]), Math.hypot(v1[0] - v3[0], v1[1] - v3[1]), Math.hypot(v2[0] - v3[0], v2[1] - v3[1]));
+      return {
+        kind, gx, gy,
+        r: Math.hypot(gx, gy), ang: Math.atan2(gy, gx),
+        rel: [[v1[0] - gx, v1[1] - gy], [v2[0] - gx, v2[1] - gy], [v3[0] - gx, v3[1] - gy]],
+        offAmp: size * 0.2,
+        jit: rand(-0.15, 0.15),
+      };
+    });
+
+    // Motion-wave parameters. Both angular rates carry a guaranteed
+    // minimum magnitude and a random sign (never a symmetric range that
+    // could park the whole field near-still), with periods of ~3-5s so
+    // the pulse is obvious at a glance. kRad sets the radial wavelength at
+    // ~0.9-1.3 of the disk radius -- long enough that NEIGHBOURING tiles
+    // sit at similar phase and the tiling visibly flexes as a coherent
+    // sheet (a first cut at 0.35-0.55 R put adjacent tiles 1.6-2.5 rad
+    // apart in phase and the tiling read as loose confetti, found only by
+    // rendering and looking), yet still a full 2*pi across the disk, so
+    // unit phases stay spread and total lit coverage stays constant (see
+    // renderFrame).
+    omegaAng = (rng() < 0.5 ? -1 : 1) * rand(1.2, 2.0) * SPEED;
+    omegaRad = (rng() < 0.5 ? -1 : 1) * rand(1.3, 2.0) * SPEED;
+    kRad = (Math.PI * 2) / (R * rand(0.9, 1.3));
+    scaleAmp = 0.22;
+    rotAmp = 0.18;
+    lightAmp = 7;
+
   }
 
   // Called at start-up AND every cycleSec. Coverage-neutral by
@@ -219,7 +285,14 @@
     // gives every sampled window a larger absolute sweep, so even an
     // unlucky near-self-similar landing still displaces edges enough to
     // register.
-    rotRate = (rng() < 0.5 ? -1 : 1) * rand(0.9, 1.5) * SPEED;
+    // 2026-09-10: slowed from 0.9-1.5 rad/s to 0.42-0.7 rad/s (one
+    // revolution in ~9-15s, still inside the lively 4-15s band). The
+    // per-unit choreography (see file header) now supplies far more
+    // frame-to-frame change than the rigid spin ever did, so the fast
+    // rate is no longer needed to satisfy the motion check -- and a slower
+    // rigid spin lets the unit-level motion dominate what the viewer sees
+    // instead of being swamped by whole-disk rotation.
+    rotRate = (rng() < 0.5 ? -1 : 1) * rand(0.42, 0.7) * SPEED;
   }
 
   const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
@@ -246,9 +319,45 @@
     ctx.lineWidth = Math.max(1, minDim / 720);
     ctx.lineJoin = 'round';
 
-    for (const [kind, v1, v2, v3] of triangles) {
+    for (const tri of triangles) {
+      const { kind, gx, gy, r, ang, rel, offAmp, jit } = tri;
       const isThin = kind === 0 || kind === 1;
       const base = PAL[isThin ? thinIdx : thickIdx];
+
+      // Unit choreography: two travelling waves, both keyed to the unit's
+      // POSITION (so at any instant the phases across the disk are spread
+      // uniformly and the frame-average of every modulation is constant --
+      // coverage-neutral, which is what keeps validate.js's brightness-trend
+      // regression happy) and advanced by the shared clock.
+      //   phA: a 5-fold ANGULAR wave (tied to the tiling's own symmetry,
+      //        like the hue ripple below) -> per-triangle SCALE about its
+      //        own centroid (+-22%), a radial OFFSET of +-20% of the
+      //        unit's size in quadrature, and a small lightness pulse --
+      //        five swelling lobes sweeping around the disk.
+      //   phR: a RADIAL wave sweeping outward/inward through the disk ->
+      //        per-triangle micro-ROTATION about its centroid (+-0.18
+      //        rad), a coherent twist rippling out through the tiling.
+      // WHY this split matters: scale, offset and lightness all change lit
+      // area/luma, so they must ride a wave whose phase distribution over
+      // the disk is STATIONARY in time. The angular wave is exactly that
+      // (five full cycles round the disk at every instant, whatever the
+      // clock says). The radial wave is NOT -- its phase span across the
+      // disk is ~5-6 rad, less than 2*pi, so the area-weighted mix of
+      // phases sloshes with the clock. A first cut that put scale on the
+      // radial wave passed 8 of 9 validator seeds and failed seed 5 with a
+      // projected +88 luma "trend" (a ~4s coverage oscillation aliased by
+      // validate.js's 8 samples), so only the area-preserving rotation
+      // rides the radial wave now.
+      const phA = 5 * ang - omegaAng * clk + jit;
+      const phR = kRad * r - omegaRad * clk + jit;
+      const sA = Math.sin(phA), sR = Math.sin(phR);
+      const s = 1 + scaleAmp * sA;
+      const ur = rotAmp * sR;
+      const cr = Math.cos(ur), sr = Math.sin(ur);
+      const off = offAmp * Math.cos(phA);
+      const ox = gx + (r > 1e-6 ? gx / r : 0) * off;
+      const oy = gy + (r > 1e-6 ? gy / r : 0) * off;
+
       // A smooth periodic function of angle (never a linear sweep of a
       // wrapped atan2 value) -- an earlier version used angFrac*130 where
       // angFrac wrapped 1->0 at one specific angle, which showed up as a
@@ -257,11 +366,15 @@
       // formula alone). sin() is continuous across the wrap by
       // construction, and using 5x the angle ties the colour ripple to the
       // tiling's own 5-fold symmetry instead of an arbitrary frequency.
-      const ang = Math.atan2((v1[1] + v2[1] + v3[1]) / 3, (v1[0] + v2[0] + v3[0]) / 3);
       const hue = ((base[0] + hue0 + 40 * Math.sin(5 * ang)) % 360 + 360) % 360;
-      const light = isThin ? Math.min(80, base[2] + 10) : Math.max(30, base[2] - 8);
+      const light0 = isThin ? Math.min(80, base[2] + 10) : Math.max(30, base[2] - 8);
+      const light = Math.max(28, Math.min(82, light0 + lightAmp * sA));
       ctx.fillStyle = `hsl(${hue}, ${base[1]}%, ${light}%)`;
       ctx.strokeStyle = `hsl(${hue}, ${base[1]}%, ${Math.max(8, light - 30)}%)`;
+
+      const v1 = [ox + (rel[0][0] * cr - rel[0][1] * sr) * s, oy + (rel[0][0] * sr + rel[0][1] * cr) * s];
+      const v2 = [ox + (rel[1][0] * cr - rel[1][1] * sr) * s, oy + (rel[1][0] * sr + rel[1][1] * cr) * s];
+      const v3 = [ox + (rel[2][0] * cr - rel[2][1] * sr) * s, oy + (rel[2][0] * sr + rel[2][1] * cr) * s];
 
       ctx.beginPath();
       ctx.moveTo(v1[0], v1[1]);
