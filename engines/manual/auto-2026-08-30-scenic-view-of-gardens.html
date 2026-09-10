@@ -10,6 +10,49 @@
 <body>
     <canvas id="glcanvas"></canvas>
     <script>
+        // UNIT CHOREOGRAPHY (2026-09-10 wave 2, "dynamic movements with the basic
+        // pattern units", not just a rigid spin). Gemini-promoted engine (theme:
+        // "Scenic View of Gardens"): a swarm of small gold/amber lit cubes -- a
+        // dense central cluster plus a wider outer ring -- orbiting a common
+        // centre under an orbiting camera. Before this pass every cube only
+        // circled at its own fixed rate and spun (audit: residual 4.5 luma; the
+        // camera orbit at 0.5-1.5 rad/s was most of the on-screen motion). The
+        // concept is kept and each cube now has its own choreography, keyed to
+        // its position so the swarm RIPPLES rather than drifting as a block:
+        //   1. ORBITS as before (0.4-1.6 rad/s, random sign), plus an
+        //      EPICYCLIC LOOP per cube (radius 0.35-0.55, period ~3-4.5s) so
+        //      neighbours swing in and out past each other.
+        //   2. BOB WAVE travelling around the ring: y += A*sin(2*angle +
+        //      k*radius - omega*t), amplitude 0.5-0.7, period ~3.5-5s -- a
+        //      wave rolls through the swarm, phases spanning many cycles across
+        //      the field so the mean height is flat.
+        //   3. SCALE PULSE +-18% with per-cube phases assigned by RANK along a
+        //      second travelling wave (exactly N equally spaced phases: the sum
+        //      is identically zero, total lit area constant by construction).
+        //   4. SPIN 0.5-2.0 rad/s on three axes (as before), rates varying with
+        //      a third wave (+-0.6 rad lead/lag) so the spinning is non-uniform
+        //      across the swarm.
+        // Also fixed: additive blending removed (overlapping cubes summed toward
+        // white); fragment colour clamped (min(c, 0.86)); the per-frame colour
+        // "breathing" mutated the shared palette arrays in place (each cube's
+        // colour was a reference to a palette entry, so the sin() offsets
+        // accumulated frame after frame and every channel random-walked to 0 or
+        // 1) -- colours are now fixed per cube at init with a small per-cube
+        // hue/lightness variation; the light follows the camera (a fixed
+        // world light left dark faces toward the eye for half of each
+        // circuit); colors=h,s,l;... (the engine contract's
+        // palette override) is honoured; cube count is 44-60 at density 1 (was
+        // 20-150, i.e. a different video every seed); cubes are larger; the
+        // camera orbit is 0.25-0.4 rad/s (period ~16-25s -- the old 0.5-1.5
+        // rad/s whole-scene whirl was rigid motion, not unit motion) with the
+        // camera at a distance where the nearest cube cannot clip (on paper:
+        // vertical reach 5.44 -- outer-ring height 3 + bob 0.7 + a pulsed
+        // cube's half-diagonal 1.74 -- at near depth 9.55 needs distance
+        // >= 22.7 at 45 deg fov; radius 23). Context-loss handling and preserveDrawingBuffer:true kept;
+        // READY is now held back through the startup context-loss window the
+        // way solids3d.html does (context created first, then a 300ms wait
+        // plus a recovery poll). Deterministic: seeded PRNG only, frame-
+        // counter clock, no Date/Math.random/rAF.
         // --- Global State and Utils ---
         window.READY = false;
         window.TOTAL_FRAMES = 0;
@@ -44,6 +87,8 @@
         const MAX_CUBE_COUNT = 150; // Increased for density
         let cubeCount;
         let cubes = [];
+        let paletteHSL = [];
+        let waves = null;
 
         // Colors
         let palette = [];
@@ -307,7 +352,8 @@
             varying lowp vec4 v_color;
 
             void main() {
-                gl_FragColor = v_color;
+                // soft clamp: no face can wash out to white (house style)
+                gl_FragColor = vec4(min(v_color.rgb, vec3(0.86)), 1.0);
             }
         `;
 
@@ -331,8 +377,7 @@
 
             gl.enable(gl.DEPTH_TEST);
             gl.depthFunc(gl.LEQUAL);
-            gl.enable(gl.BLEND);
-            gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // Additive blending
+            gl.disable(gl.BLEND); // opaque: additive blending summed overlapping cubes toward white
 
             const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
             program = shaderProgram;
@@ -520,7 +565,15 @@
             const up = [0, 1, 0];
             mat4.lookAt(viewMatrix, cameraPosition, target, up);
 
-            gl.uniform3fv(u_lightDir_loc, normalizeVector(lightDir));
+            // Light follows the camera (from above-right of the eye): a fixed
+            // world light left the cubes' dark faces toward the camera for
+            // half of every circuit (dull frames, and a real brightness swing
+            // per circuit). Per-face shading still varies with each cube's spin.
+            gl.uniform3fv(u_lightDir_loc, normalizeVector([
+                camX / cameraRadius + 0.4 * Math.cos(cameraAngle) + lightDir[0] * 0.15,
+                cameraHeight / cameraRadius + 0.7,
+                camZ / cameraRadius - 0.4 * Math.sin(cameraAngle) + lightDir[2] * 0.15,
+            ]));
             gl.uniform3fv(u_lightColor_loc, lightColor);
             gl.uniform3fv(u_ambientColor_loc, ambientColor);
             gl.uniform3fv(u_viewPos_loc, cameraPosition);
@@ -535,17 +588,17 @@
             gl.vertexAttribPointer(program.attribLocations.normal, 3, gl.FLOAT, false, 0, 0);
             gl.enableVertexAttribArray(program.attribLocations.normal);
 
+            const modelMatrix = mat4.create();
+            const modelViewProjectionMatrix = mat4.create();
             for (let i = 0; i < cubeCount; i++) {
                 const cube = cubes[i];
-                const modelMatrix = mat4.create();
                 mat4.identity(modelMatrix);
                 mat4.translate(modelMatrix, modelMatrix, cube.position);
-                mat4.rotateX(modelMatrix, modelMatrix, cube.rotation[0]);
-                mat4.rotateY(modelMatrix, modelMatrix, cube.rotation[1]);
+                mat4.rotateX(modelMatrix, modelMatrix, cube.rotation[0] + cube.surge);
+                mat4.rotateY(modelMatrix, modelMatrix, cube.rotation[1] + cube.surge * 0.6);
                 mat4.rotateZ(modelMatrix, modelMatrix, cube.rotation[2]);
-                mat4.scale(modelMatrix, modelMatrix, [cube.scale, cube.scale, cube.scale]);
+                mat4.scale(modelMatrix, modelMatrix, [cube.curScale, cube.curScale, cube.curScale]);
 
-                const modelViewProjectionMatrix = mat4.create();
                 mat4.multiply(modelViewProjectionMatrix, projectionMatrix, viewMatrix);
                 mat4.multiply(modelViewProjectionMatrix, modelViewProjectionMatrix, modelMatrix);
 
@@ -566,6 +619,13 @@
         function getParam(name, defaultValue) {
             const urlParams = new URLSearchParams(window.location.search);
             return urlParams.get(name) || defaultValue;
+        }
+
+        function parseColorsParam() {
+            const raw = new URLSearchParams(window.location.search).get('colors');
+            if (!raw) return null;
+            const out = raw.split(';').map(t => t.split(',').map(Number)).filter(a => a.length === 3 && a.every(Number.isFinite));
+            return out.length >= 2 ? out : null;
         }
 
         function HSLtoRGB(h, s, l) {
@@ -611,29 +671,53 @@
             dt = 1 / fps;
             window.TOTAL_FRAMES = Math.round(duration * fps);
 
-            // Derived from photo inspiration: gold/amber, with hints of orange/red
-            // Base hues: gold (around 40-50), orange (around 20-30), reddish-orange (around 10-20)
-            const baseHue1 = 40 + prng() * 10; // Gold-ish
-            const baseHue2 = (baseHue1 + 60 + prng() * 20) % 360; // Offset hue
-            const baseHue3 = (baseHue1 - 60 - prng() * 20 + 360) % 360; // Other offset hue
-            
-            palette = [
-                HSLtoRGB(baseHue1, 80 + prng() * 10, 50 + prng() * 10), // Gold
-                HSLtoRGB(baseHue2, 70 + prng() * 10, 45 + prng() * 10), // Orange/Reddish
-                HSLtoRGB(baseHue3, 75 + prng() * 10, 55 + prng() * 10)  // Slightly different gold/amber
-            ];
+            // Palette: colors=h,s,l;... override (engine contract) if given,
+            // else the photo-derived gold/amber/orange family.
+            const forced = parseColorsParam();
+            if (forced) {
+                palette = forced.map(([h, sat, l]) => HSLtoRGB(h, sat, Math.min(l, 62)));
+                paletteHSL = forced.map(([h, sat, l]) => [h, sat, Math.min(l, 62)]);
+            } else {
+                const baseHue1 = 40 + prng() * 10; // Gold-ish
+                const baseHue2 = (baseHue1 + 60 + prng() * 20) % 360; // Offset hue
+                const baseHue3 = (baseHue1 - 60 - prng() * 20 + 360) % 360; // Other offset hue
+                paletteHSL = [
+                    [baseHue1, 82 + prng() * 10, 52 + prng() * 8],
+                    [baseHue2, 78 + prng() * 10, 50 + prng() * 8],
+                    [baseHue3, 80 + prng() * 10, 54 + prng() * 8],
+                ];
+                palette = paletteHSL.map(([h, sat, l]) => HSLtoRGB(h, sat, l));
+            }
 
-            // Normalize light direction for shader
-            lightDir = [prng() * 2 - 1, 0.5 + prng() * 0.5, prng() * 2 - 1]; // More consistent Y direction
-            lightColor = [0.9 + prng() * 0.1, 0.8 + prng() * 0.1, 0.6 + prng() * 0.1]; // Warm gold/amber light
-            ambientColor = [0.08 + prng() * 0.02, 0.07 + prng() * 0.02, 0.04 + prng() * 0.02]; // Darker ambient
+            // Light: a small seeded offset on top of the camera-following
+            // direction (set per frame in drawScene)
+            lightDir = [prng() * 2 - 1, 0.5 + prng() * 0.5, prng() * 2 - 1];
+            lightColor = [0.9 + prng() * 0.1, 0.85 + prng() * 0.1, 0.7 + prng() * 0.1];
+            ambientColor = [0.24, 0.22, 0.18];
 
-            cubeCount = Math.floor(20 + prng() * (MAX_CUBE_COUNT - 20) * density);
-            
-            // Camera setup
-            cameraRadius = 15 + prng() * 5; // Fixed camera radius
-            cameraHeight = 5 + prng() * 3; // Fixed camera height
-            cameraSpeed = (0.5 + prng() * 1.0) * speed; // Radians per second
+            // Cube count: a narrow band (was 20-150, i.e. a different video
+            // every seed and a different render cost every seed)
+            cubeCount = Math.max(16, Math.min(MAX_CUBE_COUNT, Math.round((44 + prng() * 16) * density)));
+
+            // Camera: fixed radius/height, slow orbit (the unit motion is the
+            // point now, not a whole-scene whirl)
+            cameraRadius = 23.0;
+            cameraHeight = 5 + prng() * 3;
+            cameraSpeed = (0.25 + prng() * 0.15) * speed * (prng() < 0.5 ? 1 : -1);
+            cameraAngle = prng() * Math.PI * 2;
+
+            // Shared choreography waves (guaranteed minimum rate, random sign)
+            const sgn = () => (prng() < 0.5 ? -1 : 1);
+            waves = {
+                bobAmp: 0.5 + prng() * 0.2,
+                bobW: sgn() * (2 * Math.PI) / (3.5 + prng() * 1.5),   // period 3.5-5s
+                bobKr: sgn() * (0.6 + prng() * 0.5),                  // rad per unit radius
+                pulseAmp: 0.18,
+                pulseW: sgn() * (2 * Math.PI) / (3.0 + prng() * 1.5), // period 3-4.5s
+                surgeAmp: 0.6,
+                surgeW: sgn() * (2 * Math.PI) / (3.0 + prng() * 2.0),
+                surgeK: sgn() * (0.8 + prng() * 0.6),
+            };
 
             initCubes();
         }
@@ -642,97 +726,94 @@
             cubes = [];
             const centralClusterRadius = 4.0;
             const outerOrbitRadius = 6.0;
+            const TWO_PI = Math.PI * 2;
+            const sgn = () => (prng() < 0.5 ? -1 : 1);
 
             for (let i = 0; i < cubeCount; i++) {
                 const colorIndex = Math.floor(prng() * palette.length);
-                const baseScale = 0.2 + prng() * 0.3 * density;
-                const scaleVariance = (prng() * 0.5 + 0.5) * baseScale; // Scale from 0.5*base to 1*base
-                
-                let position;
-                let orbitRadius;
+                // fixed per-cube colour: palette entry with a small hue/lightness
+                // variation (no per-frame mutation -- see the header)
+                const [h, sat, l] = paletteHSL[colorIndex];
+                const color = HSLtoRGB((h + (prng() * 2 - 1) * 12 + 360) % 360, sat, Math.min(64, l + (prng() * 2 - 1) * 6));
+                const baseScale = 0.5 + prng() * 0.35 * density; // 0.5-0.85 (was 0.2-0.5)
+
+                let orbitRadius, yBase;
                 if (prng() < 0.6) { // More cubes in a central cluster
-                    const angle = prng() * Math.PI * 2;
-                    const r = prng() * centralClusterRadius;
-                    position = [
-                        r * Math.cos(angle) * (0.5 + prng() * 0.5),
-                        (prng() * 2 - 1) * 2, // Y position
-                        r * Math.sin(angle) * (0.5 + prng() * 0.5)
-                    ];
-                    orbitRadius = r;
+                    orbitRadius = 1.0 + prng() * (centralClusterRadius - 1.0);
+                    yBase = (prng() * 2 - 1) * 2;
                 } else { // Some cubes in a wider orbit
-                    const angle = prng() * Math.PI * 2;
-                    const r = outerOrbitRadius + prng() * 3;
-                    position = [
-                        r * Math.cos(angle),
-                        (prng() * 2 - 1) * 3,
-                        r * Math.sin(angle)
-                    ];
-                    orbitRadius = r;
+                    orbitRadius = outerOrbitRadius + prng() * 3;
+                    yBase = (prng() * 2 - 1) * 3;
                 }
 
-                const orbitSpeed = (0.4 + prng() * 1.2) * speed * (prng() < 0.5 ? 1 : -1); // Lively pace
-                const rotSpeedX = (0.5 + prng() * 1.5) * speed * (prng() < 0.5 ? 1 : -1);
-                const rotSpeedY = (0.5 + prng() * 1.5) * speed * (prng() < 0.5 ? 1 : -1);
-                const rotSpeedZ = (0.5 + prng() * 1.5) * speed * (prng() < 0.5 ? 1 : -1);
+                const orbitSpeed = (0.4 + prng() * 1.2) * speed * sgn(); // Lively pace
+                const rotSpeedX = (0.5 + prng() * 1.5) * speed * sgn();
+                const rotSpeedY = (0.5 + prng() * 1.5) * speed * sgn();
+                const rotSpeedZ = (0.5 + prng() * 1.5) * speed * sgn();
 
                 cubes.push({
-                    position: position,
-                    initialAngle: Math.atan2(position[2], position[0]),
-                    orbitRadius: Math.sqrt(position[0]*position[0] + position[2]*position[2]),
+                    position: [0, 0, 0],
+                    initialAngle: prng() * TWO_PI,
+                    orbitRadius: orbitRadius,
+                    yBase: yBase,
                     orbitSpeed: orbitSpeed,
-                    rotation: [prng() * Math.PI * 2, prng() * Math.PI * 2, prng() * Math.PI * 2],
+                    // epicyclic loop (horizontal), period ~3-4.5s
+                    loopR: 0.35 + prng() * 0.2,
+                    loopW: sgn() * (TWO_PI / (3.0 + prng() * 1.5)),
+                    loopPhase: prng() * TWO_PI,
+                    rotation: [prng() * TWO_PI, prng() * TWO_PI, prng() * TWO_PI],
                     rotationSpeed: [rotSpeedX, rotSpeedY, rotSpeedZ],
-                    color: palette[colorIndex],
-                    scale: scaleVariance
+                    color: color,
+                    scale: baseScale,
+                    curScale: baseScale,
+                    surge: 0,
+                    pulsePhase: 0,
                 });
             }
+            // Pulse phases by RANK along a wave direction through the swarm:
+            // exactly N equally spaced phases (sum identically zero) that still
+            // read as a travelling sweep across the field.
+            const kd = [sgn() * (0.5 + prng() * 0.5), sgn() * (0.5 + prng() * 0.5)];
+            const order = cubes.map((c, idx) => ({ idx, v: kd[0] * Math.cos(c.initialAngle) * c.orbitRadius + kd[1] * Math.sin(c.initialAngle) * c.orbitRadius }))
+                .sort((a, b) => a.v - b.v);
+            order.forEach((o, rank) => { cubes[o.idx].pulsePhase = TWO_PI * rank / cubes.length; });
         }
 
         function updateSimulation() {
             const time = window.currentFrame * dt;
 
             // Camera movement
-            cameraAngle += cameraSpeed * dt * speed;
+            cameraAngle += cameraSpeed * dt;
             if (cameraAngle >= Math.PI * 2) cameraAngle -= Math.PI * 2;
+            if (cameraAngle < 0) cameraAngle += Math.PI * 2;
 
-            // Cube movement and rotation
+            const w = waves;
             for (let i = 0; i < cubeCount; i++) {
                 const cube = cubes[i];
 
-                // Orbital movement (mostly in XZ plane)
+                // 1. orbit (XZ plane) + epicyclic loop
                 const currentAngle = cube.initialAngle + time * cube.orbitSpeed;
-                cube.position[0] = cube.orbitRadius * Math.cos(currentAngle);
-                cube.position[2] = cube.orbitRadius * Math.sin(currentAngle);
-                // Simple oscillating Y movement for some cubes
-                if (i % 3 === 0) {
-                     cube.position[1] = 2 * Math.sin(time * 0.5 * speed + cube.initialAngle);
-                } else if (i % 2 === 0) {
-                     cube.position[1] = 1 * Math.cos(time * 0.7 * speed + cube.initialAngle);
-                }
+                const lp = cube.loopPhase + cube.loopW * time;
+                const x = cube.orbitRadius * Math.cos(currentAngle) + cube.loopR * Math.cos(lp);
+                const z = cube.orbitRadius * Math.sin(currentAngle) + cube.loopR * Math.sin(lp);
+                // 2. bob wave travelling around the ring and outward
+                const y = cube.yBase + w.bobAmp * Math.sin(2 * currentAngle + w.bobKr * cube.orbitRadius - w.bobW * time);
+                cube.position[0] = x;
+                cube.position[1] = y;
+                cube.position[2] = z;
 
+                // 3. scale pulse (rank-spread phases)
+                cube.curScale = cube.scale * (1 + w.pulseAmp * Math.sin(w.pulseW * time + cube.pulsePhase));
 
-                cube.rotation[0] += cube.rotationSpeed[0] * dt * speed;
-                cube.rotation[1] += cube.rotationSpeed[1] * dt * speed;
-                cube.rotation[2] += cube.rotationSpeed[2] * dt * speed;
-
+                // 4. spin + surge wave keyed to position
+                cube.rotation[0] += cube.rotationSpeed[0] * dt;
+                cube.rotation[1] += cube.rotationSpeed[1] * dt;
+                cube.rotation[2] += cube.rotationSpeed[2] * dt;
                 for (let j = 0; j < 3; j++) {
                     if (cube.rotation[j] >= Math.PI * 2) cube.rotation[j] -= Math.PI * 2;
                     if (cube.rotation[j] < 0) cube.rotation[j] += Math.PI * 2;
                 }
-
-                // Gently modulate cube color/saturation over time
-                const baseColor = palette[Math.floor(i % palette.length)];
-                const hueShift = Math.sin(time * 0.1 * speed + i) * 10;
-                const satShift = Math.sin(time * 0.2 * speed + i * 0.5) * 5;
-                const lightShift = Math.sin(time * 0.15 * speed + i * 0.2) * 5;
-
-                // Re-calculating HSL for modulation (simplified, not exact reverse transform)
-                // This is a rough way to shift HSL for a given RGB base
-                // For a more accurate shift, convert RGB to HSL, modify, then back to RGB
-                // For now, simple direct shifts on RGB components to get a 'breathing' effect
-                cube.color[0] = Math.max(0, Math.min(1, baseColor[0] + Math.sin(time * 0.2 + i * 0.1) * 0.05));
-                cube.color[1] = Math.max(0, Math.min(1, baseColor[1] + Math.sin(time * 0.15 + i * 0.2) * 0.05));
-                cube.color[2] = Math.max(0, Math.min(1, baseColor[2] + Math.sin(time * 0.25 + i * 0.3) * 0.05));
+                cube.surge = w.surgeAmp * Math.sin(w.surgeK * (x + z) - w.surgeW * time);
             }
         }
 
@@ -750,50 +831,46 @@
         };
 
         // --- Context Loss/Restore Handling ---
+        let contextLost = false;
         function handleContextLost(event) {
-            event.preventDefault();
-            console.warn('WebGL context lost. Attempting to restore...');
-            // Stop drawing, wait for restore
-            window.READY = false;
+            event.preventDefault(); // required for the context to be restorable
+            contextLost = true;
         }
 
         function handleContextRestored() {
-            console.log('WebGL context restored. Re-initializing...');
-            // Re-initialize all GL resources
+            // Re-initialize all GL resources and replay the simulation to the
+            // current frame so the state matches an uninterrupted run.
             if (initWebGL()) {
-                initParams(); // Re-seed to ensure same state as before loss if possible
-                // Re-advance frames to the current time to restore state
-                // Note: currentFrame would not have been reset by the renderer
+                initParams();
                 const framesToCatchUp = window.currentFrame;
-                window.currentFrame = 0; // Reset for re-simulation
-                for (let i = 0; i < framesToCatchUp; i++) {
-                    updateSimulation();
-                }
-                drawScene(); // Draw the current state immediately after restore
-                window.READY = true;
-                console.log('WebGL context re-initialized and ready.');
-            } else {
-                console.error('Failed to re-initialize WebGL context.');
+                window.currentFrame = 0;
+                for (let i = 0; i < framesToCatchUp; i++) { updateSimulation(); window.currentFrame++; }
+                drawScene();
+                contextLost = false;
             }
         }
 
         // --- Initialization ---
+        // Same startup-only context-loss grace period as solids3d.html: create
+        // the context first, give an early spurious loss a chance to fire and
+        // be recovered, then declare READY.
         function initialize() {
-            // Give a short delay for potential early context loss to fire
-            setTimeout(() => {
-                const canvasElement = document.getElementById('glcanvas');
-                canvasElement.addEventListener('webglcontextlost', handleContextLost, false);
-                canvasElement.addEventListener('webglcontextrestored', handleContextRestored, false);
+            const canvasElement = document.getElementById('glcanvas');
+            canvasElement.addEventListener('webglcontextlost', handleContextLost, false);
+            canvasElement.addEventListener('webglcontextrestored', handleContextRestored, false);
 
-                if (initWebGL()) {
-                    initParams();
-                    drawScene(); // Initial draw
-                    window.READY = true;
-                    console.log('Engine ready.');
-                } else {
-                    console.error('Initial WebGL setup failed.');
+            if (!initWebGL()) { console.error('Initial WebGL setup failed.'); return; }
+            initParams();
+            drawScene(); // Initial draw
+
+            (async () => {
+                await new Promise((r) => setTimeout(r, 300));
+                const deadline = Date.now() + 1500;
+                while (contextLost && Date.now() < deadline) {
+                    await new Promise((r) => setTimeout(r, 20));
                 }
-            }, 300); // 300ms delay
+                window.READY = true;
+            })();
         }
 
         document.addEventListener('DOMContentLoaded', initialize);

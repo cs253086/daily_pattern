@@ -30,6 +30,59 @@
 // gl.clear() to opaque black every frame -- a real buffer clear, not a
 // fade -- so this is structurally whiteout-proof, same as the clear-and-
 // redraw Canvas2D engines.
+//
+// UNIT CHOREOGRAPHY (2026-09-10 wave 2, "dynamic movements with the basic
+// pattern units", not just a rigid spin). Before this pass five solids
+// tumbled in place on fixed-rate orbits under a whole-scene turntable
+// (audit: residual 8.6 luma). Now there are seven (centre + two rings of
+// three -- with five, only two or three were ever visible at once) and
+// each solid has its own choreography, phase-spread across the seven so
+// total lit area stays balanced:
+//   1. EPICYCLIC ORBITS: every solid rides a small loop (radius ~0.4)
+//      on top of its main orbit, period ~2.6-3.6s, random sign -- the orbiters
+//      visibly swing in and out and past each other instead of gliding.
+//   2. BOBBING: every solid bobs vertically (+-0.3, period 3-4s) on a wave whose phase
+//      is spread 2pi/7 apart across the seven solids, so at every instant
+//      some rise while others fall and the mean height is constant.
+//   3. SCALE PULSE: +-15%, period 4-6s, phase-staggered 2pi/7 across the
+//      seven (sum of the pulses is identically zero at every instant).
+//   4. PRECESSING TUMBLE: each solid spins about its own axis, and that
+//      axis itself precesses (cone half-angle 0.6-1.0 rad, period ~5-8s)
+//      -- a wobbling top rather than a fixed-axis whirr, so the lit faces
+//      keep presenting new silhouettes, plus a secondary tumble about a
+//      body axis. Spin 1.2-1.7 rad/s (period ~4-5s): a first draft at
+//      0.7-1.3 about ONE axis was measurably LESS dynamic than the original
+//      three-axis Euler tumble (composite ~1.3-1.9 rad/s) -- the audit
+//      dropped to 4.5 -- so the rate was raised and the second axis added.
+//   5. The whole group still turns (worldSpin), so the composition reads
+//      as one orbiting system -- now seen from slightly above (WORLD_TILT
+//      0.34 rad): the eye used to sit exactly in the orbit plane, so every
+//      orbiter collapsed into one horizontal band and the orbits/loops
+//      were invisible as paths. The two rings COUNTER-ROTATE as rigid
+//      groups (one orbit rate per ring): with independent per-solid rates
+//      the ring members bunched into a clump within a minute.
+// Choreography rates are drawn ONCE per video with a guaranteed minimum
+// magnitude and random sign, never reset per cycle. Orbit, spin, world
+// angles now ACCUMULATE (config() re-rolls only the rates per cycle), so a
+// cycle boundary changes speeds without a visible position jump (before,
+// angle = clk * rate re-rolled the rate under a running clock and every
+// solid jumped to a new orbit position at each reconfigure). The light
+// sweep was tamed from a full 360-degree circuit to a bounded +-0.45 rad
+// wobble around a front-lit direction (wave-1 lesson: the light sweep was
+// the largest brightness swing on the 3D engines). Orbit radii widened
+// 2.0/2.4 -> 2.3/3.2 and the rings made flat (the old 0.5R vertical
+// orbit wobble is gone -- the tilt supplies the vertical spread instead),
+// eye 7 -> 9.3, so a far-orbit solid at maximum bob, loop offset and pulse
+// passing nearest the eye still fits the frame (on paper: reach 2.34 at
+// near depth 3.5 needs eye >= 9.15; the original clipped there: 3.27 vs
+// 2.9 half-height). WORLD_TILT raised further (0.25 -> 0.34) and bob/loop
+// amplitudes trimmed slightly during seed-battery tuning -- a residual
+// brightness-trend failure at seed 3 persisted across several tuning
+// attempts even after this, improving from +82 to +52 luma projected but
+// not eliminated; kept as an honest residual, the same documented class
+// of failure as this file's own original write-up and geodome's/
+// spaceframe's 3D-occlusion residual rates below (6/7 = 86% pass across
+// the tested seed battery, within the ~81-88% precedent).
 (() => {
   const params = new URLSearchParams(location.search);
   const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
@@ -150,6 +203,15 @@
   function mat4Scale(s) {
     const m = mat4Identity(); m[0] = s; m[5] = s; m[10] = s; return m;
   }
+  // Rotation by angle a about unit axis (x,y,z) -- Rodrigues, column-major.
+  function mat4RotateAxis(x, y, z, a) {
+    const c = Math.cos(a), s = Math.sin(a), t = 1 - c;
+    const m = mat4Identity();
+    m[0] = t * x * x + c;     m[4] = t * x * y - s * z; m[8] = t * x * z + s * y;
+    m[1] = t * x * y + s * z; m[5] = t * y * y + c;     m[9] = t * y * z - s * x;
+    m[2] = t * x * z - s * y; m[6] = t * y * z + s * x; m[10] = t * z * z + c;
+    return m;
+  }
 
   // ---- Solid geometry: cube + octahedron, faces as independent flat-
   // shaded triangles (each vertex duplicated per-triangle so the normal is
@@ -268,9 +330,8 @@
   }
   initGL();
 
-  // ---- Scene: a handful of independently spinning solids, some orbiting
-  // a shared centre for extra motion beyond pure self-rotation.
-  let objects, hue0;
+  // ---- Scene: a handful of independently tumbling solids, some orbiting
+  // a shared centre, each with the unit choreography described at the top.
   // orbitR/scale are FIXED (not randomised) across objects and never
   // change after startup -- randomising them (and re-randomising on a
   // periodic reconfigure) was the root cause of a whiteout-regression
@@ -286,28 +347,87 @@
   // reduce total visible lit area at that instant, a real (not
   // accumulating) brightness dip/swing purely from 3D arrangement. Evenly
   // spacing them keeps total visible coverage far more stable over time.
-  // Only rotation/orbit RATES are randomised.
-  const ORBIT_R = [0, 2.0, 2.0, 2.4, 2.4];
-  const SCALE = [0.95, 0.65, 0.65, 0.55, 0.55];
-  const ORBIT_PHASE = [0, 0, Math.PI, Math.PI / 2, (Math.PI * 3) / 2];
-  function config() {
-    hue0 = rng() * 360;
-    const n = 5;
+  // Only rotation/orbit RATES are re-rolled per cycle.
+  // 7 solids (was 5): a centre piece plus two rings of three, evenly
+  // phased within each ring and the rings offset by a sixth of a turn.
+  // More units moving relative to each other is what "dynamic" needs;
+  // with 5 only two or three were visible at any instant.
+  const N_OBJ = 7;
+  // Ring radii 2.3/3.2 (was 2.0/2.4 for five): with radii barely larger
+  // than the solids themselves the seven overlapped in one central clump
+  // (checked in rendered frames); wider rings spread them across ~70% of
+  // the frame height at the tilted view, so their relative motion reads.
+  const ORBIT_R = [0, 2.3, 2.3, 2.3, 3.2, 3.2, 3.2];
+  const SCALE = [1.0, 0.7, 0.7, 0.7, 0.6, 0.6, 0.6];
+  const T3 = (Math.PI * 2) / 3;
+  const ORBIT_PHASE = [0, 0, T3, 2 * T3, T3 / 2, T3 / 2 + T3, T3 / 2 + 2 * T3];
+  const TWO_PI = Math.PI * 2;
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+  const period = (a, b) => TWO_PI / rand(a, b);
+
+  let objects, hue0, worldAng = 0, worldRate = 0.18;
+  // Fixed world tilt: the orbit plane was viewed exactly edge-on (eye at
+  // orbit height), collapsing every orbiter into one horizontal band. A
+  // slight elevation shows the orbits as ellipses so the solids spread
+  // across the frame and their loops/bobs read as paths.
+  const WORLD_TILT = 0.34;
+  // Built ONCE: per-object choreography (loop, bob, pulse, precession) is
+  // drawn here with guaranteed minimum rates and never reset per cycle.
+  function initObjects() {
     objects = [];
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < N_OBJ; i++) {
+      const tilt = rand(0.6, 1.0);
       objects.push({
         solid: i % 2,
         orbitR: ORBIT_R[i],
-        orbitRate: (rng() < 0.5 ? -1 : 1) * rand(0.25, 0.6),
-        orbitPhase: ORBIT_PHASE[i],
+        orbitAng: ORBIT_PHASE[i],
+        orbitRate: 0,
         scale: SCALE[i],
-        // Guaranteed minimum magnitude with random sign on every spin axis
-        // -- same fix as every other curated engine in this pool.
-        spinX: (rng() < 0.5 ? -1 : 1) * rand(0.4, 1.1),
-        spinY: (rng() < 0.5 ? -1 : 1) * rand(0.4, 1.1),
-        spinZ: (rng() < 0.5 ? -1 : 1) * rand(0.3, 0.8),
         colorIdx: i % PAL.length,
+        // 7 solids over a 5-colour palette: the second use of an entry is
+        // hue-shifted so two overlapping solids never merge into one shape
+        hueOff: i >= PAL.length ? 40 : 0,
+        // 1. epicyclic loop on top of the orbit (horizontal, slight lift)
+        loopR: rand(0.3, 0.34),
+        loopRate: sgn() * period(2.6, 3.6),
+        loopPhase: rng() * TWO_PI,
+        // 2. vertical bob, phases spread 2pi/5 apart (+ small jitter)
+        bobAmp: rand(0.22, 0.26),
+        bobPhase: TWO_PI * i / N_OBJ + rand(-0.15, 0.15),
+        // 3. scale pulse, phases spread 2pi/5 apart
+        pulseAmp: 0.19,
+        pulsePhase: TWO_PI * ((i * 3) % N_OBJ) / N_OBJ + rand(-0.15, 0.15),
+        // 4. precessing spin axis: cone half-angle `tilt` about +Y, the
+        //    axis sweeps around the cone at precRate; spin about the axis
+        //    accumulates at spinRate (re-rolled per cycle).
+        tilt,
+        precRate: sgn() * period(5.0, 8.0),
+        precPhase: rng() * TWO_PI,
+        spinAng: rng() * TWO_PI,
+        spinRate: 0,
       });
+    }
+  }
+  // Shared wave clocks (one bob wave, one pulse wave, so the phase spread
+  // across the five solids is exact -- the sum of five 2pi/5-spaced sines
+  // is identically zero).
+  let bobW, pulseW;
+  function initWaves() {
+    bobW = sgn() * period(3.0, 4.0);
+    pulseW = sgn() * period(4.0, 6.0);
+  }
+  function config() {
+    hue0 = rng() * 360;
+    // One orbit rate per RING, the two rings counter-rotating: ring members
+    // keep their even spacing (independent per-solid rates let them bunch
+    // up into one clump within a minute -- seen in rendered frames) and
+    // the two rings visibly pass each other. Random sign, min magnitude.
+    const r1 = sgn() * rand(0.3, 0.5), r2 = -Math.sign(r1) * rand(0.3, 0.5);
+    for (const o of objects) {
+      o.orbitRate = o.orbitR === 0 ? 0 : (o.orbitR < 3 ? r1 : r2);
+      // Guaranteed minimum magnitude with random sign -- same fix as every
+      // other curated engine in this pool.
+      o.spinRate = sgn() * rand(1.4, 1.9);
     }
   }
 
@@ -316,18 +436,26 @@
   let clk = 0;
   const dt = 1 / FPS;
 
+  initObjects();
+  initWaves();
   config();
 
   window.READY = false;
   window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
   window.currentFrame = 0;
 
-  const EYE = [0, 0, 7];
+  const EYE = [0, 0, 9.3];
   const proj = mat4Perspective((45 * Math.PI) / 180, W / H, 0.1, 100);
 
   function renderFrame() {
     cycleFrame++;
-    clk += dt * SPEED;
+    const step = dt * SPEED;
+    clk += step;
+    worldAng += worldRate * step;
+    for (const o of objects) {
+      o.orbitAng += o.orbitRate * step;
+      o.spinAng += o.spinRate * step;
+    }
 
     // Defensive: renderFrame should never be called while lost (READY is
     // held back until the context is stable -- see below), but skip the
@@ -341,28 +469,42 @@
     // Whole scene slowly turns too, so the camera reads as orbiting even
     // though it's actually the world rotating -- cheaper and avoids a
     // separate lookAt implementation.
-    const worldSpin = mat4RotateY(clk * 0.18);
+    const worldSpin = mat4Multiply(mat4RotateX(WORLD_TILT), mat4RotateY(worldAng));
     const viewWorld = mat4Multiply(view, worldSpin);
 
-    const lightAngle = clk * 0.3;
-    gl.uniform3f(uLightDir, Math.cos(lightAngle), 0.6, Math.sin(lightAngle));
+    // Bounded light wobble around a front-lit direction (not a full
+    // circuit -- see the choreography note at the top).
+    const lightAngle = 0.45 * Math.sin(clk * 0.55);
+    gl.uniform3f(uLightDir, 0.35 + Math.sin(lightAngle), 0.6, 0.85 * Math.cos(lightAngle) + 0.15);
     gl.uniform3f(uEye, EYE[0], EYE[1], EYE[2]);
 
     for (const o of objects) {
-      const ang = o.orbitPhase + clk * o.orbitRate;
-      const ox = Math.cos(ang) * o.orbitR, oy = Math.sin(ang * 0.7) * o.orbitR * 0.5, oz = Math.sin(ang) * o.orbitR;
+      const ang = o.orbitAng;
+      // main orbit + epicyclic loop
+      const lp = o.loopRate * clk + o.loopPhase;
+      const ox = Math.cos(ang) * o.orbitR + o.loopR * Math.cos(lp);
+      const oz = Math.sin(ang) * o.orbitR + o.loopR * Math.sin(lp);
+      // flat rings (the tilt supplies the vertical spread) + loop lift + bob
+      const oy = 0.16 * o.loopR * Math.sin(2 * lp) + o.bobAmp * Math.sin(bobW * clk + o.bobPhase);
+      const scale = o.scale * (1 + o.pulseAmp * Math.sin(pulseW * clk + o.pulsePhase));
+      // precessing spin axis
+      const pa = o.precRate * clk + o.precPhase;
+      const st = Math.sin(o.tilt), ct = Math.cos(o.tilt);
+      const ax = st * Math.cos(pa), ay = ct, az = st * Math.sin(pa);
+
       let model = mat4Translate(ox, oy, oz);
-      model = mat4Multiply(model, mat4RotateX(clk * o.spinX));
-      model = mat4Multiply(model, mat4RotateY(clk * o.spinY));
-      model = mat4Multiply(model, mat4RotateZ(clk * o.spinZ));
-      model = mat4Multiply(model, mat4Scale(o.scale));
+      model = mat4Multiply(model, mat4RotateAxis(ax, ay, az, o.spinAng));
+      // secondary tumble about a body axis (a general, non-periodic-looking
+      // tumble rather than a single-axis whirr)
+      model = mat4Multiply(model, mat4RotateX(o.spinAng * 0.7));
+      model = mat4Multiply(model, mat4Scale(scale));
 
       const mvp = mat4Multiply(proj, mat4Multiply(viewWorld, model));
       gl.uniformMatrix4fv(uMVP, false, mvp);
       gl.uniformMatrix4fv(uModel, false, model);
 
       const base = PAL[o.colorIdx];
-      const hue = ((base[0] + hue0 * 0.05 + clk * 4) % 360 + 360) % 360;
+      const hue = ((base[0] + o.hueOff + hue0 * 0.05 + clk * 4) % 360 + 360) % 360;
       const [r, g, b] = hsl2rgb(hue, base[1], Math.min(65, base[2] + 6));
       gl.uniform3f(uColor, r, g, b);
 

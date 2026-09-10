@@ -31,6 +31,62 @@
 // swiftshader's startup-only spurious context loss, gl.clear() to opaque
 // black every frame (structurally whiteout-proof, real hardware buffer
 // reset not a compositing fade).
+//
+// UNIT CHOREOGRAPHY (2026-09-10 wave 2, "dynamic movements with the basic
+// pattern units", not just a rigid spin). Before this pass the lattice's
+// cubes sat at fixed grid positions and only spun in place under a whole-
+// world turntable (audit: residual 5.6 luma, i.e. almost everything the
+// eye saw was the rigid turntable). Now the basic units -- the cubes --
+// move relative to each other every frame while the grid stays a grid:
+//   1. BOBBING COLUMNS: a travelling plane wave runs through the grid
+//      along X; every cube is displaced along Y by ~20% of the lattice
+//      spacing, keyed to its column, so neighbouring columns slide up and
+//      down past each other and the rows undulate (a rolling swell across
+//      the lattice). Cubes in the same column bob together, so column
+//      spacing never closes; both layers bob in phase, so the block
+//      deforms as ONE lattice (antiphase layers read as a heap -- below).
+//   2. SWAYING ROWS: a second wave keyed to each cube's ROW displaces it
+//      along X (~34% of spacing), so rows shear sideways against each
+//      other (layers in phase). Row members sway together, so row
+//      spacing never closes.
+//   3. SIZE PULSE: every cube's scale breathes +-20% on a third travelling
+//      wave. Phases are assigned by RANK along the wave (exactly N equally
+//      spaced phases across the 30 cubes), so the sum of the pulses is
+//      identically zero at every instant -- total lit area is constant by
+//      construction, not just on average (coverage-neutral, no brightness
+//      trend).
+//   4. SPIN SURGE: each cube's own Y spin speeds up and slows down on a
+//      fourth wave (+-0.55 rad of angular lead/lag), so the spinning is
+//      visibly non-uniform across the grid rather than a uniform whirr.
+//   5. COUNTER-ROCKING LAYERS: the two 5x3 layers rock about the view
+//      axis in opposite directions (+-0.12 rad, period ~4-5.5s) as rigid
+//      plates, so the lattice repeatedly shears out of and back into
+//      alignment; small on purpose -- rows must still read as rows.
+//   6. Per-cube spin rates raised (0.7-1.4 rad/s, periods ~4.5-9s).
+//   7. The whole-world turntable is now a bounded yaw wobble (+-0.4 rad,
+//      period 9-13s) plus a small pitch wobble, so the lattice stays near
+//      face-on: its identity is always legible and the in-plane unit
+//      motion above is never hidden as depth motion (and the near corner
+//      cube can no longer swing into the frame edge -- see initWaves).
+// Wave rates/directions are drawn ONCE per video (guaranteed minimum
+// magnitude, random sign, periods 3.5-7s) and driven by the shared
+// monotonic clock, never reset per cycle; per-cube spin ANGLES and the
+// world turntable angle now accumulate (rates re-rolled per cycle, angles
+// continuous), so a cycle boundary changes speeds without a visible jump.
+// The light sweep was tamed from a full 360-degree circuit to a bounded
+// +-0.45 rad wobble around a front-lit direction (wave-1 lesson: the light
+// sweep was the largest brightness swing on the 3D engines, and taming it
+// buys the headroom the geometry motion needs). Grid reshaped 4x4x2 ->
+// 5x3x2 (wider, matching the 16:9 frame, so the units are bigger on
+// screen -- the lever the audit responded to most), spacing 1.7 -> 1.6,
+// scale 0.55 -> 0.5, eye 11.5 -> 11.4 so the displaced, rocked corner
+// cubes stay inside the frame at the worst-case alignment (on paper:
+// vertical reach ~3.66 at a near-corner depth of ~2.43 -- max yaw, pitch,
+// rock, bob, sway and pulse all coinciding on a corner cube with its
+// diagonal vertical -- needs eye >= 11.3). A first draft (bob 25% at 1.4 rad/column, layers rocked
+// +-0.3 rad) LOOKED like a loose heap of tumbling cubes at full size, not
+// a lattice -- identity first; the bob wavelength was lengthened and the
+// rock shrunk until the rows read as rows again next to the original.
 (() => {
   const params = new URLSearchParams(location.search);
   const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
@@ -248,20 +304,31 @@
   }
   initGL();
 
-  // ---- Scene: a fixed-position 3D grid of cubes, each spinning
-  // independently. Grid SHAPE/spacing/scale is fixed (not randomised) and
-  // never changes after startup -- same lesson as solids3d.html's fixed
-  // ORBIT_R/SCALE/ORBIT_PHASE: randomising layout geometry swings how much
-  // of the frame is covered by lit faces between reconfigure cycles, which
-  // reads as a fake trend to the whiteout-regression check even though
-  // gl.clear() makes true accumulation impossible. Only per-cube spin
-  // rates, the world's own rotation rate, and hue are randomised.
-  const GX = 4, GY = 4, GZ = 2;
-  const SPACING = 1.7;
-  let cells, hue0, worldSpinRate;
-  function config() {
-    hue0 = rng() * 360;
-    worldSpinRate = (rng() < 0.5 ? -1 : 1) * rand(0.12, 0.22);
+  // ---- Scene: a 3D grid of cubes, each spinning independently, with the
+  // unit choreography described at the top. Grid SHAPE/spacing/base scale
+  // is fixed (not randomised) and never changes after startup -- same
+  // lesson as solids3d.html's fixed ORBIT_R/SCALE/ORBIT_PHASE: randomising
+  // layout geometry swings how much of the frame is covered by lit faces
+  // between reconfigure cycles, which reads as a fake trend to the
+  // whiteout-regression check even though gl.clear() makes true
+  // accumulation impossible. Only per-cube spin rates, the world's own
+  // rotation rate, and hue are re-rolled per cycle.
+  // 5 wide x 4 tall x 2 deep (was 4x4x2): a wider grid fills the 16:9
+  // frame better, so the units are bigger on screen and their relative
+  // motion reads at a glance -- the single biggest lever the unit-motion
+  // audit responded to (a small cluster caps the metric no matter how
+  // hard its members move).
+  const GX = 5, GY = 3, GZ = 2;
+  const SPACING = 1.6;
+  const BASE_SCALE = 0.5;
+  const N_CELLS = GX * GY * GZ;
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+  const TWO_PI = Math.PI * 2;
+
+  // Cells are built ONCE; only their RATES are re-rolled per cycle (angles
+  // accumulate, so a rate change never jumps a cube's orientation).
+  let cells;
+  function initCells() {
     cells = [];
     for (let ix = 0; ix < GX; ix++) {
       for (let iy = 0; iy < GY; iy++) {
@@ -270,20 +337,88 @@
           const gy = (iy - (GY - 1) / 2) * SPACING;
           const gz = (iz - (GZ - 1) / 2) * SPACING;
           cells.push({
+            ix, iy, iz,
             pos: [gx, gy, gz],
-            // Guaranteed minimum magnitude with random sign on every spin
-            // axis -- same fix as every other curated engine in this pool.
-            spinX: (rng() < 0.5 ? -1 : 1) * rand(0.35, 0.9),
-            spinY: (rng() < 0.5 ? -1 : 1) * rand(0.35, 0.9),
-            spinZ: (rng() < 0.5 ? -1 : 1) * rand(0.25, 0.7),
+            angX: rng() * TWO_PI, angY: rng() * TWO_PI, angZ: rng() * TWO_PI,
+            spinX: 0, spinY: 0, spinZ: 0,
             // Hue varies with grid position (a spatial gradient across the
             // lattice, distinct from solids3d's per-object palette index)
             // plus a shared global drift over time.
             huePos: (ix / (GX - 1) + iy / (GY - 1)) * 0.5,
             colorIdx: (ix + iy + iz) % PAL.length,
+            pulsePhase: 0,
           });
         }
       }
+    }
+  }
+
+  // ---- Unit choreography waves: drawn ONCE per video, never reset -------
+  let WAVE;
+  function initWaves() {
+    const period = (a, b) => TWO_PI / rand(a, b);
+    WAVE = {
+      // 1. bobbing columns: Y displacement keyed to column (x) and layer (z)
+      bobAmp: rand(0.2, 0.23) * SPACING,
+      // Long wavelength (~0.75-0.95 rad per column): rows UNDULATE as a
+      // rolling swell instead of scrambling -- a shorter wavelength (1.4
+      // rad/column, first draft) broke the row alignment the grid identity
+      // depends on (checked at full size against the original).
+      bobKx: sgn() * rand(0.9, 1.1) / SPACING,
+      // Both layers bob IN PHASE (front/back cubes stay paired in depth):
+      // antiphase layers were tried and the interleaved plates read as a
+      // loose heap at full size, not a lattice. The block deforms as ONE
+      // lattice -- rows ripple, columns slide -- which is the identity.
+      bobKz: 0,
+      bobW: sgn() * period(3.0, 4.0),
+      // 2. swaying rows: X displacement keyed to row (y)
+      swayAmp: rand(0.32, 0.36) * SPACING,
+      swayKy: sgn() * rand(0.95, 1.3) / SPACING,
+      swayKz: 0, // in phase across layers, same reason as bobKz
+      swayW: sgn() * period(3.2, 4.2),
+      // 3. size pulse: rank-assigned phases (see below), +-16%
+      pulseAmp: 0.2,
+      pulseW: sgn() * period(3.0, 4.2),
+      // 4. spin surge on the Y spin axis
+      surgeAmp: 0.55,
+      surgeK: [sgn() * rand(0.6, 1.0), sgn() * rand(0.6, 1.0), sgn() * rand(0.8, 1.4)],
+      surgeW: sgn() * period(3.0, 4.5),
+      // 5. counter-rotating layers about the view (Z) axis
+      layerAmp: rand(0.1, 0.13),
+      layerW: sgn() * period(4.0, 5.5),
+      layerPhase: rng() * TWO_PI,
+      // Bounded world yaw/pitch wobble instead of a full turntable: the
+      // grid always stays near face-on (identity legible, in-plane unit
+      // motion always visible) and the near corner never swings close
+      // enough to the eye to clip -- the full turntable put the near
+      // corner cube at 4.0 units from the eye at 90 degrees, past the
+      // frame edge (the original 4x4x2 clipped there too, on paper).
+      yawAmp: rand(0.36, 0.42),
+      yawW: sgn() * period(9.0, 13.0),
+      yawPhase: rng() * TWO_PI,
+      pitchAmp: rand(0.06, 0.09),
+      pitchW: sgn() * period(7.0, 10.0),
+      pitchPhase: rng() * TWO_PI,
+    };
+    // Pulse phases by RANK along a random wave direction through the grid:
+    // exactly N equally spaced phases, so sum(sin) == 0 at every instant and
+    // total cube area is constant by construction. The wave direction is
+    // random per video so the pulse still reads as a travelling sweep.
+    const kd = [sgn() * rand(0.5, 1.0), sgn() * rand(0.5, 1.0), sgn() * rand(0.3, 1.2)];
+    const order = cells.map((c, i) => ({ i, v: kd[0] * c.pos[0] + kd[1] * c.pos[1] + kd[2] * c.pos[2] + rng() * 0.05 }))
+      .sort((a, b) => a.v - b.v);
+    order.forEach((o, rank) => { cells[o.i].pulsePhase = TWO_PI * rank / N_CELLS; });
+  }
+
+  let hue0;
+  function config() {
+    hue0 = rng() * 360;
+    for (const cell of cells) {
+      // Guaranteed minimum magnitude with random sign on every spin axis
+      // -- same fix as every other curated engine in this pool.
+      cell.spinX = sgn() * rand(0.7, 1.4);
+      cell.spinY = sgn() * rand(0.7, 1.4);
+      cell.spinZ = sgn() * rand(0.5, 1.0);
     }
   }
 
@@ -292,18 +427,26 @@
   let clk = 0;
   const dt = 1 / FPS;
 
+  initCells();
+  initWaves();
   config();
 
   window.READY = false;
   window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
   window.currentFrame = 0;
 
-  const EYE = [0, 0, 11.5];
+  const EYE = [0, 0, 11.4];
   const proj = mat4Perspective((45 * Math.PI) / 180, W / H, 0.1, 100);
 
   function renderFrame() {
     cycleFrame++;
-    clk += dt * SPEED;
+    const step = dt * SPEED;
+    clk += step;
+    for (const cell of cells) {
+      cell.angX += cell.spinX * step;
+      cell.angY += cell.spinY * step;
+      cell.angZ += cell.spinZ * step;
+    }
 
     if (gl.isContextLost()) return;
 
@@ -311,17 +454,20 @@
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     const view = mat4Translate(-EYE[0], -EYE[1], -EYE[2]);
-    // Single-axis turntable rotation only (Y), unlike solids3d's two-axis
-    // tumble -- a grid tipped onto a second axis quickly foreshortens into
-    // an overlapping blob that loses the "ordered lattice" read this
-    // engine exists for. A pure turntable stays legible as a grid at every
-    // rotation angle while still reading as continuously, "livelily"
-    // spinning per the house style pace requirement.
-    const worldSpin = mat4RotateY(clk * worldSpinRate);
+    // Bounded yaw (+-0.5 rad) with a small pitch wobble -- see initWaves().
+    // A grid tipped far onto a second axis foreshortens into an overlapping
+    // blob, so the pitch stays small; the yaw keeps the plates reading as
+    // an ordered lattice at every instant instead of collapsing edge-on.
+    const w = WAVE;
+    const yaw = w.yawAmp * Math.sin(w.yawW * clk + w.yawPhase);
+    const pitch = w.pitchAmp * Math.sin(w.pitchW * clk + w.pitchPhase);
+    const worldSpin = mat4Multiply(mat4RotateX(pitch), mat4RotateY(yaw));
     const viewWorld = mat4Multiply(view, worldSpin);
 
-    const lightAngle = clk * 0.3;
-    gl.uniform3f(uLightDir, Math.cos(lightAngle), 0.6, Math.sin(lightAngle));
+    // Bounded light wobble around a front-lit direction (not a full
+    // circuit -- see the choreography note at the top).
+    const lightAngle = 0.45 * Math.sin(clk * 0.4);
+    gl.uniform3f(uLightDir, 0.35 + Math.sin(lightAngle), 0.6, 0.85 * Math.cos(lightAngle) + 0.15);
     gl.uniform3f(uEye, EYE[0], EYE[1], EYE[2]);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuf.posBuf);
@@ -331,12 +477,27 @@
     gl.enableVertexAttribArray(aNormal);
     gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
 
+    // Per-layer rigid plate rock about the view axis, alternating sign,
+    // kept SMALL (+-0.12 rad): at +-0.3 the tilted rows read as a heap
+    // when the plates overlapped in projection (checked at full size).
+    const layerRot = [];
+    for (let iz = 0; iz < GZ; iz++) {
+      const s = iz % 2 === 0 ? 1 : -1;
+      layerRot.push(mat4RotateZ(s * w.layerAmp * Math.sin(w.layerW * clk + w.layerPhase)));
+    }
+
     for (const cell of cells) {
-      let model = mat4Translate(cell.pos[0], cell.pos[1], cell.pos[2]);
-      model = mat4Multiply(model, mat4RotateX(clk * cell.spinX));
-      model = mat4Multiply(model, mat4RotateY(clk * cell.spinY));
-      model = mat4Multiply(model, mat4RotateZ(clk * cell.spinZ));
-      model = mat4Multiply(model, mat4Scale(0.55));
+      const [gx, gy, gz] = cell.pos;
+      const bob = w.bobAmp * Math.sin(w.bobKx * gx + w.bobKz * gz - w.bobW * clk);
+      const sway = w.swayAmp * Math.sin(w.swayKy * gy + w.swayKz * gz - w.swayW * clk);
+      const scale = BASE_SCALE * (1 + w.pulseAmp * Math.sin(cell.pulsePhase + w.pulseW * clk));
+      const surge = w.surgeAmp * Math.sin(w.surgeK[0] * gx + w.surgeK[1] * gy + w.surgeK[2] * gz - w.surgeW * clk);
+
+      let model = mat4Multiply(layerRot[cell.iz], mat4Translate(gx + sway, gy + bob, gz));
+      model = mat4Multiply(model, mat4RotateX(cell.angX));
+      model = mat4Multiply(model, mat4RotateY(cell.angY + surge));
+      model = mat4Multiply(model, mat4RotateZ(cell.angZ));
+      model = mat4Multiply(model, mat4Scale(scale));
 
       const mvp = mat4Multiply(proj, mat4Multiply(viewWorld, model));
       gl.uniformMatrix4fv(uMVP, false, mvp);

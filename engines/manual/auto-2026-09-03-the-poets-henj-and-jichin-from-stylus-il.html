@@ -10,6 +10,39 @@
 <body>
     <canvas id="glcanvas"></canvas>
     <script>
+        // UNIT CHOREOGRAPHY (2026-09-10 wave 2, "dynamic movements with the basic
+        // pattern units", not just a rigid spin). Gemini-promoted engine
+        // (theme: "The Poet's Henj and Jichin from Stylus Il"): a small field of
+        // lit cubes drifting on 3-axis Lissajous orbits, seen from a moving
+        // camera. Before this pass it was almost static (audit: residual 1.4
+        // luma -- tiny cubes, orbit rates 0.1-0.6 rad/s, and a camera that
+        // swept THROUGH the origin every ~78s). The concept is kept -- discrete
+        // lit cubes on Lissajous paths, roaming camera -- and each cube now has
+        // its own choreography:
+        //   1. LISSAJOUS ORBITS (7 cubes at density 1) at 0.45-0.8 rad/s per axis (periods ~8-14s,
+        //      random sign) inside a bounded ball, so the cubes visibly weave
+        //      past and around each other.
+        //   2. EPICYCLIC LOOPS: every cube rides a small loop (radius ~0.14,
+        //      period ~3-4.5s) in its own plane on top of its orbit.
+        //   3. RIPPLE: a travelling bob wave keyed to each cube's current x
+        //      position (phase = k*x - omega*t), so the field ripples rather
+        //      than drifting as a block.
+        //   4. SCALE PULSE +-18% with phases spread equally across the cubes
+        //      (sum identically zero -> total lit area constant).
+        //   5. SPIN 0.5-1.4 rad/s on three axes (as before).
+        // Also fixed: additive blending removed (overlapping cubes summed toward
+        // white); fragment colour is now clamped (min(c, 0.86)) and the light
+        // follows the camera (a fixed world light left the cubes' dark sides
+        // toward the eye for half of each circuit); the camera orbits the
+        // cluster at a fixed distance chosen so the nearest cube can never
+        // clip the frame (on paper: vertical reach 2.9 at a near depth of 3.6
+        // needs distance >= 10.7 at 45 deg fov); cubes are ~2.5x the original's
+        // size and the orbit ball is an ellipsoid wider than tall, so the
+        // field fills the 16:9 frame instead of a small central disc;
+        // colors=h,s,l;... (the engine contract's palette override) is now
+        // honoured. Context-loss handling, the READY hold-back and
+        // preserveDrawingBuffer:true are kept. Deterministic (seeded PRNG only,
+        // frame-counter clock, no Date/Math.random/rAF).
         // --- Global State and Constants ---
         window.READY = false;
         window.TOTAL_FRAMES = 0;
@@ -25,18 +58,21 @@
         let cycleSec;
         let mulberryA, mulberryB, mulberryC, mulberryD; // Seeded PRNG state
 
-        const SHAPE_COUNT_BASE = 5; // Base number of rotating shapes
-        const SHAPE_COUNT_VARIANCE = 3;
-        const ORBIT_RADIUS_BASE = 0.5;
-        const ORBIT_RADIUS_VARIANCE = 0.3;
-        const SHAPE_SCALE_BASE = 0.1;
-        const SHAPE_SCALE_VARIANCE = 0.05;
-        const ROTATION_SPEED_MIN = 0.4; // radians/sec
-        const ROTATION_SPEED_MAX = 1.5; // radians/sec
-        const ORBIT_SPEED_MIN = 0.1; // radians/sec
-        const ORBIT_SPEED_MAX = 0.6; // radians/sec
-        const CAMERA_DISTANCE = 3.5;
-        const FIELD_OF_VIEW_DEG = 70;
+        const SHAPE_COUNT_BASE = 7;          // cubes at density 1 (clamped 5..9)
+        const SHAPE_SCALE_MIN = 0.75, SHAPE_SCALE_MAX = 0.88;
+        // orbit ball is an ellipsoid wider than tall (x/y/z radii) so the
+        // field fills a 16:9 frame instead of a central disc
+        const ORBIT_RADIUS = [[1.5, 2.0], [0.9, 1.2], [1.3, 1.7]];
+        const ORBIT_SPEED_MIN = 0.85, ORBIT_SPEED_MAX = 1.4;    // rad/s, periods ~4.5-7.4s
+        const LOOP_RADIUS_MIN = 0.26, LOOP_RADIUS_MAX = 0.34;
+        const LOOP_SPEED_MIN = 2.4, LOOP_SPEED_MAX = 3.4;       // rad/s, periods ~1.8-2.6s
+        const ROTATION_SPEED_MIN = 1.0, ROTATION_SPEED_MAX = 1.9; // rad/s
+        const BOB_AMP = 0.16, PULSE_AMP = 0.18;
+        const CAMERA_DISTANCE = 8.6;
+        const CAMERA_YAW_RATE = 0.13;        // rad/s, full circuit ~48s
+        const FIELD_OF_VIEW_DEG = 45;
+        const TWO_PI = Math.PI * 2;
+        let bobW, bobK, pulseW, camYawPhase, camBobPhase;
 
         const shapes = [];
         let primaryPalette = [];
@@ -385,7 +421,7 @@
                 gl_Position = u_projectionMatrix * u_viewMatrix * u_worldMatrix * a_position;
 
                 vec3 transformedNormal = normalize((u_worldMatrix * vec4(a_normal, 0.0)).xyz);
-                float lightFactor = max(dot(transformedNormal, u_lightDirection), 0.0);
+                float lightFactor = max(dot(transformedNormal, normalize(u_lightDirection)), 0.0);
                 vec3 finalColor = a_color * u_ambientColor + a_color * u_lightColor * lightFactor;
                 v_color = vec4(finalColor, 1.0);
             }
@@ -396,7 +432,8 @@
             varying vec4 v_color;
 
             void main() {
-                gl_FragColor = v_color;
+                // soft clamp: no face can wash out to white (house style)
+                gl_FragColor = vec4(min(v_color.rgb, vec3(0.86)), 1.0);
             }
         `;
 
@@ -575,26 +612,39 @@
 
             gl.enable(gl.DEPTH_TEST);
             gl.depthFunc(gl.LEQUAL);
-            gl.enable(gl.BLEND);
-            gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // Additive blending
+            gl.disable(gl.BLEND); // opaque: additive blending summed overlapping cubes toward white
             gl.clearColor(0.0, 0.0, 0.0, 1.0); // Black background
+        }
+
+        function parseColorsParam() {
+            const raw = new URLSearchParams(window.location.search).get('colors');
+            if (!raw) return null;
+            const out = raw.split(';').map(t => t.split(',').map(Number)).filter(a => a.length === 3 && a.every(Number.isFinite));
+            return out.length >= 2 ? out : null;
         }
 
         function generatePalette(baseHue) {
             const palette = [];
-            const saturation = randFloat(70, 95);
-            const lightness = randFloat(40, 70); // Keep it vibrant but not too bright initially
-            const numColors = randInt(3, 6);
+            initialHueOffsets = [];
+            hueShiftSpeeds = [];
+            const forced = parseColorsParam();
+            if (forced) {
+                for (const [h, sat, l] of forced) {
+                    palette.push({ initialHue: h, saturation: sat, lightness: Math.min(l, 64) });
+                    initialHueOffsets.push(h);
+                    hueShiftSpeeds.push(randSign() * randFloat(HUE_SHIFT_SPEED_MIN, HUE_SHIFT_SPEED_MAX));
+                }
+                return palette;
+            }
+            const saturation = randFloat(80, 95);   // vivid, not pastel
+            const lightness = randFloat(52, 62);
+            const numColors = randInt(4, 6);
 
             for (let i = 0; i < numColors; i++) {
                 let hueOffset = (i * (360 / numColors)) + randFloat(-15, 15);
                 let hue = (baseHue + hueOffset) % 360;
                 if (hue < 0) hue += 360;
-                palette.push({
-                    initialHue: hue,
-                    saturation: saturation,
-                    lightness: lightness
-                });
+                palette.push({ initialHue: hue, saturation: saturation, lightness: lightness });
                 initialHueOffsets.push(hue);
                 hueShiftSpeeds.push(randSign() * randFloat(HUE_SHIFT_SPEED_MIN, HUE_SHIFT_SPEED_MAX));
             }
@@ -602,39 +652,45 @@
         }
 
         function initializeSceneElements() {
-            shapes.length = 0; // Clear existing shapes
-            const numShapes = Math.round(randFloat(SHAPE_COUNT_BASE - SHAPE_COUNT_VARIANCE, SHAPE_COUNT_BASE + SHAPE_COUNT_VARIANCE) * density);
-
-            const paletteHues = primaryPalette.map(c => c.initialHue); // For distinctness
-            const chosenHues = [];
+            shapes.length = 0;
+            const numShapes = Math.max(5, Math.min(9, Math.round(SHAPE_COUNT_BASE * density)));
 
             for (let i = 0; i < numShapes; i++) {
-                let colorIndex = randInt(0, primaryPalette.length - 1);
-                let shapeColor = primaryPalette[colorIndex];
-
                 shapes.push({
-                    scale: randFloat(SHAPE_SCALE_BASE * density, (SHAPE_SCALE_BASE + SHAPE_SCALE_VARIANCE) * density),
-                    rotationX: randFloat(0, Math.PI * 2),
-                    rotationY: randFloat(0, Math.PI * 2),
-                    rotationZ: randFloat(0, Math.PI * 2),
-                    rotationSpeedX: randSign() * randFloat(ROTATION_SPEED_MIN, ROTATION_SPEED_MAX) * speed,
-                    rotationSpeedY: randSign() * randFloat(ROTATION_SPEED_MIN, ROTATION_SPEED_MAX) * speed,
-                    rotationSpeedZ: randSign() * randFloat(ROTATION_SPEED_MIN, ROTATION_SPEED_MAX) * speed,
-                    orbitRadius: randFloat(ORBIT_RADIUS_BASE * density, (ORBIT_RADIUS_BASE + ORBIT_RADIUS_VARIANCE) * density),
-                    orbitPhaseX: randFloat(0, Math.PI * 2),
-                    orbitPhaseY: randFloat(0, Math.PI * 2),
-                    orbitPhaseZ: randFloat(0, Math.PI * 2),
-                    orbitSpeedX: randSign() * randFloat(ORBIT_SPEED_MIN, ORBIT_SPEED_MAX) * speed,
-                    orbitSpeedY: randSign() * randFloat(ORBIT_SPEED_MIN, ORBIT_SPEED_MAX) * speed,
-                    orbitSpeedZ: randSign() * randFloat(ORBIT_SPEED_MIN, ORBIT_SPEED_MAX) * speed,
-                    colorIndex: colorIndex, // Store index to dynamically retrieve current color
-                    localOffset: [randFloat(-0.2, 0.2), randFloat(-0.2, 0.2), randFloat(-0.2, 0.2)] // Slight local offset to prevent perfect overlap
+                    scale: randFloat(SHAPE_SCALE_MIN, SHAPE_SCALE_MAX),
+                    rotation: [randFloat(0, TWO_PI), randFloat(0, TWO_PI), randFloat(0, TWO_PI)],
+                    rotationSpeed: [
+                        randSign() * randFloat(ROTATION_SPEED_MIN, ROTATION_SPEED_MAX) * speed,
+                        randSign() * randFloat(ROTATION_SPEED_MIN, ROTATION_SPEED_MAX) * speed,
+                        randSign() * randFloat(ROTATION_SPEED_MIN, ROTATION_SPEED_MAX) * speed,
+                    ],
+                    // 3-axis Lissajous orbit (the original concept), lively rates
+                    orbitR: [randFloat(ORBIT_RADIUS[0][0], ORBIT_RADIUS[0][1]), randFloat(ORBIT_RADIUS[1][0], ORBIT_RADIUS[1][1]), randFloat(ORBIT_RADIUS[2][0], ORBIT_RADIUS[2][1])],
+                    orbitPhase: [randFloat(0, TWO_PI), randFloat(0, TWO_PI), randFloat(0, TWO_PI)],
+                    orbitSpeed: [
+                        randSign() * randFloat(ORBIT_SPEED_MIN, ORBIT_SPEED_MAX) * speed,
+                        randSign() * randFloat(ORBIT_SPEED_MIN, ORBIT_SPEED_MAX) * speed,
+                        randSign() * randFloat(ORBIT_SPEED_MIN, ORBIT_SPEED_MAX) * speed,
+                    ],
+                    // epicyclic loop in the cube's own plane
+                    loopR: randFloat(LOOP_RADIUS_MIN, LOOP_RADIUS_MAX),
+                    loopSpeed: randSign() * randFloat(LOOP_SPEED_MIN, LOOP_SPEED_MAX) * speed,
+                    loopPhase: randFloat(0, TWO_PI),
+                    loopPlane: i % 3,
+                    // pulse phases equally spaced -> sum of pulses is zero
+                    pulsePhase: TWO_PI * i / numShapes,
+                    colorIndex: i % primaryPalette.length,
                 });
             }
+            // shared wave clocks (guaranteed minimum rate, random sign)
+            bobW = randSign() * randFloat(1.3, 1.9) * speed;   // period 3.3-4.8s
+            bobK = randSign() * randFloat(1.8, 2.4);           // rad per unit of x
+            pulseW = randSign() * randFloat(1.1, 1.5) * speed; // period 4.2-5.7s
+            camYawPhase = randFloat(0, TWO_PI);
+            camBobPhase = randFloat(0, TWO_PI);
         }
 
 
-        let lastResetFrame = 0;
         function setupScene() {
             const params = getQueryParams();
             mulberry32(params.seed); // Re-seed PRNG for consistent setup on restore
@@ -661,10 +717,10 @@
             primaryPalette = generatePalette(baseHue);
             initializeSceneElements();
 
-            // Set up static uniforms that don't change per frame
-            gl.uniform3f(u_lightDirectionLoc, 0.5, 0.7, 1.0); // Consistent light direction
-            gl.uniform3f(u_ambientColorLoc, 0.3, 0.3, 0.3); // Soft ambient light
-            gl.uniform3f(u_lightColorLoc, 0.7, 0.7, 0.7);   // White light
+            // Set up static uniforms that don't change per frame (the light
+            // direction is set per frame -- it follows the camera)
+            gl.uniform3f(u_ambientColorLoc, 0.38, 0.38, 0.38); // Soft ambient light
+            gl.uniform3f(u_lightColorLoc, 0.7, 0.7, 0.7);      // White light
         }
 
         // --- Render Loop ---
@@ -673,30 +729,27 @@
         const projectionMatrix = mat4.create();
 
         function drawFrame(deltaTime) {
-            // Mandate hard reset: clear completely every `cycleSec` seconds
-            const framesPerCycle = Math.round(cycleSec * fps);
-            if (window.currentFrame === 0 || (window.currentFrame - lastResetFrame) >= framesPerCycle) {
-                gl.clearColor(0.0, 0.0, 0.0, 1.0); // Full black clear
-                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-                lastResetFrame = window.currentFrame;
-            } else {
-                // Otherwise, a very subtle fade to keep trails and glow without accumulating too much
-                gl.clearColor(0.0, 0.0, 0.0, 0.01); // Subtle fade to black (alpha must be small)
-                gl.clear(gl.COLOR_BUFFER_BIT); // Clear only color buffer for subtle fade effect
-                gl.clear(gl.DEPTH_BUFFER_BIT); // Always clear depth buffer to ensure correct depth testing
-            }
-
+            // Opaque clear every frame: real buffer reset, structurally whiteout-proof
+            gl.clearColor(0.0, 0.0, 0.0, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
             gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
 
             const time = window.currentFrame * (1 / fps);
 
-            // Update camera (orbiting)
-            const cameraOrbitRadius = CAMERA_DISTANCE;
-            const cameraX = Math.sin(time * speed * 0.05) * cameraOrbitRadius * 0.5; // Slower camera orbit
-            const cameraY = Math.cos(time * speed * 0.03) * cameraOrbitRadius * 0.3;
-            const cameraZ = Math.cos(time * speed * 0.08) * cameraOrbitRadius;
-            mat4.lookAt(viewMatrix, [cameraX, cameraY, cameraZ], [0, 0, 0], [0, 1, 0]);
+            // Camera: orbits the cluster at a FIXED distance (never through it),
+            // with a gentle height bob.
+            const yaw = camYawPhase + time * CAMERA_YAW_RATE * speed;
+            const camY = 0.5 + 0.4 * Math.sin(time * 0.3 * speed + camBobPhase);
+            const horiz = Math.sqrt(CAMERA_DISTANCE * CAMERA_DISTANCE - camY * camY);
+            const camPos = [Math.sin(yaw) * horiz, camY, Math.cos(yaw) * horiz];
+            mat4.lookAt(viewMatrix, camPos, [0, 0, 0], [0, 1, 0]);
+            // Light follows the camera (from above-right of the eye): a fixed
+            // WORLD light left the cubes' dark sides facing the camera for half
+            // of every circuit (mean luma ~1.4 -- seen in rendered frames).
+            // Per-face shading still varies with every cube's own spin.
+            const rx = Math.cos(yaw), rz = -Math.sin(yaw); // camera right vector
+            gl.uniform3f(u_lightDirectionLoc, camPos[0] / CAMERA_DISTANCE + 0.45 * rx, camPos[1] / CAMERA_DISTANCE + 0.7, camPos[2] / CAMERA_DISTANCE + 0.45 * rz);
 
             const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
             const fieldOfViewRadians = FIELD_OF_VIEW_DEG * Math.PI / 180;
@@ -716,54 +769,51 @@
             gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
             gl.vertexAttribPointer(a_normalLoc, 3, gl.FLOAT, false, 0, 0);
 
+            const a_colorLoc = gl.getAttribLocation(program, 'a_color');
+            const vertexCount = cubeData.normals.length / 3;
 
             for (let i = 0; i < shapes.length; i++) {
                 const shape = shapes[i];
 
-                // Update hue based on time
+                // Colour (slow hue drift, as before)
                 const initial = primaryPalette[shape.colorIndex];
                 const currentHue = (initial.initialHue + hueShiftSpeeds[shape.colorIndex] * time) % 360;
                 const rgb = hslToRgb(currentHue, initial.saturation, initial.lightness);
-                const currentColor = new Float32Array([rgb[0], rgb[1], rgb[2]]);
 
-                // Update shape's rotations and orbit phases
-                shape.rotationX += shape.rotationSpeedX * deltaTime;
-                shape.rotationY += shape.rotationSpeedY * deltaTime;
-                shape.rotationZ += shape.rotationSpeedZ * deltaTime;
+                // Spin
+                shape.rotation[0] += shape.rotationSpeed[0] * deltaTime;
+                shape.rotation[1] += shape.rotationSpeed[1] * deltaTime;
+                shape.rotation[2] += shape.rotationSpeed[2] * deltaTime;
 
-                shape.orbitPhaseX += shape.orbitSpeedX * deltaTime;
-                shape.orbitPhaseY += shape.orbitSpeedY * deltaTime;
-                shape.orbitPhaseZ += shape.orbitSpeedZ * deltaTime;
-
-                // Calculate orbit position
-                const orbitX = Math.sin(shape.orbitPhaseX) * shape.orbitRadius;
-                const orbitY = Math.cos(shape.orbitPhaseY) * shape.orbitRadius;
-                const orbitZ = Math.sin(shape.orbitPhaseZ) * shape.orbitRadius;
+                // 1. Lissajous orbit
+                let ox = Math.sin(shape.orbitPhase[0] + shape.orbitSpeed[0] * time) * shape.orbitR[0];
+                let oy = Math.cos(shape.orbitPhase[1] + shape.orbitSpeed[1] * time) * shape.orbitR[1];
+                let oz = Math.sin(shape.orbitPhase[2] + shape.orbitSpeed[2] * time) * shape.orbitR[2];
+                // 2. epicyclic loop in the cube's own plane
+                const lp = shape.loopPhase + shape.loopSpeed * time;
+                const lc = Math.cos(lp) * shape.loopR, ls = Math.sin(lp) * shape.loopR;
+                if (shape.loopPlane === 0) { oy += lc; oz += ls; }
+                else if (shape.loopPlane === 1) { ox += lc; oz += ls; }
+                else { ox += lc; oy += ls; }
+                // 3. ripple: travelling bob wave keyed to the cube's x position
+                oy += BOB_AMP * Math.sin(bobW * time - bobK * ox);
+                // 4. scale pulse, phase-spread
+                const sc = shape.scale * (1 + PULSE_AMP * Math.sin(pulseW * time + shape.pulsePhase));
 
                 mat4.identity(worldMatrix);
-
-                // Apply global translation for orbit
-                mat4.translate(worldMatrix, worldMatrix, [orbitX + shape.localOffset[0], orbitY + shape.localOffset[1], orbitZ + shape.localOffset[2]]);
-
-                // Apply individual shape rotations
-                mat4.rotateX(worldMatrix, worldMatrix, shape.rotationX);
-                mat4.rotateY(worldMatrix, worldMatrix, shape.rotationY);
-                mat4.rotateZ(worldMatrix, worldMatrix, shape.rotationZ);
-
-                // Apply scaling
-                mat4.scale(worldMatrix, worldMatrix, [shape.scale, shape.scale, shape.scale]);
+                mat4.translate(worldMatrix, worldMatrix, [ox, oy, oz]);
+                mat4.rotateX(worldMatrix, worldMatrix, shape.rotation[0]);
+                mat4.rotateY(worldMatrix, worldMatrix, shape.rotation[1]);
+                mat4.rotateZ(worldMatrix, worldMatrix, shape.rotation[2]);
+                mat4.scale(worldMatrix, worldMatrix, [sc, sc, sc]);
 
                 gl.uniformMatrix4fv(u_worldMatrixLoc, false, worldMatrix);
 
-                // Set color for this shape
+                // Per-shape colour attribute (uniform across the cube)
                 gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
-                const faceColors = [];
-                for(let j=0; j<cubeData.normals.length/3; ++j) { // Normals array length for vertices
-                    faceColors.push(currentColor[0], currentColor[1], currentColor[2]);
-                }
-                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(faceColors), gl.DYNAMIC_DRAW); // DYNAMIC_DRAW because color changes
-                
-                const a_colorLoc = gl.getAttribLocation(program, 'a_color');
+                const faceColors = new Float32Array(vertexCount * 3);
+                for (let j = 0; j < vertexCount; ++j) { faceColors[j * 3] = rgb[0]; faceColors[j * 3 + 1] = rgb[1]; faceColors[j * 3 + 2] = rgb[2]; }
+                gl.bufferData(gl.ARRAY_BUFFER, faceColors, gl.DYNAMIC_DRAW);
                 gl.vertexAttribPointer(a_colorLoc, 3, gl.FLOAT, false, 0, 0);
 
                 gl.drawElements(gl.TRIANGLES, cubeData.vertexCount, gl.UNSIGNED_SHORT, 0);
