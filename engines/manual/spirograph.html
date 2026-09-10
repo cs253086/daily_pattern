@@ -22,10 +22,29 @@
 //   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
 //   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
 // Deterministic Mulberry32, no rAF, per-second rotation rates, cheap vector
-// strokes. Each curve's point set is computed ONCE per cycle (not per
-// frame) -- only a transform + stroke happens every frame, so this is
-// cheap despite each curve having hundreds of points. Redraws each frame
-// (no accumulation, no whiteout risk).
+// strokes. Redraws each frame (no accumulation, no whiteout risk).
+//
+// UNIT CHOREOGRAPHY (2026-09-10, user definition of "dynamic": the basic
+// units must visibly move RELATIVE TO EACH OTHER every frame, not just the
+// whole pattern spinning). The unit-motion audit (scripts/audit-unit-
+// motion.js) scored the old version at residual 7.1 / 54% non-rigid: three
+// fixed curves that only rotated. Now the curves MORPH, not just spin:
+//   * The pen offset d of every curve oscillates continuously (+-40% of
+//     its base value, period ~4-8s, phase-staggered curve to curve), so the
+//     loops swell and tighten -- the point set is rebuilt every frame
+//     (900 points x 3 curves, trivial cost).
+//   * A travelling THICKNESS/BRIGHTNESS wave runs along each curve (the
+//     path is drawn in chunks whose line width pulses x0.55-1.45 with a
+//     phase that advances along the curve and in time).
+//   * A visible PEN: a bright bead races along each curve (a full
+//     traversal every ~6-10s) trailing a short brighter comet, so the eye
+//     sees the curve being traced.
+//   * Lines are thicker (house style: bold, legible).
+// The R:r ratio, base d and epi/hypo choice are FIXED per video (CLAUDE.md
+// spirograph write-up: re-rolling them per cycle swung stroke coverage and
+// read as a brightness trend). The continuous d oscillation is bounded and
+// completes ~40-75 periods inside validate.js's 300s window, so it averages
+// out -- verified across seeds 1-8 and 12345.
 (() => {
   const params = new URLSearchParams(location.search);
   const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
@@ -82,14 +101,13 @@
   const minDim = Math.min(W, H);
   const dt = 1 / FPS;
 
-  // Build one hypotrochoid/epitrochoid point set. R/r kept as small
+  // Fill one hypotrochoid/epitrochoid point set into pts. R/r kept as small
   // integers so the curve reliably closes within a bounded number of
   // loops; LOOPS is generous so it always closes in practice without
   // needing an exact GCD-based period.
-  function buildCurve(R, r, d, epi) {
-    const POINTS = 900;
-    const LOOPS = 12;
-    const pts = new Float32Array(POINTS * 2);
+  const POINTS = 900;
+  const LOOPS = 12;
+  function buildCurve(pts, R, r, d, epi) {
     for (let i = 0; i < POINTS; i++) {
       const t = (i / POINTS) * Math.PI * 2 * LOOPS;
       let x, y;
@@ -102,48 +120,55 @@
       }
       pts[i * 2] = x; pts[i * 2 + 1] = y;
     }
-    return pts;
   }
 
-  // A "spiro" instance: a precomputed curve, its screen scale, colour, and
-  // its own independent rotation rate. n (curve count) and the R/r ratio
-  // (loop density -- a tighter ratio means far more self-intersections and
-  // total stroke overlap, which swings frame brightness a lot) are FIXED
-  // rather than randomised: randomising them was the root cause of a
-  // whiteout-regression false positive (a legitimate, non-accumulating
-  // cycle-to-cycle coverage swing, not a real drift -- same lesson as
-  // starburst.html's fixed star count). Only d (loop size), epi/hypo
-  // choice, rotation, and colour are randomised -- plenty of shape variety
-  // without swinging overall ink coverage much.
+  // A "spiro" instance. n (curve count), the R/r ratio (loop density -- a
+  // tighter ratio means far more self-intersections and total stroke
+  // overlap, which swings frame brightness a lot), the BASE d and the
+  // epi/hypo choice are all fixed once per video in initSpiros():
+  // randomising them per cycle was the root cause of a whiteout-regression
+  // false positive (a legitimate, non-accumulating cycle-to-cycle coverage
+  // swing, not a real drift -- same lesson as starburst.html's fixed star
+  // count). reconfigure() re-rolls only rotation, rates, phases and the
+  // hue offset every cycleSec.
   let spiros, hue0;
   const SPIRO_R = [7, 5, 8];
   const SPIRO_r = [3, 2, 3];
-  function config() {
-    hue0 = rng() * 360;
-    const n = 3;
+  function initSpiros() {
     spiros = [];
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < 3; i++) {
       const R = SPIRO_R[i];
       const r = SPIRO_r[i];
-      const d = rand(0.4, 1.3) * r;
+      const d0 = rand(0.55, 1.15) * r;
+      const dAmp = 0.4;
       const epi = rng() < 0.5;
-      const pts = buildCurve(R, r, d, epi);
-      // Normalise to a unit-ish radius so scale is independent of R/r/d.
-      let maxMag = 0;
-      for (let i = 0; i < pts.length; i += 2) {
-        const mag = Math.hypot(pts[i], pts[i + 1]);
-        if (mag > maxMag) maxMag = mag;
-      }
-      const norm = maxMag > 0 ? 1 / maxMag : 1;
+      // Normalise by the analytic maximum radius over the WHOLE d swing so
+      // the morphing curve always fits its scale (no clipping at any phase).
+      const maxMag = (epi ? R + r : R - r) + d0 * (1 + dAmp);
       spiros.push({
-        pts, norm,
-        scale: (0.22 + i * 0.18) * minDim,
-        rot: rng() * Math.PI * 2,
-        // Guaranteed minimum magnitude with random sign -- same fix as
-        // every other curated engine here.
-        rotRate: (rng() < 0.5 ? -1 : 1) * rand(0.3, 0.8),
+        R, r, d0, dAmp, epi,
+        pts: new Float32Array(POINTS * 2),
+        norm: 1 / maxMag,
+        scale: (0.2 + i * 0.14) * minDim,
         colorIdx: i % PAL.length,
+        dPhase: (i / 3) * Math.PI * 2 + rand(-0.4, 0.4),
       });
+    }
+  }
+  function reconfigure() {
+    hue0 = rng() * 360;
+    for (const s of spiros) {
+      s.rot = rng() * Math.PI * 2;
+      // Guaranteed minimum magnitude with random sign -- same fix as
+      // every other curated engine here.
+      // Slower than before (0.3-0.7): whole-curve spin is RIGID motion, and
+      // the point is unit-level morphing, so keep the spin as a gentle base.
+      s.rotRate = (rng() < 0.5 ? -1 : 1) * rand(0.15, 0.35);
+      s.dRate = rand(0.8, 1.5);                 // d morph period ~4-8s
+      s.waveRate = (rng() < 0.5 ? -1 : 1) * rand(1.2, 2.2); // thickness wave
+      s.waveK = rand(2.5, 4.5);                 // wavelengths along the curve
+      s.penRate = (rng() < 0.5 ? -1 : 1) * rand(0.1, 0.17); // traversals/s
+      s.penPhase = rng();
     }
   }
 
@@ -151,28 +176,68 @@
   let cycleFrame = 0;
   let clk = 0;
 
-  config();
+  initSpiros();
+  reconfigure();
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
 
   window.READY = false;
   window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
   window.currentFrame = 0;
 
+  const CHUNK = 45; // points per stroke chunk for the travelling thickness wave
   function drawCurve(s, hue) {
     const { pts, norm, scale } = s;
-    ctx.beginPath();
-    for (let i = 0; i < pts.length; i += 2) {
-      const x = pts[i] * norm * scale, y = pts[i + 1] * norm * scale;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
+    const k = norm * scale;
     const base = PAL[s.colorIdx];
-    ctx.strokeStyle = `hsla(${hue}, ${base[1]}%, ${Math.min(82, base[2] + 14)}%, 0.9)`;
-    ctx.lineWidth = Math.max(1.2, minDim / 620);
-    ctx.stroke();
-    ctx.strokeStyle = `hsla(${hue}, ${base[1]}%, ${base[2]}%, 0.2)`;
-    ctx.lineWidth = Math.max(1.2, minDim / 620) * 4.5;
-    ctx.stroke();
+    const lwBase = Math.max(2, minDim / 340);
+    const wavePh = clk * s.waveRate;
+    const nChunks = Math.ceil(POINTS / CHUNK);
+    // Two passes (soft halo, then bright core) so overlaps glow.
+    for (let pass = 0; pass < 2; pass++) {
+      for (let c = 0; c < nChunks; c++) {
+        const i0 = c * CHUNK, i1 = Math.min(POINTS, i0 + CHUNK + 1);
+        const w = 1 + 0.45 * Math.sin(wavePh + (c / nChunks) * Math.PI * 2 * s.waveK);
+        ctx.beginPath();
+        for (let i = i0; i < i1; i++) {
+          const j = (i % POINTS) * 2;
+          const x = pts[j] * k, y = pts[j + 1] * k;
+          if (i === i0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        if (pass === 0) {
+          ctx.strokeStyle = `hsla(${hue}, ${base[1]}%, ${base[2]}%, 0.15)`;
+          ctx.lineWidth = lwBase * 3.2 * w;
+        } else {
+          ctx.strokeStyle = `hsla(${hue}, ${base[1]}%, ${Math.min(74, base[2] + 6)}%, 0.9)`;
+          ctx.lineWidth = lwBase * w;
+        }
+        ctx.stroke();
+      }
+    }
+    // Pen: bright bead with a short comet tail behind it along the path.
+    const penT = ((clk * s.penRate + s.penPhase) % 1 + 1) % 1;
+    const penI = Math.floor(penT * POINTS);
+    const TAIL = 36;
+    const dir = s.penRate < 0 ? -1 : 1;
+    ctx.lineCap = 'round';
+    for (let t = TAIL; t >= 1; t -= 1) {
+      const a = ((penI - dir * t * 2) % POINTS + POINTS) % POINTS;
+      const b = ((penI - dir * (t - 1) * 2) % POINTS + POINTS) % POINTS;
+      const f = 1 - t / TAIL;
+      ctx.strokeStyle = `hsla(${hue}, ${base[1]}%, ${Math.min(80, base[2] + 14)}%, ${0.15 + 0.55 * f})`;
+      ctx.lineWidth = lwBase * (1.5 + 3.5 * f);
+      ctx.beginPath();
+      ctx.moveTo(pts[a * 2] * k, pts[a * 2 + 1] * k);
+      ctx.lineTo(pts[b * 2] * k, pts[b * 2 + 1] * k);
+      ctx.stroke();
+    }
+    const px = pts[penI * 2] * k, py = pts[penI * 2 + 1] * k;
+    const pr = Math.max(5, minDim * 0.014);
+    const g = ctx.createRadialGradient(px, py, 0, px, py, pr);
+    g.addColorStop(0, `hsla(${hue}, ${base[1]}%, 90%, 0.95)`);
+    g.addColorStop(0.5, `hsla(${hue}, ${base[1]}%, ${base[2]}%, 0.6)`);
+    g.addColorStop(1, `hsla(${hue}, ${base[1]}%, ${base[2]}%, 0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(px, py, pr, 0, Math.PI * 2); ctx.fill();
   }
 
   function renderFrame() {
@@ -186,16 +251,21 @@
     ctx.globalCompositeOperation = 'lighter';
 
     for (const s of spiros) {
+      // Morph: rebuild the point set with this frame's d.
+      const d = s.d0 * (1 + s.dAmp * Math.sin(clk * s.dRate + s.dPhase));
+      buildCurve(s.pts, s.R, s.r, d, s.epi);
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(s.rot + clk * s.rotRate);
       const base = PAL[s.colorIdx];
-      const hue = ((base[0] + hue0 * 0.05 + clk * 4) % 360 + 360) % 360;
+      // Hue: fixed per curve + small bounded wobble (hue swings luma, so no
+      // steady drift -- see CLAUDE.md).
+      const hue = ((base[0] + hue0 * 0.05 + Math.sin(clk * 0.4) * 8) % 360 + 360) % 360;
       drawCurve(s, hue);
       ctx.restore();
     }
 
-    if (cycleFrame >= cycleFrames) { cycleFrame = 0; config(); }
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigure(); }
   }
 
   window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
