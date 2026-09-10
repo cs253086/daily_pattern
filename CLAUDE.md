@@ -474,6 +474,56 @@ them:
      9.0, starburst 9.7 — wave 2. Production path re-verified after the
      pass: `DRY_RUN=1 DURATION=30 SCENE_SEC=8 node src/index.js` → 720
      frames, one engine (mixing off), correct title.
+   - **Unit choreography pass, wave 2 (2026-09-10, remaining 11 curated
+     engines + 3 Gemini-promoted, three parallel agents grouped by
+     technique), closing the pass.** Same discipline as wave 1: every
+     engine re-validated on seeds 1-8 + 12345, audited, and its 4-frame
+     0.25 s strip LOOKED at at full size before commit. Before → after
+     (residual luma / non-rigid share, seed 12345):
+
+     | engine | before | after | what moves now |
+     |---|---|---|---|
+     | grid | 6.7 / 99% | 12.2 / 96% | rows/cols slide in counter-directions; checkerboard-antiphase radial breathing (area-linear so paired cells cancel) |
+     | tessellation | 8.5 / 100% | 14.0 / 100% | tiles breathe in column antiphase (cols forced even, exact cancellation); per-tile rotation; rows shear |
+     | herringbone | 7.1 / 77% | 23.2 / 100% | weft cells breathe with run-mates spaced 2π/over apart (zero-sum); rows shear; bands bob; scroll slowed |
+     | hilbertweave | 9.0 / 94% | 12.4 / 95% | path vertices ripple on a small circle, phase along the path; stroke width pulses (3 whole cycles, zero-sum) |
+     | cascade | 5.2 / 80% | 12.9 / 82% | per-block spin; column sway; size pulse; per-column fall-speed modulation (bounded, never reversing) |
+     | geometric | 7.9 / 83% | 13.6 / 82% | adjacent rings counter-rotate; vertex-radius travelling wave (shapes wobble); ring radii slide (sum constant) |
+     | starburst | 9.7 / 74% | 12.3 / 79% | stars counter-rotate; points extend/retract on a travelling wave; shared-rate radial breathing (exact cancellation) |
+     | auto-…-spirograph (Gemini) | 0.9 / 100% | 14.7 / 97% | rewritten from accumulate-a-dot to clear-and-redraw; morphing trochoid beads, dual comet-tail pens |
+     | lattice3d | 5.6 / 97% | 8.8 / 85% | cubes bob/sway in travelling waves; rank-phased scale pulse; two layers rock in antiphase; bounded wobble replaces rigid turntable |
+     | solids3d | 8.6 / 97% | 9.0 / 97% | solids on epicyclic loops atop counter-rotating rings; vertical bob; rank-phased scale pulse; precessing spin axes |
+     | auto-…-poets-henj (Gemini) | 1.4 / 79% | 10.7 / 95% | per-cube Lissajous orbits + epicyclic loops; fixed a static-world-light bug that left dark faces toward camera |
+     | auto-…-gardens (Gemini) | 4.5 / 99% | 13.4 / 98% | orbit+epicyclic loops, travelling bob wave; fixed a real bug mutating shared palette arrays in place |
+
+     Confirms two wave-1 lessons a third time: **"rank-select a fixed
+     number" scale pulses** (phase assigned by each unit's rank so
+     exactly the same count is ever enlarged) are now the default way
+     to add a size pulse without a coverage-neutral proof per engine.
+     **Two real, previously-unknown bugs turned up purely from looking
+     for motion to add**: a static-world-light 3D bug (dark faces held
+     toward the camera for half of every orbit) and a shared-array
+     mutation bug (palette colours random-walking over the render) —
+     neither was a motion defect, both were caught only because adding
+     choreography required touching that code path.
+
+     One accepted exception: solids3d seed 3 still projects +51 luma
+     (down from +82 pre-fix) — the documented residual 3D-occlusion
+     failure class (geodome 81%, spaceframe 87.5% pass rates); the
+     production-default seed 12345 passes.
+
+     **Pool audit after wave 2 (34 engines, `scripts/audit-unit-motion.js`,
+     seed 12345): every engine now clears the 40% gate**, range 48-100%
+     non-rigid (was 13-34% for the previously-worst engines), residual
+     7.9-32.6 luma (was as low as 0.9-2.9 for the previously-frozen
+     ones). Lowest post-fix residuals — spaceframe 7.9, lattice3d 8.8,
+     voronoimosaic 8.8, solids3d 9.0, hoppercrystal 9.3 — are all
+     accepted trade-offs already explained in their own write-ups
+     (turntable-parallax area effects, luma-neutral colour motion, or
+     the 3D-occlusion class), not unaddressed engines. Production path
+     re-verified end to end after the full pass: `DRY_RUN=1 DURATION=30
+     SCENE_SEC=8 CROSSFADE_SEC=1 node src/index.js` → exactly 720
+     frames, one engine (mixing off by default), correct title.
 7. **Video descriptions never reveal that the pipeline is automated.**
    User request 2026-08-15: no "generated automatically," "fully automated
    pipeline," "AI-and-code generated," or raw `Seed:`/`Engine:` debug
