@@ -55,6 +55,29 @@
 //   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
 // Deterministic Mulberry32, no rAF, per-second rates, cheap vector fills/
 // strokes. Redraws each frame (no accumulation, no whiteout risk).
+//
+// UNIT CHOREOGRAPHY (2026-09-10, user definition of "dynamic": the basic
+// units must visibly move RELATIVE TO EACH OTHER every frame, not just the
+// whole pattern spinning). The unit-motion audit (scripts/audit-unit-
+// motion.js) scored the old version at residual 4.0: thin outlines that
+// spun in place with a 12% pulse. Added, in EVERY layout, all
+// coverage-neutral (phase-spread across units so totals stay flat):
+//   * BOB: each element orbits its own slot on a small circle (22-32% of
+//     its size, period ~3.5-7s, random sign), with a phase that travels
+//     across the layout (by u/v) so neighbours are visibly out of step.
+//   * SCALE WAVE: size pulses +-22% in a travelling wave across the layout
+//     (phase by position), so a ripple of swelling/shrinking runs through
+//     the arrangement instead of everything breathing together.
+//   * Faster per-element SPIN (0.6-1.3 rad/s, random sign per element) and
+//     faster ring ORBITS (0.25-0.5 rad/s, opposite sign on adjacent rings
+//     so rings counter-rotate).
+//   * Directional columns keep their lockstep fall but SWAY sideways with
+//     a per-column phase, and columns fall at clearly different speeds.
+//   * Thicker strokes (house style: bold, legible).
+// Shape details (sides/points/innerRatio/angleWidth) and the lum-derived
+// size/hue modulation are now fixed per video with the layout: with
+// thicker lines, re-rolling polygon sides per cycle changes stroke length
+// enough to read as a brightness trend (CLAUDE.md's starburst lesson).
 (() => {
   const params = new URLSearchParams(location.search);
   const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
@@ -145,6 +168,7 @@
 
   // ---- Shape drawing: a single element stamp centred at the origin,
   // rotated/scaled by the caller via ctx transform. ----------------------
+  let fillStyle = null; // set by the caller for the pass that also fills
   function drawPolygon(size, sides, style, lw) {
     ctx.beginPath();
     for (let i = 0; i <= sides; i++) {
@@ -153,6 +177,7 @@
       if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
     ctx.closePath();
+    if (fillStyle) { ctx.fillStyle = fillStyle; ctx.fill(); }
     ctx.strokeStyle = style; ctx.lineWidth = lw; ctx.stroke();
   }
   function drawStar(size, points, innerRatio, style, lw) {
@@ -165,6 +190,7 @@
       if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
     ctx.closePath();
+    if (fillStyle) { ctx.fillStyle = fillStyle; ctx.fill(); }
     ctx.strokeStyle = style; ctx.lineWidth = lw; ctx.stroke();
   }
   function drawWedge(size, angleWidth, style, lw) {
@@ -172,6 +198,7 @@
     ctx.moveTo(0, 0);
     ctx.arc(0, 0, size, -angleWidth / 2, angleWidth / 2);
     ctx.closePath();
+    if (fillStyle) { ctx.fillStyle = fillStyle; ctx.fill(); }
     ctx.strokeStyle = style; ctx.lineWidth = lw; ctx.stroke();
   }
   function drawElement(el, size, style, lw) {
@@ -209,7 +236,7 @@
           list.push({
             mode: 'static', x0, y0,
             u: gx > 1 ? ix / (gx - 1) : 0.5, v: gy > 1 ? iy / (gy - 1) : 0.5,
-            baseSize: spacing * 0.34,
+            baseSize: spacing * 0.31,
           });
         }
       }
@@ -234,7 +261,10 @@
           list.push({
             mode: 'drift', x0, y0: (b / perCol) * H, vy: colVy, colId: gxI,
             u: gxI / Math.max(1, cols - 1), v: 0.5,
-            baseSize: (W / cols) * 0.4,
+            // 0.34 (was 0.4): with the scale wave and bob added, 0.4 made a
+            // column's own elements overlap vertically and spill sideways, so
+            // the streams stopped reading as columns (seen by rendering seed 3).
+            baseSize: (W / cols) * 0.34,
           });
         }
       }
@@ -259,10 +289,27 @@
           list.push({
             mode: 'polar', cx: cx0, cy: cy0, radius, angle0, ringId: r,
             u: i / n, v: t,
-            baseSize: minDim * rand(0.028, 0.038),
+            baseSize: minDim * rand(0.034, 0.046),
           });
         }
       }
+    }
+    // Per-element FIXED details (coverage-affecting, so never re-rolled
+    // per cycle): shape parameters, lum modulation, bob radius, wave phase.
+    for (const el of list) {
+      const lum = lumAt(el.u, el.v);
+      el.sizeMul = 0.82 + (lum / 100) * 0.36;
+      el.hueShift = (lum / 100) * 40 - 20;
+      if (SHAPE === 'polygon') el.sides = randInt(3, 7);
+      else if (SHAPE === 'star') { el.points = randInt(4, 7); el.innerRatio = rand(0.38, 0.55); }
+      else el.angleWidth = rand(0.5, 1.1);
+      // Bounded so an element's reach (size x (1+wave) + bob) stays inside
+      // half its slot spacing: at 35-50% the grid/column structure stopped
+      // reading as a grid/columns (seen by rendering seeds 3 and 6).
+      el.bobR = el.baseSize * (el.mode === 'drift' ? rand(0.18, 0.26) : rand(0.22, 0.32));
+      // Travelling-wave phases: advance with position across the layout.
+      el.wavePhase = (el.u * 2 + el.v) * Math.PI * 2 + rand(-0.5, 0.5);
+      el.bobPhase = (el.u + el.v * 2) * Math.PI * 2 + rand(-0.5, 0.5);
     }
     return list;
   }
@@ -281,28 +328,30 @@
     // arcrings.html's rings-rotate-as-one-unit design.
     const ringIds = [...new Set(elements.filter((e) => e.mode === 'polar').map((e) => e.ringId))];
     const ringOrbitRate = {};
-    for (const id of ringIds) ringOrbitRate[id] = sign() * rand(0.08, 0.18);
+    const ringDir = sign();
+    for (const id of ringIds) ringOrbitRate[id] = ringDir * (id % 2 ? -1 : 1) * rand(0.25, 0.5);
     // Shared colour PER COLUMN for the directional layout -- reinforces
     // the "these belong to the same stream" read even where vertical gaps
-    // between a column's own elements are still fairly wide.
+    // between a column's own elements are still fairly wide. Columns also
+    // get their own sway phase/rate so neighbouring streams weave.
     const colIds = [...new Set(elements.filter((e) => e.colId !== undefined).map((e) => e.colId))];
-    const colColor = {};
-    for (const id of colIds) colColor[id] = randInt(0, PAL.length - 1);
+    const colColor = {}, colSwayRate = {}, colSwayPhase = {};
+    for (const id of colIds) {
+      colColor[id] = randInt(0, PAL.length - 1);
+      colSwayRate[id] = sign() * rand(0.9, 1.6);
+      colSwayPhase[id] = rng() * Math.PI * 2;
+    }
+    const waveRate = sign() * rand(1.0, 1.8);   // scale wave, period ~3.5-6s
     for (const el of elements) {
       el.rot0 = rng() * Math.PI * 2;
       // Guaranteed minimum magnitude with random sign -- same fix as every
       // other curated engine here.
-      el.rotRate = sign() * rand(0.35, 0.9);
-      el.pulseRate = rand(0.5, 1.2);
-      el.pulsePhase = rng() * Math.PI * 2;
+      el.rotRate = sign() * rand(0.6, 1.3);
+      el.waveRate = waveRate;
+      el.bobRate = sign() * rand(0.9, 1.8);
       el.orbitRate = el.mode === 'polar' ? ringOrbitRate[el.ringId] : 0;
       el.colorIdx = el.colId !== undefined ? colColor[el.colId] : randInt(0, PAL.length - 1);
-      const lum = lumAt(el.u, el.v);
-      el.sizeMul = 0.82 + (lum / 100) * 0.36;
-      el.hueShift = (lum / 100) * 40 - 20;
-      if (SHAPE === 'polygon') el.sides = randInt(3, 7);
-      else if (SHAPE === 'star') { el.points = randInt(4, 7); el.innerRatio = rand(0.38, 0.55); }
-      else el.angleWidth = rand(0.5, 1.1);
+      if (el.colId !== undefined) { el.swayRate = colSwayRate[el.colId]; el.swayPhase = colSwayPhase[el.colId]; }
     }
   }
 
@@ -320,18 +369,25 @@
   window.currentFrame = 0;
 
   function positionOf(el) {
+    let x, y;
     if (el.mode === 'polar') {
       const a = el.angle0 + clk * el.orbitRate;
-      return { x: el.cx + Math.cos(a) * el.radius, y: el.cy + Math.sin(a) * el.radius };
-    }
-    if (el.mode === 'drift') {
+      x = el.cx + Math.cos(a) * el.radius; y = el.cy + Math.sin(a) * el.radius;
+    } else if (el.mode === 'drift') {
       const margin = el.baseSize * 2;
       const span = H + margin * 2;
-      let y = (el.y0 + clk * el.vy) % span;
-      if (y < 0) y += span;
-      return { x: el.x0, y: y - margin };
+      let yy = (el.y0 + clk * el.vy) % span;
+      if (yy < 0) yy += span;
+      // Column sway: the whole stream weaves sideways, phase-offset down
+      // the column so it reads as a ribbon, not a rigid bar.
+      x = el.x0 + el.baseSize * 0.2 * Math.sin(clk * el.swayRate + el.swayPhase + (el.y0 / H) * Math.PI * 2);
+      y = yy - margin;
+    } else {
+      x = el.x0; y = el.y0;
     }
-    return { x: el.x0, y: el.y0 };
+    // Bob: a small circle around the slot.
+    const b = clk * el.bobRate + el.bobPhase;
+    return { x: x + Math.cos(b) * el.bobR, y: y + Math.sin(b) * el.bobR };
   }
 
   function renderFrame() {
@@ -343,20 +399,26 @@
     ctx.fillRect(0, 0, W, H);
 
     ctx.globalCompositeOperation = 'lighter';
-    const lwBright = Math.max(1.6, minDim / 480);
-    const lwSoft = lwBright * 3.2;
+    const lwBright = Math.max(2.5, minDim / 220);
+    const lwSoft = lwBright * 2.6;
 
     for (const el of elements) {
       const { x, y } = positionOf(el);
       const rot = el.rot0 + clk * el.rotRate;
-      const size = el.baseSize * el.sizeMul * (0.88 + 0.12 * Math.sin(clk * el.pulseRate + el.pulsePhase));
+      const size = el.baseSize * el.sizeMul * (1 + 0.22 * Math.sin(clk * el.waveRate + el.wavePhase));
       const base = PAL[el.colorIdx];
-      const hue = ((base[0] + hue0 * 0.05 + el.hueShift + clk * 4) % 360 + 360) % 360;
+      // Hue: spatial (per element) + small bounded wobble; no steady drift
+      // (hue swings luma -- CLAUDE.md).
+      const hue = ((base[0] + hue0 * 0.05 + el.hueShift + Math.sin(clk * 0.4) * 8) % 360 + 360) % 360;
 
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(rot);
+      // Translucent fill makes each unit a bold, legible shape (house
+      // style) rather than a hairline outline.
+      fillStyle = `hsla(${hue}, ${base[1]}%, ${base[2]}%, 0.28)`;
       drawElement(el, size, `hsla(${hue}, ${base[1]}%, ${Math.min(84, base[2] + 16)}%, 0.92)`, lwBright);
+      fillStyle = null;
       drawElement(el, size, `hsla(${hue}, ${base[1]}%, ${base[2]}%, 0.2)`, lwSoft);
       ctx.restore();
     }
