@@ -3639,6 +3639,127 @@ place among the nearest neighbours, confirming the concave receding
 staircase reads as structurally distinct from every existing 3D
 composition, not just superficially different.
 
+## Dragon-fold engine (`dragonfold.html`) — 2026-09-10
+
+Daily creative-research routine. Category was "random Wikipedia article" by
+the firing-minute-mod-category-count method. Since Wikipedia is blocked in
+this sandbox, an open WebSearch for an unusual/lesser-known geometric curve
+construction (the established fallback for this category) surfaced the
+Peano/Hilbert space-filling family (already covered by `hilbertweave.html`),
+rolling-circle curves (already `spirograph.html`'s archetype), and the
+**Heighway dragon curve** -- the classic "paperfolding" fractal produced by
+repeatedly folding a strip of paper in half the same way and unfolding each
+crease to a right angle. Generated here via its standard L-system definition
+(axiom FX, rules X -> X+YF+, Y -> -FX-Y, 90-degree turns; X/Y are
+non-drawing placeholders, only F/+/- are interpreted by the turtle).
+
+**A genuinely different construction PRINCIPLE from `hilbertweave.html`, the
+pool's other L-system curve.** The Hilbert curve is a Hamiltonian path that
+visits EVERY cell of a fixed NxN grid exactly once -- uniform coverage, a
+square bounding box by construction. The dragon curve visits no such grid
+at all: it is self-avoiding but not self-similar to a square, with a
+lopsided, asymmetric silhouette. **Verified OFFLINE before writing any
+rendering code**, the same discipline this pool's `quasicrystal.html`/
+`geodome.html`/`hilbertweave.html` already established for a curve
+construction that could still "look plausible" even if subtly wrong: a
+standalone script expanded the L-system for orders 4/8/12/14, walked the
+turtle, and hashed every traversed edge to confirm NO edge is ever
+revisited in either direction (a true self-avoiding path) -- and confirmed
+the bounding box's width/height ratio genuinely changes with order (1.667,
+1.533, 1.508, 0.665), rather than assuming the "lopsided" claim.
+
+**This engine needed two composition-level redesigns to clear the mandatory
+novelty gate, both driven by measurement, not guessing** -- the third time
+this pool has needed multi-round novelty iteration after `phyllotaxis.html`
+(four rounds) and `hilbertweave.html`/`voderberg.html` (one redesign /
+one parameter-lever iteration each):
+
+1. **First draft: several small dragon-curve instances, rendered as
+   continuous thick strokes, placed in a near-regular grid** -- the exact
+   composition pattern `dendrite.html`/`phyllotaxis.html`/`hilbertweave.html`
+   already established as safe for THOSE engines. Measured against the
+   pool: nearest neighbour was `hilbertweave` at distance **0.457** --
+   a clear fail (need >= 0.60). Despite a completely different underlying
+   curve construction (paper-folding fractal vs. grid-filling Hamiltonian
+   path), the RENDERED composition -- several small rainbow stroke-curve
+   clusters on black -- read too similar to `hilbertweave.html`'s own
+   multi-instance archetype to the colour-blind, composition-based
+   descriptor. Confirms this pool's `phyllotaxis.html`-documented lesson a
+   second time: "what is the repeated element" and "how is it arranged" are
+   different axes, and construction-principle novelty doesn't automatically
+   translate into composition-level novelty.
+2. **Redesign: ONE large dominant instance, rendered as a CHAIN OF SOLID
+   BLOCKS (near pitch-width rounded squares) tracing the curve's visited
+   lattice points, instead of a continuous stroke** -- a genuine
+   render-technique change (not a parameter nudge), borrowing
+   `primespiral.html`'s "bold filled squares" technique but applied to one
+   CONNECTED path instead of a sieve of independent scattered points, at
+   one large scale instead of several small instances. At near-pitch-width
+   blocks (0.9x pitch), this passed at **0.627** -- clear of the threshold,
+   but by this pool's own `voderberg.html`-established precedent ("a
+   technical pass just above the 0.60 line is still worth a quick iteration
+   check"), an uncomfortably thin margin next to this pool's typical 0.7+
+   passes, so it was iterated rather than shipped on a bare pass.
+   - Tried making blocks LARGER and overlapping (1.06x pitch, a more solid
+     connected ribbon) on the reasoning that a bolder, more filled shape
+     would read as more distinct. Measured WORSE, not better: distance
+     dropped to **0.522** (a fail) -- the more solid mass moved the
+     composition CLOSER to the pool's smooth lit-3D mesh engines
+     (`torusrings3d`/`geodome`), not further, and the same change also
+     pushed one seed's `unitMotionNonRigidFrac` below the 40% floor
+     (overlapping blocks smear per-block independent motion together,
+     weakening the non-rigid signal). A real, measured instance of this
+     pool's established lesson that not every lever moves novelty distance
+     in the intuitively expected direction (see `voderberg.html`'s
+     segment-count-vs-turn-count write-up for the first occurrence).
+   - Reverting and instead making blocks SMALLER (0.74x pitch, more
+     separated/textured/pixelated rather than a smooth blob) moved the
+     opposite, correct direction: distance rose to **0.772**, and the
+     unit-motion margin widened comfortably too (0.507-0.705 across the
+     full seed battery, vs. the 1.06x attempt's near-failure). The
+     textured, gapped look reads as structurally distinct from the pool's
+     smooth continuous-mesh 3D engines in a way a solid, merged blob does
+     not, even though both are still "irregular, moderately-covered,
+     non-radially-symmetric" compositions in the broad strokes.
+
+**Unit-level dynamics were built in from the first draft**, not retrofitted
+(per CLAUDE.md's 2026-09-10 standing requirement): every block bobs
+independently on its own small orbit (own phase/rate, amplitude a fraction
+of lattice PITCH rather than of the whole instance -- pitch is much
+smaller than the instance's overall size at these iteration orders, so a
+generous bob amplitude relative to pitch is still negligible for rotation-
+clipping safety); a rank-selected fixed-length window of blocks (by path
+index) pulse larger/brighter at any instant, coverage-neutral by
+construction since the window length never changes (the same "fixed-size
+window, position varies" mechanic `chladni.html`/`hilbertweave.html`
+already proved safe); the whole chain also spins slowly and rigidly on top.
+
+**Verified** (final, 0.74x-pitch design): `validateEngine()` **16/16**
+across seeds 1-15 plus the CLI's actual default seed 12345 (see
+`geodome.html`'s write-up for why that seed matters). Margins comfortable
+throughout: `projectedRise` -6.4 to +8.4 (vs the 50 threshold), `avgSat`
+69.4-77.9 (vs the 22 minimum), zero near-white pixels on every seed,
+`fastMotion` always above its per-frame floor, `compositionDrift`
+0.063-0.130 (vs the 0.015 minimum -- comfortable, unlike the compute-once-
+rotate-only engines this check was built to catch), `unitMotionNonRigidFrac`
+0.507-0.705 (vs the 0.40 minimum -- the mandatory 2026-09-10 unit-motion
+gate), `projectedHourRenderMin` 7.2-18.8min (well inside the CI budget).
+Visual spot-checks across 2/25/50/75/95/105% of a 41.5s cycle at 3 seeds,
+actually rendering PNGs and looking at them (not just reading validator
+output): a vivid, bold, immediately-legible pixelated fractal-worm chain
+with clear rainbow gradient tracing the fold order, no artifacts across any
+sampled fraction or seed.
+
+**Novelty gate** (final design): measured against all 35 existing engines
+(the committed fingerprint cache was several commits stale -- missing
+several recently-promoted/shipped engines -- so the whole pool was
+fingerprinted fresh alongside the candidate, per this pool's established
+practice; the refreshed cache was not committed, per this routine's "touch
+only the new engine + log + CLAUDE.md" constraint). Nearest neighbour is
+`torusrings3d` at distance **0.772** -- comfortably clear of the 0.60
+threshold and close to this pool's own median pair distance, not a
+borderline case.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

@@ -184,4 +184,16 @@
     "nearestNeighbour": null,
     "nearestDistance": null
   }
+,
+  {
+    "date": "2026-09-10",
+    "inspirationSource": "The Heighway dragon curve -- the classic \"paperfolding\" fractal produced by repeatedly folding a strip of paper in half the same way and unfolding each crease to a right angle, generated via its standard Lindenmayer-system definition (axiom FX, rules X -> X+YF+, Y -> -FX-Y, 90-degree turns). Category: random Wikipedia article (Wikipedia itself is blocked in this sandbox, so per this pool's established fallback, an open WebSearch for an unusual/lesser-known geometric curve construction was used instead).",
+    "idea": "A single curve built by iterated 90-degree paper-folding -- self-avoiding (verified offline: no edge revisited across orders 4/8/12/14) but NOT self-similar to a fixed square, with a lopsided bounding box whose aspect ratio genuinely changes with iteration order (1.667/1.533/1.508/0.665 at orders 4/8/12/14) -- a genuinely different construction principle from every other curve/path engine in the pool (not a Hamiltonian grid-fill like hilbertweave, not a substitution tiling, not a branching growth process, not an arithmetic sieve). Rendered as a chain of solid rounded-square blocks (not a continuous stroke) tracing the curve's visited lattice points, giving a bold pixelated-fractal-worm silhouette.",
+    "engineName": "dragonfold",
+    "outcome": "shipped",
+    "reason": "Needed two composition-level redesigns after the mandatory novelty gate rejected the first two attempts, both measured not assumed: (1) multi-instance small stroke-curve clusters in a grid (the same general archetype as hilbertweave.html) measured only 0.457 from hilbertweave -- fixed by switching from a continuous stroke to a chain of solid blocks at one large dominant scale (a genuine render-technique change, not a parameter nudge); (2) that redesign at near-pitch-width blocks (0.9x) passed at 0.627 but with an uncomfortably thin margin by this pool's own precedent (see voderberg.html's write-up), and a follow-up attempt to push it further by making blocks OVERLAP (1.06x pitch, more solid) moved the WRONG direction -- distance dropped to 0.522 (a fail) and also broke the unit-motion gate on one seed, confirming this pool's established lesson that not every lever moves novelty distance in the intuitively expected direction. Reverting and instead SHRINKING blocks (0.74x pitch, more textured/pixelated, less like a smooth blob) moved distance up to 0.772 while also comfortably widening the unit-motion margin. Unit-level dynamics (per-block independent orbit bob + rank-selected fixed-fraction size/brightness pulse + per-instance rigid spin) were built in from the first draft per the standing 2026-09-10 requirement, not retrofitted.",
+    "seedsVerified": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 12345],
+    "nearestNeighbour": "torusrings3d",
+    "nearestDistance": 0.772
+  }
 ]
