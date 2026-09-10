@@ -23,6 +23,30 @@
 // Deterministic Mulberry32, no rAF, per-second rotation rates, cheap vector
 // strokes/fills. Redraws each frame (no accumulation, no whiteout risk):
 // glow comes from additive overlap of a few nested stars within one frame.
+//
+// UNIT CHOREOGRAPHY (2026-09-10 wave 2, user definition of "dynamic": the
+// basic units must visibly move RELATIVE TO EACH OTHER every second, not
+// just the whole pattern spinning). The unit-motion audit
+// (scripts/audit-unit-motion.js) scored the old version at residual 9.7 /
+// 74% non-rigid: four rigid stars spinning with a 6% pulse. Now, all
+// coverage-neutral by construction:
+//   * COUNTER-ROTATION: adjacent stars alternate sign (inner faster), so
+//     the nested stars always slide against each other.
+//   * POINT EXTEND/RETRACT: each star's outer-vertex radius carries a
+//     travelling wave around the star (+-22-28% of its radius, one or two
+//     wavelengths per star, period 3-6s) -- the points reach out and pull
+//     in one after another, so the star ripples; the wave spans whole
+//     cycles around the star, so its area stays flat to first order.
+//   * RADIAL BREATHING: the stars breathe (+-10%) on ONE shared rate with
+//     phases staggered i*2pi/4, so the sum of the deltas cancels exactly
+//     at every instant (independent per-star rates would not).
+//   * INNER-RATIO SEE-SAW: the concave inner vertices breathe (+-0.09 of
+//     the inner ratio) in antiphase between adjacent stars, so the points
+//     visibly sharpen and blunt against their neighbours.
+//   * Star count stays FIXED at 4 (see the config() comment: randomising it
+//     swung additive-overlap area and read as a brightness trend). Hue is
+//     spatial (per star) with a small bounded wobble instead of a steady
+//     drift (hue swings luma -- see CLAUDE.md). Slightly thicker edges.
 (() => {
   const params = new URLSearchParams(location.search);
   const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
@@ -81,7 +105,7 @@
 
   // A "star" is a concave N-pointed star polygon (alternating outer/inner
   // radius) at some scale, spinning at its own rate.
-  let stars, hue0;
+  let stars, hue0, breathRate, breathPhase;
   function config() {
     hue0 = rng() * 360;
     // Fixed count (not randomised): a variable star count changes total
@@ -91,30 +115,43 @@
     // across frames (full clear every frame). Keep count fixed and vary
     // everything else (points/radii/rotation/hue) for variety instead.
     const n = 4;
+    const sign0 = rng() < 0.5 ? -1 : 1;
+    breathRate = rand(0.9, 1.5);                 // shared, ~4-7s
+    breathPhase = rng() * Math.PI * 2;
     stars = [];
     for (let i = 0; i < n; i++) {
       const t = (i + 1) / n;
       stars.push({
         points: randInt(5, 9),
         outerR: t * minDim * 0.44,
-        innerRatio: rand(0.38, 0.55),
+        innerRatio: rand(0.40, 0.55),
         rot: rng() * Math.PI * 2,
-        // Guaranteed minimum magnitude with random sign -- never let a star
-        // sit nearly still (see kaleidoscope.html/geometric.html for why).
-        rotRate: (rng() < 0.5 ? -1 : 1) * rand(0.5, 1.3) * (1 - t * 0.35),
-        pulseRate: rand(0.6, 1.4),
+        // Guaranteed minimum magnitude; adjacent stars COUNTER-rotate
+        // (alternating sign), inner ones faster -- never near-still.
+        rotRate: sign0 * (i % 2 === 0 ? 1 : -1) * rand(0.5, 1.1) * (1 - t * 0.35),
+        // Point wave: wavelengths around the star (integer, so the wave is
+        // continuous around it), rate with random sign, own phase.
+        waveK: rng() < 0.6 ? 1 : 2,
+        waveRate: (rng() < 0.5 ? -1 : 1) * rand(1.1, 2.0),   // ~3-6s
+        wavePhase: rng() * Math.PI * 2,
+        waveAmp: rand(0.22, 0.28),
+        innerRate: rand(0.8, 1.4),
         colorIdx: i % PAL.length,
       });
     }
   }
 
   // Build a star polygon path (concave, alternating outer/inner vertices).
-  function starPath(r, points, innerRatio, rot) {
+  // Outer vertices carry a travelling radius wave around the star.
+  function starPath(r, points, innerRatio, rot, wAmp, wK, wPh) {
     ctx.beginPath();
     const n = points * 2;
     for (let i = 0; i <= n; i++) {
       const idx = i % n;
-      const rad = (idx % 2 === 0) ? r : r * innerRatio;
+      const p = Math.floor(idx / 2);
+      const rad = (idx % 2 === 0)
+        ? r * (1 + wAmp * Math.sin(wPh + (p / points) * Math.PI * 2 * wK))
+        : r * innerRatio;
       const a = rot + (idx / n) * Math.PI * 2;
       const x = cx + Math.cos(a) * rad, y = cy + Math.sin(a) * rad;
       if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
@@ -145,27 +182,33 @@
     ctx.globalCompositeOperation = 'lighter';
     const lwThin = Math.max(1, minDim / 900);
 
-    for (const s of stars) {
-      const r = s.outerR * (0.94 + 0.06 * Math.sin(clk * s.pulseRate));
+    for (let i = 0; i < stars.length; i++) {
+      const s = stars[i];
+      // Shared-rate breathing with phases spread across the 4 stars.
+      const r = s.outerR * (1 + 0.10 * Math.sin(clk * breathRate + breathPhase + (i / stars.length) * Math.PI * 2));
       const rot = s.rot + clk * s.rotRate;
+      const wph = clk * s.waveRate + s.wavePhase;
+      const inner = s.innerRatio + 0.09 * Math.sin(clk * s.innerRate + (i % 2) * Math.PI);
       const base = PAL[s.colorIdx];
-      const hue = ((base[0] + hue0 * 0.05 + clk * 5) % 360 + 360) % 360;
+      // Hue: spatial per star + small bounded wobble (hue swings luma, so
+      // no steady drift -- see CLAUDE.md).
+      const hue = ((base[0] + hue0 * 0.05 + i * 8 + Math.sin(clk * 0.3 + i) * 8) % 360 + 360) % 360;
 
       // Low-alpha additive fill first (layers build brighter where stars
       // overlap -- safe: this happens WITHIN one freshly-cleared frame, it
       // never carries over to the next).
-      starPath(r, s.points, s.innerRatio, rot);
+      starPath(r, s.points, inner, rot, s.waveAmp, s.waveK, wph);
       ctx.fillStyle = `hsla(${hue}, ${base[1]}%, ${base[2]}%, 0.16)`;
       ctx.fill();
 
       // Crisp bright edge + soft wide edge on top, like the other curated
       // engines, so the outline itself reads luminous.
-      starPath(r, s.points, s.innerRatio, rot);
+      starPath(r, s.points, inner, rot, s.waveAmp, s.waveK, wph);
       ctx.strokeStyle = `hsla(${hue}, ${base[1]}%, ${Math.min(82, base[2] + 14)}%, 0.9)`;
-      ctx.lineWidth = lwThin * 2.0;
+      ctx.lineWidth = lwThin * 2.4;
       ctx.stroke();
       ctx.strokeStyle = `hsla(${hue}, ${base[1]}%, ${base[2]}%, 0.22)`;
-      ctx.lineWidth = lwThin * 5.5;
+      ctx.lineWidth = lwThin * 6.0;
       ctx.stroke();
     }
 
