@@ -22,6 +22,34 @@
 // Deterministic Mulberry32, no rAF, canvas sized to width/height, per-second
 // rotation rates, cheap vector strokes. Redraws each frame (no accumulation):
 // the "glow" is from additive overlap of the layered edges + a light bloom pass.
+//
+// UNIT CHOREOGRAPHY (2026-09-10 wave 2, user definition of "dynamic": the
+// basic units must visibly move RELATIVE TO EACH OTHER every second, not
+// just the whole pattern spinning). The unit-motion audit
+// (scripts/audit-unit-motion.js) scored the old version at residual 7.9 /
+// 83% non-rigid: rigid polygons on a shared global spin with a 4% pulse.
+// Now, all coverage-neutral by construction:
+//   * COUNTER-ROTATION: adjacent rings alternate sign (inner faster), and
+//     the global spin is gone -- every ring slides against its neighbours.
+//   * VERTEX BREATHING: each ring's vertex radius carries a travelling wave
+//     around the shape (+-12% of its radius, 1 or 2 wavelengths per ring,
+//     period 3-6s), so polygons wobble/squash and their corners bulge in
+//     turn; the wave spans whole cycles around the ring, so the perimeter
+//     stays flat.
+//   * RADIAL SLIDE: rings breathe in and out (+-28% of the ring spacing)
+//     with phases spread i*2pi/n across the n rings, so the sum of the
+//     radii -- and the total stroke length -- is constant at every instant.
+//   * SPOKE SWEEP: the spokes are brighter and each swings +-32% of its
+//     slot in a travelling wave around the lattice, and its length pulses
+//     (+-14%) on the same wave, so the lattice ripples instead of spinning
+//     as one block.
+//   * Ring count is fixed once per video (initRings); config() re-rolls
+//     sides, rates and phases per cycle. Hue is spatial (per ring / per
+//     spoke) with a small bounded wobble instead of a steady drift (hue
+//     swings luma -- see CLAUDE.md). Thicker strokes (house style).
+//   * cycleSec 45 -> 43.5: at 45 one of validate.js's fixed sample times
+//     (270s) sat exactly on a reconfigure boundary (the automaton.html /
+//     wave-1 lesson); 43.5 keeps every sample clear of one.
 (() => {
   const params = new URLSearchParams(location.search);
   const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
@@ -34,7 +62,7 @@
   const SEED = intP('seed', 1);
   const SPEED = fltP('speed', 1);
   const DENSITY = fltP('density', 1);
-  const CYCLE_SEC = fltP('cycleSec', 45);
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
 
   const canvas = document.getElementById('c');
   canvas.width = W; canvas.height = H;
@@ -81,40 +109,52 @@
   const dt = 1 / FPS;
 
   // A "ring" is a regular polygon at some radius, rotating at its own rate.
-  let rings, sides, hue0, spin;
+  // Ring count is fixed once per video; everything else re-rolls per cycle.
+  let rings, sides, hue0, nRings, spokeSweepRate, spokeSweepPhase, spokeSpin, slideRate, slidePhase;
+  function initRings() {
+    nRings = randInt(4, 6);
+  }
   function config() {
     sides = randInt(3, 8);                 // shared polygon order (triangle..octagon)
     hue0 = rng() * 360;
-    // Guaranteed minimum magnitude (not rand(-0.25,0.25), which can land
-    // near zero and look nearly static) so the whole piece always has
-    // visible, lively motion -- a full rotation now takes ~4-9s instead of
-    // being able to sit almost still for tens of seconds.
-    spin = (rng() < 0.5 ? -1 : 1) * rand(0.7, 1.5);   // global rotation (rad/s)
-    // Fewer, bigger nested shapes -> each polygon reads clearly instead of a
-    // dense fine web of overlapping rings.
-    const n = randInt(4, 6);
+    const sign0 = rng() < 0.5 ? -1 : 1;
+    // Spokes: their own slow spin plus a travelling sweep wave.
+    spokeSpin = -sign0 * rand(0.25, 0.45);
+    spokeSweepRate = (rng() < 0.5 ? -1 : 1) * rand(1.0, 1.7);   // ~3.7-6.3s
+    spokeSweepPhase = rng() * Math.PI * 2;
+    slideRate = rand(0.8, 1.4);                                   // ~4.5-8s
+    slidePhase = rng() * Math.PI * 2;
+    const n = nRings;
     rings = [];
     for (let i = 0; i < n; i++) {
       const t = (i + 1) / n;
       rings.push({
         r: t * minDim * 0.46,
         rot: rng() * Math.PI * 2,
-        // Same guaranteed-minimum-magnitude fix; inner rings still spin
-        // somewhat faster (the (1 - t*0.4) taper), but never near-zero.
-        rotRate: (rng() < 0.5 ? -1 : 1) * rand(0.6, 1.3) * (1 - t * 0.4),
+        // Guaranteed minimum magnitude; adjacent rings COUNTER-rotate
+        // (alternating sign) and inner rings spin faster.
+        rotRate: sign0 * (i % 2 === 0 ? 1 : -1) * rand(0.55, 1.1) * (1 - t * 0.4),
         sides: (rng() < 0.7) ? sides : randInt(3, 8),
         colorIdx: i % PAL.length,
-        pulseR: rand(0.9, 2.0),
+        // Vertex wave: wavelengths around the ring (integer so the wave is
+        // continuous around the shape), rate with random sign, phase.
+        waveK: rng() < 0.6 ? 1 : 2,
+        waveRate: (rng() < 0.5 ? -1 : 1) * rand(1.1, 2.0),   // ~3-6s
+        wavePhase: rng() * Math.PI * 2,
+        waveAmp: rand(0.09, 0.14),
       });
     }
   }
 
-  function poly(r, n, rot, style, lw) {
+  // Polygon whose vertex radius carries a travelling wave around the shape.
+  function poly(r, n, rot, style, lw, wAmp, wK, wPh) {
     ctx.strokeStyle = style; ctx.lineWidth = lw;
     ctx.beginPath();
     for (let i = 0; i <= n; i++) {
-      const a = rot + (i / n) * Math.PI * 2;
-      const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+      const idx = i % n;
+      const a = rot + (idx / n) * Math.PI * 2;
+      const rr = r * (1 + wAmp * Math.sin(wPh + (idx / n) * Math.PI * 2 * wK));
+      const x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr;
       if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
     ctx.stroke();
@@ -124,6 +164,7 @@
   let cycleFrame = 0;
   let clk = 0;
 
+  initRings();
   config();
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
 
@@ -140,33 +181,44 @@
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, W, H);
 
-    const g = clk * spin;                   // global spin
     ctx.globalCompositeOperation = 'lighter';
 
-    // Radial lattice: crisp spokes from centre.
+    // Radial lattice: crisp spokes from centre, each sweeping inside its
+    // slot and pulsing in length on a travelling wave (phase spans exactly
+    // two cycles around the lattice, so total spoke length stays flat).
     const spokes = sides * 2;
     const lwThin = Math.max(1, minDim / 1080);
+    const slot = Math.PI * 2 / spokes;
+    const sweepPh = clk * spokeSweepRate + spokeSweepPhase;
+    const spokeBase = clk * spokeSpin;
     for (let k = 0; k < spokes; k++) {
-      const a = g + (k / spokes) * Math.PI * 2;
+      const wph = sweepPh + (k / spokes) * Math.PI * 2 * 2;
+      const a = spokeBase + (k / spokes) * Math.PI * 2 + 0.32 * slot * Math.sin(wph);
+      const len = minDim * 0.5 * (1 + 0.14 * Math.cos(wph));
       const base = PAL[k % PAL.length];
-      const spokeHue = ((base[0] + hue0 * 0.05 + clk * 4) % 360 + 360) % 360;
-      ctx.strokeStyle = `hsla(${spokeHue}, ${base[1]}%, ${base[2]}%, 0.10)`;
-      ctx.lineWidth = lwThin;
+      const spokeHue = ((base[0] + hue0 * 0.05 + k * 9 + Math.sin(clk * 0.3) * 6) % 360 + 360) % 360;
+      ctx.strokeStyle = `hsla(${spokeHue}, ${base[1]}%, ${base[2]}%, 0.30)`;
+      ctx.lineWidth = lwThin * 1.6;
       ctx.beginPath(); ctx.moveTo(cx, cy);
-      ctx.lineTo(cx + Math.cos(a) * minDim * 0.5, cy + Math.sin(a) * minDim * 0.5);
+      ctx.lineTo(cx + Math.cos(a) * len, cy + Math.sin(a) * len);
       ctx.stroke();
     }
 
-    // Concentric rotating polygons — the crisp geometric core. Draw each twice
-    // (bright thin + soft wider) so edges read luminous without going blobby.
-    for (const rg of rings) {
-      const r = rg.r * (0.96 + 0.04 * Math.sin(clk * 0.6 * rg.pulseR));
-      const rot = rg.rot + g + clk * rg.rotRate;
+    // Concentric counter-rotating polygons -- the crisp geometric core. Draw
+    // each twice (bright thin + soft wider) so edges read luminous without
+    // going blobby. Radii slide with phases spread across the rings.
+    const spacing = minDim * 0.46 / rings.length;
+    for (let i = 0; i < rings.length; i++) {
+      const rg = rings[i];
+      const r = rg.r + 0.28 * spacing * Math.sin(clk * slideRate + slidePhase + (i / rings.length) * Math.PI * 2);
+      const rot = rg.rot + clk * rg.rotRate;
+      const wph = clk * rg.waveRate + rg.wavePhase;
       const base = PAL[rg.colorIdx];
-      // Continuous slow hue drift (dynamic colouring) layered on the wobble.
-      const hue = ((base[0] + hue0 * 0.05 + clk * 4 + Math.sin(clk * 0.2) * 12) % 360 + 360) % 360;
-      poly(r, rg.sides, rot, `hsla(${hue}, ${base[1]}%, ${Math.min(80, base[2] + 14)}%, 0.9)`, lwThin * 2.2);
-      poly(r, rg.sides, rot, `hsla(${hue}, ${base[1]}%, ${base[2]}%, 0.22)`, lwThin * 6.0);
+      // Hue: spatial per ring + small bounded wobble (hue swings luma, so
+      // no steady drift -- see CLAUDE.md).
+      const hue = ((base[0] + hue0 * 0.05 + i * 7 + Math.sin(clk * 0.25 + i) * 8) % 360 + 360) % 360;
+      poly(r, rg.sides, rot, `hsla(${hue}, ${base[1]}%, ${Math.min(80, base[2] + 14)}%, 0.9)`, lwThin * 3.2, rg.waveAmp, rg.waveK, wph);
+      poly(r, rg.sides, rot, `hsla(${hue}, ${base[1]}%, ${base[2]}%, 0.22)`, lwThin * 8.0, rg.waveAmp, rg.waveK, wph);
     }
 
     if (cycleFrame >= cycleFrames) { cycleFrame = 0; config(); }

@@ -26,6 +26,38 @@
 //   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
 // Deterministic Mulberry32, no rAF, per-second rates, cheap vector strokes,
 // redraws each frame (no accumulation, no whiteout risk).
+//
+// UNIT CHOREOGRAPHY (2026-09-10 wave 2, user definition of "dynamic": the
+// basic units must visibly move RELATIVE TO EACH OTHER every second, not
+// just the whole pattern scrolling). The unit-motion audit
+// (scripts/audit-unit-motion.js) scored the old version at residual 5.2 /
+// 80% non-rigid: every column fell at the same rate (one rigid downward
+// translation) and each block's spin/size were slaved to its fall phase.
+// Now, all coverage-neutral by construction:
+//   * Per-block SPIN: every block has its own rotation rate (guaranteed
+//     minimum, random sign, period ~3-8s) independent of its fall, so
+//     neighbours tumble against each other.
+//   * Sideways SWAY: a travelling wave keyed to column index (phase spans
+//     exactly two cycles across the frame) moves each block +-24% of its
+//     cell width (+-30%), so columns lean left/right in a ripple.
+//   * Size PULSE as a travelling wave across columns AND along each column
+//     (+-30% of block size); the column phases span whole cycles so the
+//     frame's total stroke length stays flat at every instant.
+//   * Per-column FALL SPEED: each column's fall is integrated per frame
+//     (continuous across reconfigures -- no position jump at a cycle
+//     boundary) at the shared base rate times (1 + 0.4 sin), phase spread
+//     across columns: the floor is guaranteed (never below 0.6x) and columns
+//     visibly overtake each other while the diagonal sweep re-forms on
+//     average (a permanent per-column speed offset was tried first and
+//     dissolved the diagonal -- the engine's identity -- within a cycle).
+//   * BUNCHING: blocks within a column slide along it (+-13% of the column
+//     spacing) in a travelling wave, so they bunch and spread like beads.
+//   * blocksPerCol is FIXED at 4 once per video (was re-rolled 2-3 per
+//     cycle: a 50% swing in total stroke length between cycles). Hue is spatial (per
+//     column) with a small bounded wobble instead of a steady drift (hue
+//     swings luma -- see CLAUDE.md). Each square also carries a translucent
+//     additive fill (glass tile) under its bright edge: bolder (house
+//     style) and the units carry enough luma for their motion to register.
 (() => {
   const params = new URLSearchParams(location.search);
   const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
@@ -82,27 +114,51 @@
 
   // A "column" of falling blocks. blocksPerCol blocks are evenly spaced in
   // vertical phase within the column and wrap top-to-bottom continuously.
+  // Column count and blocks-per-column are fixed once per video (initGrid);
+  // config() re-rolls only rates, phases and the hue offset every cycleSec.
   let cols, cellW, blocksPerCol, hue0, fallRate, diagonalK;
-  function config() {
-    hue0 = rng() * 360;
+  let colFall, colModPhase, spinRate, spinPhase, swayRate, swayPhase, pulseRate, modRate, bunchRate;
+  function initGrid() {
     const target = Math.round(rand(9, 14) * Math.max(0.6, Math.min(1.6, DENSITY)));
     cols = target;
     cellW = W / cols;
-    blocksPerCol = randInt(2, 3);
+    blocksPerCol = 4;
+    // Per-column phase stagger by x position -- creates the diagonal
+    // cascade sweep instead of every column falling in lockstep. Set once:
+    // the per-column fall phase is integrated from here on.
+    diagonalK = rand(0.6, 1.4) * (rng() < 0.5 ? -1 : 1);
+    colFall = [];
+    for (let gx = 0; gx < cols; gx++) colFall.push((gx / cols) * diagonalK);
+  }
+  function config() {
+    hue0 = rng() * 360;
     // Guaranteed minimum magnitude with random sign -- same fix as every
     // other curated engine here. Fall direction itself is NOT randomised
     // (always downward, sign fixed) since that's the whole point of the
     // directional archetype -- only speed varies.
-    fallRate = rand(0.12, 0.24);
-    // Per-column phase stagger by x position -- creates the diagonal
-    // cascade sweep instead of every column falling in lockstep.
-    diagonalK = rand(0.6, 1.4) * (rng() < 0.5 ? -1 : 1);
+    fallRate = rand(0.13, 0.22);
+    // Per-column speed-modulation phase (spread across columns so at any
+    // instant some columns are fast and some slow).
+    colModPhase = []; spinRate = []; spinPhase = [];
+    for (let gx = 0; gx < cols; gx++) {
+      colModPhase.push((gx / cols) * Math.PI * 2 * 2 + rand(-0.3, 0.3));
+      for (let b = 0; b < blocksPerCol; b++) {
+        spinRate.push((rng() < 0.5 ? -1 : 1) * rand(1.2, 2.3)); // rad/s, ~2.7-5.2s per turn
+        spinPhase.push(rng() * Math.PI * 2);
+      }
+    }
+    modRate = rand(0.5, 0.85);                                   // fall-speed modulation, ~7-12s
+    swayRate = (rng() < 0.5 ? -1 : 1) * rand(1.2, 1.9);          // sway ~3.3-5.2s
+    swayPhase = rng() * Math.PI * 2;
+    pulseRate = (rng() < 0.5 ? -1 : 1) * rand(1.4, 2.1);         // size pulse ~3-4.5s
+    bunchRate = (rng() < 0.5 ? -1 : 1) * rand(0.9, 1.5);         // bunching ~4-7s
   }
 
   const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
   let cycleFrame = 0;
   let clk = 0;
 
+  initGrid();
   config();
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
 
@@ -110,10 +166,11 @@
   window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
   window.currentFrame = 0;
 
-  function drawBlock(x, y, size, rot, style, lw) {
+  function drawBlock(x, y, size, rot, style, lw, fill) {
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rot);
+    if (fill) { ctx.fillStyle = fill; ctx.fillRect(-size / 2, -size / 2, size, size); }
     ctx.strokeStyle = style;
     ctx.lineWidth = lw;
     ctx.strokeRect(-size / 2, -size / 2, size, size);
@@ -129,29 +186,43 @@
     ctx.fillRect(0, 0, W, H);
 
     ctx.globalCompositeOperation = 'lighter';
-    const lwBright = Math.max(1.5, Math.min(W, H) / 1080 * 2.6);
+    const lwBright = Math.max(1.5, Math.min(W, H) / 1080 * 3.6);
     const lwSoft = lwBright * 3.0;
-    const maxSize = cellW * 0.58;
+    const maxSize = cellW * 0.62;
+    const swayAmp = cellW * 0.30;
 
     for (let gx = 0; gx < cols; gx++) {
-      const x = (gx + 0.5) * cellW;
-      const colPhase = (gx / cols) * diagonalK;
+      const x0 = (gx + 0.5) * cellW;
+      // Integrate this column's fall: base rate x (1 + 0.4 sin), so it
+      // never slows below 0.6x and never reverses; continuous across
+      // reconfigures because only the rate changes, never the phase.
+      colFall[gx] += dt * SPEED * fallRate * (1 + 0.4 * Math.sin(clk * modRate + colModPhase[gx]));
+      const fall = colFall[gx];
+      // Travelling waves keyed to column: phase spans exactly 2 cycles
+      // across the frame so the per-frame sums stay flat.
+      const colWave = (gx / cols) * Math.PI * 2 * 2;
+      const sway = swayAmp * Math.sin(clk * swayRate + colWave + swayPhase);
 
       for (let b = 0; b < blocksPerCol; b++) {
-        const basePhase = (b / blocksPerCol) + colPhase + clk * fallRate;
+        const bunch = 0.13 * Math.sin(clk * bunchRate + colWave + (b / blocksPerCol) * Math.PI * 2);
+        const basePhase = (b / blocksPerCol) + bunch + fall;
         const frac = basePhase - Math.floor(basePhase); // 0..1, wraps continuously
         const y = frac * (H + maxSize * 2) - maxSize;
         // Fade in/out near the top/bottom wrap edges so blocks don't pop.
         const edgeFade = Math.min(1, Math.min(frac, 1 - frac) * 8);
-        const size = maxSize * (0.7 + 0.3 * Math.sin(basePhase * Math.PI * 2 * 3));
-        const rot = basePhase * Math.PI * 2 * 1.5;
+        // Size pulse: travelling wave across columns and down the column.
+        const size = maxSize * (0.70 + 0.30 * Math.sin(clk * pulseRate + colWave + frac * Math.PI * 2 * 2));
+        const bi = gx * blocksPerCol + b;
+        const rot = spinPhase[bi] + clk * spinRate[bi];
+        const x = x0 + sway * (0.6 + 0.4 * Math.cos(frac * Math.PI * 2));
 
         const base = PAL[gx % PAL.length];
-        const hue = ((base[0] + hue0 * 0.05 + x * 0.08 + clk * 5) % 360 + 360) % 360;
+        const hue = ((base[0] + hue0 * 0.05 + x0 * 0.06 + Math.sin(clk * 0.3 + gx) * 6) % 360 + 360) % 360;
         const alphaBright = 0.9 * edgeFade;
         const alphaSoft = 0.2 * edgeFade;
         if (alphaBright < 0.02) continue;
-        drawBlock(x, y, size, rot, `hsla(${hue}, ${base[1]}%, ${Math.min(84, base[2] + 16)}%, ${alphaBright})`, lwBright);
+        drawBlock(x, y, size, rot, `hsla(${hue}, ${base[1]}%, ${Math.min(84, base[2] + 16)}%, ${alphaBright})`, lwBright,
+          `hsla(${hue}, ${base[1]}%, ${base[2]}%, ${0.34 * edgeFade})`);
         drawBlock(x, y, size, rot, `hsla(${hue}, ${base[1]}%, ${base[2]}%, ${alphaSoft})`, lwSoft);
       }
     }
