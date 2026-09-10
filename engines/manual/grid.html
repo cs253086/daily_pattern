@@ -21,6 +21,38 @@
 //   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
 // Deterministic Mulberry32, no rAF, per-second rates, cheap vector strokes,
 // redraws each frame (crisp, no smear). Supports the image-palette `colors` param.
+//
+// UNIT CHOREOGRAPHY (2026-09-10 wave 2). User definition of "dynamic": the
+// basic units (here: the polygon cells) must visibly move RELATIVE TO EACH
+// OTHER every second while the design stays a lattice. Before this pass the
+// cells already pulsed/rotated on one radial wave, but the thin outlines on
+// black left almost no luma for scripts/audit-unit-motion.js to see
+// (residual 6.7). What moves now, all coverage-neutral by phase-spreading
+// across the lattice:
+//   - alternating ROWS slide left/right in opposite directions and
+//     alternating COLUMNS slide up/down, each an oscillation (never a
+//     scroll, so every cell stays in its own lattice slot) whose phase
+//     travels along the row/column index (period 4-7 s, amplitude 16-28%
+//     of a cell, guaranteed minimum, random sign);
+//   - a checkerboard COUNTER-SPIN: neighbouring cells rotate in opposite
+//     directions on top of the shared radial wave;
+//   - the radial scale wave now breathes in checkerboard ANTIPHASE
+//     (neighbours swap size, area-linear mapping so each pair's summed
+//     area is constant by construction) -- both the strongest relative
+//     motion in the engine and the fix for a pre-existing brightness swing
+//     (the per-pixel wave spans <1 cycle at validator resolution);
+//   - a faint interior fill + thicker bright edge so the scale pulse and
+//     the new slides register as area change, not hairlines; polygon
+//     radius is area-normalised per type so the per-cycle triangle/square/
+//     hexagon swap is not a lit-area step;
+//   - a faint lattice mesh drawn through the DISPLACED cell centres, so the
+//     row/column slides read as the grid itself bending.
+// Slide/spin/wave rates live in config() (per-cycle reconfigure, phases are
+// pure functions of clk so the reset is a rate change, not a jump in
+// position -- the same convention as before); the lattice size itself is
+// now fixed once per video in initLattice(). The fill is faint (alpha
+// 0.36) and the antiphase pairing keeps the summed lit area flat (see the
+// validator numbers in CLAUDE.md's wave-2 table).
 (() => {
   const params = new URLSearchParams(location.search);
   const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
@@ -79,22 +111,43 @@
   const dt = 1 / FPS;
 
   let cols, rows, cell, sides, hue0, waveK, spinRate;
-  function config() {
+  // Unit-choreography parameters (see header): row/column slide, counter-spin.
+  let slideAmpX, slideAmpY, slideRateX, slideRateY, slidePhaseK, counterSpin;
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+  // Lattice size is fixed ONCE per video (wave-2 change): total stroke +
+  // mesh length scales with 1/cell, so re-rolling cols per cycle was a real
+  // per-cycle lit-area step (the original sat at +16..+27 projected luma
+  // on seeds 4/7 before any of this pass's changes, from exactly this).
+  function initLattice() {
     // Fewer, bigger cells -> bold, clearly readable shapes instead of a fine mesh.
     const target = Math.round(rand(4, 7) * Math.max(0.6, Math.min(1.6, DENSITY)));
     cols = target;
     cell = W / cols;
     rows = Math.ceil(H / cell) + 1;
+  }
+  function config() {
     sides = [3, 4, 4, 6][randInt(0, 3)];   // triangle, square (x2), hexagon
     hue0 = rng() * 360;
     waveK = rand(0.012, 0.03);              // spatial frequency of the wave
     spinRate = rand(0.4, 1.1) * (rng() < 0.5 ? -1 : 1);
+    // Row/column slide: guaranteed-minimum amplitude (fraction of a cell)
+    // and rate (rad/s, period ~4-7 s), random sign each. Adjacent rows /
+    // columns move in antiphase (see renderFrame), so the lattice shears
+    // back and forth rather than drifting.
+    slideAmpX = rand(0.16, 0.28) * sgn();
+    slideAmpY = rand(0.14, 0.24) * sgn();
+    slideRateX = rand(0.9, 1.5) * sgn();
+    slideRateY = rand(0.9, 1.5) * sgn();
+    slidePhaseK = rand(0.5, 0.9);            // phase step per row/column (travelling)
+    // Checkerboard counter-spin rate (rad/s): neighbours rotate opposite ways.
+    counterSpin = rand(0.55, 0.9) * sgn();
   }
 
   const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
   let cycleFrame = 0;
   let clk = 0;
 
+  initLattice();
   config();
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
 
@@ -112,26 +165,79 @@
 
     ctx.globalCompositeOperation = 'lighter';
     // Thicker strokes to match the bigger cells -> bold, clearly readable edges.
-    const lwBright = Math.max(1.5, Math.min(W, H) / 1080 * 3.2);
+    const lwBright = Math.max(1.8, Math.min(W, H) / 1080 * 4.2);
     const lwSoft = lwBright * 3.0;
-    const maxR = cell * 0.46;
+    const lwMesh = Math.max(1, Math.min(W, H) / 1080 * 1.6);
+    // Slides can never make neighbours collide: cells in the same row share
+    // one horizontal slide and cells in the same column share one vertical
+    // slide, so lattice neighbours keep exactly 1 cell of separation along
+    // the axis that joins them; the worst cross-axis offset (2x amplitude,
+    // 0.56 cell) only matters for a polygon extent above 0.5 cell, and the
+    // largest extent here (triangle: 0.36 * 1.24 * sqrt(0.92) = 0.43) is
+    // below that.
+    const maxR = cell * 0.36;
+    // Area-normalised circumradius per polygon type (triangle 1.30r^2,
+    // square 2r^2, hexagon 2.60r^2): config() swaps the type per cycle, and
+    // with an interior fill that swap would otherwise be a per-cycle jump
+    // in lit area (a real brightness step, the starburst.html lesson).
+    const areaNorm = Math.sqrt(2 / (sides / 2 * Math.sin(2 * Math.PI / sides)));
+
+    // Displaced centre of cell (gx, gy): alternating rows slide in opposite
+    // horizontal directions, alternating columns in opposite vertical
+    // directions, phase travelling along the index. Pure function of clk
+    // and the lattice index (no per-frame state), used for both the
+    // polygons and the mesh so they stay attached.
+    const centre = (gx, gy) => {
+      const rowSign = (gy & 1) ? -1 : 1;
+      const colSign = (gx & 1) ? -1 : 1;
+      const sx = rowSign * slideAmpX * cell * Math.sin(clk * slideRateX + gy * slidePhaseK);
+      const sy = colSign * slideAmpY * cell * Math.sin(clk * slideRateY + gx * slidePhaseK);
+      return [(gx + 0.5) * cell + sx, (gy + 0.5) * cell + sy];
+    };
+
+    // Faint lattice mesh through the displaced centres: makes the row /
+    // column slides read as the grid itself bending. Coverage-neutral to
+    // within a few percent (line lengths only change by the slide angle).
+    ctx.strokeStyle = 'hsla(0, 0%, 100%, 0.3)';
+    ctx.lineWidth = lwMesh;
+    ctx.beginPath();
+    for (let gy = 0; gy < rows; gy++) {
+      for (let gx = 0; gx < cols; gx++) {
+        const [x, y] = centre(gx, gy);
+        if (gx + 1 < cols) { const [nx, ny] = centre(gx + 1, gy); ctx.moveTo(x, y); ctx.lineTo(nx, ny); }
+        if (gy + 1 < rows) { const [nx, ny] = centre(gx, gy + 1); ctx.moveTo(x, y); ctx.lineTo(nx, ny); }
+      }
+    }
+    ctx.stroke();
 
     for (let gy = 0; gy < rows; gy++) {
       for (let gx = 0; gx < cols; gx++) {
-        const x = (gx + 0.5) * cell;
-        const y = (gy + 0.5) * cell;
-        const dx = x - cx, dy = y - cy;
+        const [x, y] = centre(gx, gy);
+        const x0 = (gx + 0.5) * cell, y0 = (gy + 0.5) * cell;
+        const dx = x0 - cx, dy = y0 - cy;
         const dist = Math.sqrt(dx * dx + dy * dy);
         // travelling wave outward from centre drives rotation + size
         const phase = clk * spinRate - dist * waveK;
-        const rot = phase;
-        const scale = 0.55 + 0.45 * Math.sin(phase);
-        if (scale < 0.06) continue;
-        const r = maxR * scale;
+        // checkerboard counter-spin on top of the shared wave rotation
+        const rot = phase + (((gx + gy) & 1) ? -1 : 1) * clk * counterSpin;
+        // (par below is the same checkerboard parity, used for size antiphase.)
+        // Checkerboard ANTIPHASE breathing with an area-linear mapping: the
+        // wave still travels outward, but neighbouring cells swap size --
+        // maximal relative unit motion -- and every cell pair's summed
+        // area is (0.5+0.42s)+(0.5-0.42s) = 1 by construction, so the
+        // frame's lit area is flat no matter how few cycles the wave spans
+        // across the frame (at validate.js's 480x270 the per-pixel waveK
+        // spans under ONE cycle, so without the pairing the whole grid
+        // breathed together and projected +62 luma on some seeds).
+        const par = ((gx + gy) & 1) ? -1 : 1;
+        const area = 0.5 + 0.42 * par * Math.sin(phase);
+        const r = maxR * areaNorm * Math.sqrt(area);
 
         const base = PAL[(gx + gy) % PAL.length];
         // Continuous slow hue drift (dynamic colouring) plus a spatial sweep.
         const hue = ((base[0] + hue0 * 0.05 + dist * 0.05 + clk * 3) % 360 + 360) % 360;
+        // faint interior fill so scale/slide register as area, not hairlines
+        fillPoly(x, y, r, sides, rot, `hsla(${hue}, ${base[1]}%, ${base[2]}%, 0.36)`);
         // bright thin edge + soft wide edge = luminous but crisp
         drawPoly(x, y, r, sides, rot, `hsla(${hue}, ${base[1]}%, ${Math.min(82, base[2] + 14)}%, 0.85)`, lwBright);
         drawPoly(x, y, r, sides, rot, `hsla(${hue}, ${base[1]}%, ${base[2]}%, 0.16)`, lwSoft);
@@ -139,6 +245,18 @@
     }
 
     if (cycleFrame >= cycleFrames) { cycleFrame = 0; config(); }
+  }
+
+  function fillPoly(x, y, r, n, rot, style) {
+    ctx.fillStyle = style;
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const a = rot + (i / n) * Math.PI * 2;
+      const px = x + Math.cos(a) * r, py = y + Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
   }
 
   function drawPoly(x, y, r, n, rot, style, lw) {

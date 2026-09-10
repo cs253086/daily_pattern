@@ -23,6 +23,33 @@
 //   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
 // Deterministic Mulberry32, no rAF, per-second rates, cheap vector strokes,
 // redraws each frame (crisp, no smear, no whiteout risk).
+//
+// UNIT CHOREOGRAPHY (2026-09-10 wave 2). User definition of "dynamic": the
+// basic units (here: the Truchet tiles) must visibly move RELATIVE TO EACH
+// OTHER every second while the design still reads as a tiling. Before this
+// pass the tiles only flipped their diagonal (discrete) and breathed by a
+// small 14% inset pulse (audit residual 8.5). What moves now:
+//   - the tiles BREATHE harder about their own centroids (inset 0.66-0.92,
+//     so the dark seams between tiles visibly open and close), alternate
+//     columns in ANTIPHASE under an envelope travelling down the rows,
+//     with an area-linear (sqrt) inset mapping and an even column count,
+//     so every row's summed lit area cancels EXACTLY -- flat by
+//     construction, not by hoping a wave spans whole cycles;
+//   - every tile ROTATES about its centroid by up to +-0.15 rad on a
+//     second travelling wave keyed to the OTHER diagonal (gx-gy);
+//   - alternating ROWS shear left/right in counter-directions (an
+//     oscillation, up to 22% of a cell, so each tile stays in its slot);
+//   - a hue-neutral LIGHTNESS ripple (+-7) on a third wave.
+// Rotation and shear are area-neutral; the breathing and lightness waves
+// cancel exactly per row (see config() for the two failed drafts). The
+// old continuous hue drift is gone (hue is luma-bearing; the original
+// file already projected -148 luma on seed 5 from it alone), hue stays
+// spatial. Tile fills are drawn source-over (they never overlapped before, so
+// this changes nothing visually) so any rotated-corner contact between
+// neighbours cannot brighten under additive blending. All wave rates are
+// guaranteed-minimum with a random sign, re-rolled per cycle in config();
+// the lattice size is fixed once per video in initLattice() because cell
+// count changes the total seam/edge length (a lit-area step per cycle).
 (() => {
   const params = new URLSearchParams(location.search);
   const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
@@ -79,23 +106,59 @@
   const dt = 1 / FPS;
 
   let cols, rows, cell, hue0, waveK, waveRate;
-  function config() {
-    // Fewer, bigger cells -> bold, clearly readable tiles.
+  // Unit-choreography wave parameters (see header).
+  let breathRate, breathK, rotAmp, rotRate, rotK, shearAmp, shearRate, shearK, lightRate, lightK;
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+  function initLattice() {
+    // Fewer, bigger cells -> bold, clearly readable tiles. Fixed once per
+    // video (wave-2): the total seam/edge length scales with the cell
+    // count, so re-rolling it per cycle was a lit-area step.
     const target = Math.round(rand(8, 13) * Math.max(0.6, Math.min(1.6, DENSITY)));
-    cols = target;
+    // Even column count: the breathing/lightness waves alternate sign per
+    // COLUMN (see config), so with an even count every row's summed lit
+    // area cancels exactly, at every instant, at every resolution.
+    cols = target + (target & 1);
     cell = W / cols;
     rows = Math.ceil(H / cell) + 1;
+    // Base hue offset once per video (wave-2): re-rolling it per cycle was
+    // an up-to-18 deg hue shift on every tile every 38 s -- a whole-frame
+    // luma step, since HSL hue is not luma-neutral.
     hue0 = rng() * 360;
+  }
+  function config() {
     waveK = rand(0.010, 0.026);
     // Guaranteed minimum magnitude with random sign -- never let the wave
     // sit nearly still (same fix as every other curated engine here).
     waveRate = (rng() < 0.5 ? -1 : 1) * rand(0.5, 1.2);
+    // Breathing (inset) wave: period ~3.5-6 s. Phase alternates by PI per
+    // COLUMN (neighbours along a row breathe in antiphase -- the strongest
+    // relative motion there is) and travels down the ROWS by breathK per
+    // row. With an even column count each row's summed area cancels
+    // EXACTLY at every instant. A first draft keyed a plain 0.6 rad/cell
+    // wave to gx+gy and projected -112..+86 luma across seeds; a second
+    // keyed PI+drift to gx+gy and still left ~rows' worth of area
+    // uncancelled (+63 on seed 6) because a diagonal index has a ramp/
+    // plateau multiplicity -- a finite grid does not sum a wave to zero.
+    breathRate = sgn() * rand(1.05, 1.8);
+    breathK = sgn() * rand(0.55, 0.95);
+    // Per-tile rotation wave on the other diagonal: +-0.10-0.15 rad.
+    rotAmp = rand(0.10, 0.15);
+    rotRate = sgn() * rand(0.9, 1.5);
+    rotK = rand(0.45, 0.75);
+    // Row shear: alternating rows in counter-directions, 14-22% of a cell.
+    shearAmp = rand(0.14, 0.22) * cell;
+    shearRate = sgn() * rand(0.8, 1.3);
+    shearK = rand(0.5, 0.9);
+    // Hue-neutral lightness ripple, same per-column antiphase keying.
+    lightRate = sgn() * rand(1.0, 1.6);
+    lightK = sgn() * rand(0.55, 0.95);
   }
 
   const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
   let cycleFrame = 0;
   let clk = 0;
 
+  initLattice();
   config();
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
 
@@ -111,14 +174,19 @@
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, W, H);
 
-    ctx.globalCompositeOperation = 'lighter';
+    // Fills stay source-over (see header): tiles never overlapped before,
+    // and now a rotated corner may just touch a neighbour -- additive
+    // blending would turn that contact into a bright spot.
     const lwEdge = Math.max(1, Math.min(W, H) / 1080 * 2.2);
 
     for (let gy = 0; gy < rows; gy++) {
+      // Alternating rows shear in counter-directions, phase travelling down
+      // the rows -- an oscillation, so every tile stays in its own slot.
+      const shear = ((gy & 1) ? -1 : 1) * shearAmp * Math.sin(clk * shearRate + gy * shearK);
       for (let gx = 0; gx < cols; gx++) {
-        const x0 = gx * cell, y0 = gy * cell, x1 = x0 + cell, y1 = y0 + cell;
+        const x0 = gx * cell + shear, y0 = gy * cell, x1 = x0 + cell, y1 = y0 + cell;
         const cxp = x0 + cell * 0.5, cyp = y0 + cell * 0.5;
-        const dx = cxp - cx, dy = cyp - cy;
+        const dx = gx * cell + cell * 0.5 - cx, dy = cyp - cy;
         const dist = Math.sqrt(dx * dx + dy * dy);
         const phase = clk * waveRate - dist * waveK;
         // Classic Truchet tile: split the square into two triangles along
@@ -127,26 +195,44 @@
         // not a continuous rotation, which is what makes it read as tiles
         // rather than floating lines).
         const flipA = Math.sin(phase) >= 0;
-        // Continuous per-cell size pulse, independent of the (comparatively
-        // sparse) discrete flip events -- without this, most frames 1-2s
-        // apart look nearly identical except where a flip happens to land,
-        // which reads as static (same failure class as a near-zero motion
-        // parameter, just via discrete events instead of a slow rate).
-        const pulse = 0.5 + 0.5 * Math.sin(clk * 2.4 + (gx + gy) * 0.35);
+        // Continuous per-tile BREATHING (inset pulse), antiphase between
+        // neighbours (breathK ~ PI, see config) -- the seams between tiles
+        // visibly open and close. The inset is mapped through sqrt so tile
+        // AREA is linear in the wave, and the antiphase pairing then keeps
+        // the summed lit area flat by construction.
+        const colSign = (gx & 1) ? -1 : 1;
+        const breath = colSign * Math.sin(clk * breathRate + gy * breathK);
+        // Per-tile rotation about the centroid on the other diagonal's wave.
+        const rot = rotAmp * Math.sin(clk * rotRate + (gx - gy) * rotK);
+        const cr = Math.cos(rot), sr = Math.sin(rot);
+        // Hue-neutral lightness ripple (whole cycles across the frame).
+        const dl = colSign * 7 * Math.sin(clk * lightRate + gy * lightK);
 
         const baseA = PAL[(gx + gy) % PAL.length];
         const baseB = PAL[(gx + gy + 2) % PAL.length];
-        const hueA = ((baseA[0] + hue0 * 0.05 + dist * 0.04 + clk * 4) % 360 + 360) % 360;
-        const hueB = ((baseB[0] + hue0 * 0.05 + dist * 0.04 + clk * 4) % 360 + 360) % 360;
+        // Hue is spatial only (wave-2): the previous continuous 4 deg/s hue
+        // drift changed the frame's luma with a 90 s period (HSL hue is not
+        // luma-neutral), which the validator's brightness fit read as a
+        // -148 luma trend on seed 5 even in the ORIGINAL file.
+        const hueA = ((baseA[0] + hue0 * 0.05 + dist * 0.04) % 360 + 360) % 360;
+        const hueB = ((baseB[0] + hue0 * 0.05 + dist * 0.04) % 360 + 360) % 360;
+        const lA = Math.max(30, Math.min(78, baseA[2] + dl));
+        const lB = Math.max(30, Math.min(78, baseB[2] + dl));
 
         // Two triangles that together exactly tile the cell -- no dead
         // space, unlike a thin isolated segment. Inset each corner toward
         // the cell centre so a thin black gutter shows between neighbouring
         // tiles -- otherwise the fill is fully opaque wall-to-wall and loses
         // the channel's "luminous shapes on black" identity (looks like flat
-        // wallpaper instead of a glowing mosaic).
-        const INSET = 0.78 + 0.14 * pulse;
-        const ins = (px, py) => [cxp + (px - cxp) * INSET, cyp + (py - cyp) * INSET];
+        // wallpaper instead of a glowing mosaic). Corner extent after the
+        // max inset (0.92) and rotation (0.15 rad): 0.46*(cos+sin) = 0.52
+        // of a cell, so neighbours can at most just touch at a corner.
+        // inset 0.66..0.92: area = 0.641 +- 0.205 (linear in the wave)
+        const INSET = Math.sqrt(0.641 + 0.205 * breath);
+        const ins = (px, py) => {
+          const ox = (px - cxp) * INSET, oy = (py - cyp) * INSET;
+          return [cxp + ox * cr - oy * sr, cyp + ox * sr + oy * cr];
+        };
         const cTL = ins(x0, y0), cTR = ins(x1, y0), cBL = ins(x0, y1), cBR = ins(x1, y1);
         const triA = flipA ? [cTL, cTR, cBR] : [cTL, cTR, cBL];
         const triB = flipA ? [cTL, cBL, cBR] : [cTR, cBR, cBL];
@@ -154,19 +240,19 @@
         ctx.beginPath();
         ctx.moveTo(triA[0][0], triA[0][1]); ctx.lineTo(triA[1][0], triA[1][1]); ctx.lineTo(triA[2][0], triA[2][1]);
         ctx.closePath();
-        ctx.fillStyle = `hsla(${hueA}, ${baseA[1]}%, ${baseA[2]}%, 0.92)`;
+        ctx.fillStyle = `hsla(${hueA}, ${baseA[1]}%, ${lA}%, 0.92)`;
         ctx.fill();
 
         ctx.beginPath();
         ctx.moveTo(triB[0][0], triB[0][1]); ctx.lineTo(triB[1][0], triB[1][1]); ctx.lineTo(triB[2][0], triB[2][1]);
         ctx.closePath();
-        ctx.fillStyle = `hsla(${hueB}, ${baseB[1]}%, ${baseB[2]}%, 0.92)`;
+        ctx.fillStyle = `hsla(${hueB}, ${baseB[1]}%, ${lB}%, 0.92)`;
         ctx.fill();
 
         // Bright edge along the shared diagonal -- crisp Truchet-tile line.
         const diag = flipA ? [cTL, cBR] : [cTR, cBL];
         ctx.beginPath(); ctx.moveTo(diag[0][0], diag[0][1]); ctx.lineTo(diag[1][0], diag[1][1]);
-        ctx.strokeStyle = `hsla(${hueA}, ${baseA[1]}%, ${Math.min(90, baseA[2] + 22)}%, 0.9)`;
+        ctx.strokeStyle = `hsla(${hueA}, ${baseA[1]}%, ${Math.min(90, lA + 22)}%, 0.9)`;
         ctx.lineWidth = lwEdge;
         ctx.stroke();
       }

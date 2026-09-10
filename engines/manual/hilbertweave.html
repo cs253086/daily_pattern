@@ -67,6 +67,27 @@
 // window length (so total lit coverage never varies as it moves), giving
 // genuine lively per-frame motion beyond the coarser per-cycle rotation
 // reset.
+//
+// UNIT CHOREOGRAPHY (2026-09-10 wave 2). User definition of "dynamic": the
+// basic units (here: the path segments of each Hilbert curve) must visibly
+// move RELATIVE TO EACH OTHER every second while the design still reads as
+// a maze. Before this pass each instance only spun rigidly with a
+// brightness pulse (audit residual 9.0). What moves now, per instance:
+//   - a travelling RIPPLE along the curve: every path VERTEX is displaced
+//     on a small circle (radius 18% of a grid cell) whose phase advances
+//     along the path index, so a wave of displacement runs along the maze
+//     (period 3.5-6 s, guaranteed-minimum rate, random direction).
+//     Vertices are shared by consecutive segments, so the path stays one
+//     connected curve -- the corridors sway, they never break;
+//   - the STROKE WIDTH pulses along the path (+-22%), keyed to the index
+//     with exactly 3 whole cycles per path, so the summed stroke area is
+//     zero-sum at every instant (segments all have unit length);
+//   - the existing brightness pulse window and rigid spin are kept.
+// Ripple/width phases are accumulated per frame so the per-cycleSec rate
+// re-roll never jumps the path. Base stroke is 0.50 of a cell (was 0.56):
+// two parallel corridors 1 cell apart, both at max width (0.61) and at
+// worst-case opposite displacement (0.36), sum to 0.97 < 1, so corridors
+// can never merge.
 (() => {
   const params = new URLSearchParams(location.search);
   const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
@@ -181,7 +202,7 @@
         const cellSize = side / n;
         const originX = -side / 2 + cellSize / 2;
         const originY = -side / 2 + cellSize / 2;
-        const strokeW = cellSize * 0.56;
+        const strokeW = cellSize * 0.50;   // see header: 0.61 max + 0.36 ripple < 1 cell
 
         const baseCol = PAL[idx % PAL.length];
         const hue0 = rng() * 360;
@@ -200,9 +221,14 @@
         }
 
         instances.push({
-          centerX, centerY, strokeW, segments, totalSegs,
+          centerX, centerY, strokeW, cellSize, segments, totalSegs,
           pulseLenIdx: Math.max(6, Math.round(totalSegs * 0.14)),
           rotAngle0: 0, rotRate: 0, pulseSpeed: 0, pulseDir: 1,
+          // unit choreography: ripple + width wave (rates re-rolled per
+          // cycle, phases accumulated in renderFrame)
+          rippleRate: 0, rippleK: 0, ripplePh: rng() * Math.PI * 2, rippleTwist: rng() * Math.PI * 2,
+          widthRate: 0, widthK: Math.PI * 2 * 3 / totalSegs, widthPh: rng() * Math.PI * 2,
+          verts: new Float64Array((totalSegs + 1) * 2),
         });
       }
     }
@@ -219,6 +245,11 @@
       inst.rotRate = (rng() < 0.5 ? -1 : 1) * rand(0.35, 0.7) * SPEED;
       inst.pulseDir = rng() < 0.5 ? -1 : 1;
       inst.pulseSpeed = rand(0.18, 0.32) * SPEED; // fraction of the full path travelled per second
+      // Ripple: period 3.5-6 s, random direction; ~1 wavelength per 14-22
+      // segments so several crests are on screen at once.
+      inst.rippleRate = (rng() < 0.5 ? -1 : 1) * rand(1.05, 1.8) * SPEED;
+      inst.rippleK = rand(0.28, 0.45);
+      inst.widthRate = (rng() < 0.5 ? -1 : 1) * rand(0.9, 1.5) * SPEED;
     }
   }
 
@@ -252,6 +283,21 @@
       const pulseCenter = ((inst.pulseDir * clk * inst.pulseSpeed) % 1 + 1) % 1 * inst.totalSegs;
       const halfLen = inst.pulseLenIdx / 2;
 
+      // Travelling ripple: displace every shared path vertex on a small
+      // circle, phase advancing along the path index (see header).
+      inst.ripplePh += inst.rippleRate * dt;
+      inst.widthPh += inst.widthRate * dt;
+      const amp = inst.cellSize * 0.18;
+      const v = inst.verts;
+      for (let j = 0; j <= inst.totalSegs; j++) {
+        const base = j < inst.totalSegs ? inst.segments[j] : null;
+        const bx = base ? base.x0 : inst.segments[j - 1].x1;
+        const by = base ? base.y0 : inst.segments[j - 1].y1;
+        const ph = inst.ripplePh - j * inst.rippleK;
+        v[j * 2] = bx + amp * Math.sin(ph);
+        v[j * 2 + 1] = by + amp * Math.cos(ph + inst.rippleTwist);
+      }
+
       ctx.save();
       ctx.translate(inst.centerX, inst.centerY);
       ctx.rotate(inst.rotAngle0 + clk * inst.rotRate);
@@ -264,10 +310,11 @@
         const light = Math.min(88, s.light + boost * 26);
         const sat = Math.min(96, s.sat + boost * 10);
         ctx.strokeStyle = `hsl(${s.hue}, ${sat}%, ${light}%)`;
-        ctx.lineWidth = inst.strokeW;
+        // Width wave: exactly 3 whole cycles along the path -> zero-sum area.
+        ctx.lineWidth = inst.strokeW * (1 + 0.22 * Math.sin(inst.widthPh - i * inst.widthK));
         ctx.beginPath();
-        ctx.moveTo(s.x0, s.y0);
-        ctx.lineTo(s.x1, s.y1);
+        ctx.moveTo(v[i * 2], v[i * 2 + 1]);
+        ctx.lineTo(v[i * 2 + 2], v[i * 2 + 3]);
         ctx.stroke();
       }
 

@@ -64,6 +64,36 @@
 // computed once at start-up -- no accumulation, no whiteout risk, and the
 // weave tiles the canvas completely every frame (no black background ever
 // visible), so coverage is exactly constant regardless of scroll phase.
+//
+// UNIT CHOREOGRAPHY (2026-09-10 wave 2). User definition of "dynamic": the
+// basic units (here: the over/under weave cells) must visibly move
+// RELATIVE TO EACH OTHER every second while the design still reads as a
+// herringbone twill. Before this pass the whole weave only scrolled as one
+// block (audit residual 7.1, 77% non-rigid). What moves now:
+//   - the WEFT CELLS BREATHE: every cell is now a square thread on a dark
+//     shadow backdrop (fabric shadow between threads); warp ("under")
+//     cells are a fixed 0.84 of a cell, weft ("over") cells pulse between
+//     0.69 and 0.90 (area-linear sqrt mapping, area 0.64 +- 0.17). Within
+//     every run of `over` consecutive weft cells the phases are spaced
+//     exactly 2*PI/over apart, so each run's summed area is ZERO-SUM at
+//     every instant (a rolling undulation along each wale rib); the
+//     envelope travels across the ribs, keyed to the run's wale index
+//     (period 4-6 s);
+//   - ROWS shear left/right in counter-directions (alternating rows, an
+//     oscillation of 22-32% of a cell, phase travelling down the rows),
+//     so the wale staircase visibly wobbles instead of sliding rigidly;
+//   - the chevron BANDS bob up/down in alternation (18-28% of a cell), so
+//     the fishbone points nod against each other.
+// Shear and bob are translations (area-neutral bar sub-percent edge
+// effects, and sliver-free by construction: a row boundary is horizontal
+// and rows move horizontally, a band boundary is vertical and bands move
+// vertically); wave phases are accumulated per frame so the per-cycleSec
+// rate re-roll never jumps the units; the block scroll itself is slowed
+// (see reconfigureScroll) so it no longer dominates the frame change.
+// The luma-gap rule below is kept.
+// Trade-off: the weave no longer tiles the canvas wall-to-wall -- about a
+// third of each cell is now shadow -- which is what makes thread-level
+// motion visible at all on a two-colour weave.
 (() => {
   const params = new URLSearchParams(location.search);
   const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
@@ -199,6 +229,16 @@
     const v = (dir * c + r) % period;
     return ((v % period) + period) % period < over;
   }
+  // Same rule, returning everything the choreography needs: the band, the
+  // cell's position v inside its weft run (0..over-1, -1 for warp) and the
+  // wale index of the run's first cell (shared by the whole run).
+  function weaveCell(r, c) {
+    const band = Math.floor(c / bandWidthCells);
+    const dir = (band % 2 === 0) ? 1 : -1;
+    const w = dir * c + r;
+    const v = ((w % period) + period) % period;
+    return { band, v: v < over ? v : -1, runBase: w - v };
+  }
 
   // Called at start-up AND every cycleSec. Only the scroll rate/direction
   // resets -- coverage-neutral by construction (a translating periodic
@@ -206,12 +246,30 @@
   // never create a brightness trend the way a re-randomised geometry
   // parameter could).
   let scrollAngle, scrollRate;
+  // Unit-choreography rates (rad/s, guaranteed minimum, random sign) and
+  // spatial keys; phases accumulate in renderFrame so a re-roll is a
+  // change of speed, never a jump.
+  let breathRate, breathK, shearRate, shearK, shearAmp, bobRate, bobK, bobAmp;
+  let breathPh = 0, shearPh = 0, bobPh = 0;
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
   function reconfigureScroll() {
     scrollAngle = rand(0, Math.PI * 2);
     // Guaranteed-minimum-magnitude, random-sign-equivalent rate (the angle
     // itself already covers "sign"/direction) -- house-style motion
     // convention applied via speed rather than a symmetric range around 0.
-    scrollRate = cellSize * rand(0.5, 0.9) * SPEED;
+    // Scroll slowed from 0.5-0.9 cell/s (wave-2): the block scroll is
+    // exactly the motion the user does NOT count as dynamic, and at the
+    // old rate it dominated the frame-to-frame change so the unit-motion
+    // gate read only 34% non-rigid on seed 3. Still a visible drift.
+    scrollRate = cellSize * rand(0.22, 0.4) * SPEED;
+    breathRate = sgn() * rand(1.05, 1.6) * SPEED;   // period ~4-6 s
+    breathK = rand(0.35, 0.6);                       // per wale rib
+    shearRate = sgn() * rand(0.8, 1.3) * SPEED;
+    shearK = rand(0.4, 0.8);                         // per row
+    shearAmp = rand(0.22, 0.32) * cellSize;
+    bobRate = sgn() * rand(0.7, 1.2) * SPEED;
+    bobK = rand(0.9, 1.6);                           // per band
+    bobAmp = rand(0.18, 0.28) * cellSize;
   }
 
   const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
@@ -228,6 +286,9 @@
   function renderFrame() {
     cycleFrame++;
     clk += dt;
+    breathPh += breathRate * dt;
+    shearPh += shearRate * dt;
+    bobPh += bobRate * dt;
 
     const tilePx = period * cellSize;
     const dist = clk * scrollRate;
@@ -240,18 +301,53 @@
     scrollX = ((scrollX % tilePx) + tilePx) % tilePx;
     scrollY = ((scrollY % tilePx) + tilePx) % tilePx;
 
-    const cMin = Math.floor((scrollX - cellSize) / cellSize) - 1;
-    const cMax = Math.ceil((W + cellSize + scrollX) / cellSize) + 1;
-    const rMin = Math.floor((scrollY - cellSize) / cellSize) - 1;
-    const rMax = Math.ceil((H + cellSize + scrollY) / cellSize) + 1;
+    const cMin = Math.floor((scrollX - cellSize) / cellSize) - 2;
+    const cMax = Math.ceil((W + cellSize + scrollX) / cellSize) + 2;
+    const rMin = Math.floor((scrollY - cellSize) / cellSize) - 2;
+    const rMax = Math.ceil((H + cellSize + scrollY) / cellSize) + 2;
+
+    // Shadow backdrop (a dark, desaturated warp tone): the seams that open
+    // between breathing threads read as fabric shadow, never as black
+    // holes or antialiased hairlines. A first draft used the warp colour
+    // itself as the backdrop and breathed only the weft: run-mates then
+    // left sub-pixel slivers of backdrop between them that rendered as a
+    // grey outline mesh at 1280x720 -- LOOKED at, not inferred.
+    ctx.fillStyle = `hsl(${warpCol.hue}, ${Math.round(warpCol.sat * 0.5)}%, 17%)`;
+    ctx.fillRect(0, 0, W, H);
+    const warpFill = `hsl(${warpCol.hue}, ${warpCol.sat}%, ${warpCol.light}%)`;
+    const weftFill = `hsl(${weftCol.hue}, ${weftCol.sat}%, ${weftCol.light}%)`;
+    const runStep = Math.PI * 2 / over;
+    const warpSide = cellSize * 0.84;
 
     for (let r = rMin; r <= rMax; r++) {
+      // Row shear: alternating rows in counter-directions, phase travelling
+      // down the rows. An oscillation -- every cell stays in its own slot.
+      const shear = ((r & 1) ? -1 : 1) * shearAmp * Math.sin(shearPh + r * shearK);
       const y = r * cellSize - scrollY;
       for (let c = cMin; c <= cMax; c++) {
-        const x = c * cellSize - scrollX;
-        const col = isOver(r, c) ? weftCol : warpCol;
-        ctx.fillStyle = `hsl(${col.hue}, ${col.sat}%, ${col.light}%)`;
-        ctx.fillRect(x, y, cellSize + 1, cellSize + 1);
+        const cellInfo = weaveCell(r, c);
+        // Band bob: alternating chevron bands nod up/down against each other.
+        const bob = ((cellInfo.band & 1) ? -1 : 1) * bobAmp * Math.sin(bobPh + cellInfo.band * bobK);
+        const x = c * cellSize - scrollX + shear;
+        let side;
+        if (cellInfo.v < 0) {
+          // Warp (under) thread: fixed size -- it is the weft on top that
+          // bulges. Keeps the per-run zero-sum exact for every over/under.
+          side = warpSide;
+          ctx.fillStyle = warpFill;
+        } else {
+          // Weft (over) thread breathes, shrink-only (side 0.69-0.90 of a
+          // cell, area 0.64 +- 0.17 -- linear in the wave): run-mates are
+          // 2*PI/over apart so each run's summed area is zero-sum at every
+          // instant; the envelope travels across the wale ribs via the
+          // run's base index. Max side 0.90 keeps every seam >= 0.1 cell
+          // (2 px at 1280 wide), so no hairline slivers.
+          const breath = Math.sin(breathPh + cellInfo.runBase * breathK + cellInfo.v * runStep);
+          side = cellSize * Math.sqrt(0.64 + 0.17 * breath);
+          ctx.fillStyle = weftFill;
+        }
+        const half = side * 0.5;
+        ctx.fillRect(x + cellSize * 0.5 - half, y + bob + cellSize * 0.5 - half, side, side);
       }
     }
 
