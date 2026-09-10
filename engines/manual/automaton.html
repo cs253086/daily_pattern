@@ -111,6 +111,34 @@
   let gens; // array of {row: Uint8Array, gen: number}, index 0 = newest (top)
   let nextGenNumber, scrollPix, hue0, hueStepDeg, genPerSec, rule150, seedOffsets;
 
+  // UNIT CHOREOGRAPHY (2026-09-10, user definition of "dynamic": the basic
+  // pattern units -- here the individual automaton cells -- must visibly
+  // move relative to each other, not just the whole field scrolling down
+  // as one rigid block). Three coverage-neutral waves, all driven by the
+  // shared clock and fixed per cycle in config():
+  //   1. Cells SLIDE sideways within their row in a travelling wave keyed
+  //      to distance from the centre column (up to 60% of a cell). Mirror
+  //      cells slide in opposite directions (sign of the offset follows
+  //      the side of centre), so each row stays exactly mirror-symmetric
+  //      about its own centre -- the automaton's defining invariant.
+  //   2. Rows SHEAR sideways as a whole in a sine keyed to generation
+  //      index (up to ~1.6 cells, wavelength 14-22 rows so the fractal's
+  //      diagonals stay coherent), so the vertical spine snakes. The row is
+  //      a wrapped ring, so cells that leave one edge re-enter the other.
+  //   3. Cells PULSE in size (+-22%) in a wave keyed to generation index
+  //      and distance from centre, phase-spread so total lit area per
+  //      frame is constant to within noise (no brightness trend).
+  //   4. Cells BOB vertically within their row (+-45% of a cell) in a wave
+  //      keyed to distance from centre (identical for mirror cells, so the
+  //      symmetry holds), a relative motion the downward scroll cannot
+  //      absorb.
+  // The rule, seed row, capDensity and CYCLE_SEC=43.5 are untouched.
+  let slideAmp, slideK, slideRate, slidePhase;
+  let shearAmp, shearK, shearRate, shearPhase;
+  let pulseAmp, pulseKg, pulseKc, pulseRate, pulsePhase;
+  let bobAmp, bobK, bobRate, bobPhase;
+  let clk = 0;
+
   function seedRow() {
     const row = new Uint8Array(cols);
     const c2 = cols / 2; // integer since cols is forced even
@@ -139,7 +167,7 @@
     // construction here -- generations always advance forward and scroll
     // always flows downward -- so no random-sign trick is needed, only a
     // floor away from zero, matching cascade.html's fallRate reasoning).
-    genPerSec = rand(1.6, 2.4) * SPEED;
+    genPerSec = rand(1.3, 1.9) * SPEED;
     // Hue is banded by GENERATION (each row's colour is fixed forever once
     // drawn), never by wall-clock time. An earlier version also added a
     // continuous `clk * hueDriftRate` term so the whole frame's hue slowly
@@ -169,6 +197,28 @@
     gens = [{ row: seedRow(), gen: 0 }];
     nextGenNumber = 1;
     scrollPix = 0;
+
+    // Unit choreography parameters (see the comment block above). Every
+    // rate has a guaranteed minimum magnitude and a random sign so no
+    // wave can park near-still; periods ~2.6-6s.
+    const sgn = () => (rng() < 0.5 ? -1 : 1);
+    slideAmp = cellSize * 0.6;
+    slideK = (Math.PI * 2) / rand(16, 24);
+    slideRate = sgn() * rand(1.5, 2.4) * SPEED;
+    slidePhase = rand(0, Math.PI * 2);
+    shearAmp = cellSize * rand(1.2, 1.6);
+    shearK = (Math.PI * 2) / rand(14, 22);
+    shearRate = sgn() * rand(1.0, 1.6) * SPEED;
+    shearPhase = rand(0, Math.PI * 2);
+    pulseAmp = 0.22;
+    pulseKg = (Math.PI * 2) / rand(6, 10);
+    pulseKc = (Math.PI * 2) / rand(8, 14);
+    pulseRate = sgn() * rand(1.2, 2.0) * SPEED;
+    pulsePhase = rand(0, Math.PI * 2);
+    bobAmp = cellSize * 0.45;
+    bobK = (Math.PI * 2) / rand(14, 22);
+    bobRate = sgn() * rand(1.7, 2.5) * SPEED;
+    bobPhase = rand(0, Math.PI * 2);
   }
 
   // Getting a periodic full reset here took FOUR rejected/refined designs,
@@ -267,6 +317,7 @@
 
   function renderFrame() {
     cycleFrame++;
+    clk += dt;
 
     scrollPix += cellSize * genPerSec * dt;
     while (scrollPix >= cellSize) {
@@ -279,7 +330,12 @@
     ctx.globalCompositeOperation = 'source-over';
 
     const inset = Math.max(1, cellSize * 0.08);
-    const size = cellSize - inset * 2;
+    const size0 = cellSize - inset * 2;
+    const centre = (cols - 1) / 2;
+    const tSlide = slidePhase + clk * slideRate;
+    const tShear = shearPhase + clk * shearRate;
+    const tPulse = pulsePhase + clk * pulseRate;
+    const tBob = bobPhase + clk * bobRate;
 
     for (let i = 0; i < gens.length; i++) {
       const y = (i - 1) * cellSize + scrollPix;
@@ -287,13 +343,24 @@
       const g = gens[i];
       const row = g.row;
       const hueBase = ((hue0 + g.gen * hueStepDeg) % 360 + 360) % 360;
+      const rowOff = shearAmp * Math.sin(shearK * g.gen + tShear);
       for (let c = 0; c < cols; c++) {
         if (!row[c]) continue;
         const base = PAL[c % PAL.length];
         const hue = (hueBase + base[0] * 0.15) % 360;
-        const x = c * cellSize;
+        const d = c - centre;
+        const ad = Math.abs(d);
+        const xoff = (d < 0 ? -1 : 1) * slideAmp * Math.sin(slideK * ad + tSlide);
+        const size = size0 * (1 + pulseAmp * Math.sin(pulseKg * g.gen + pulseKc * ad + tPulse));
+        const pad = (cellSize - size) / 2;
+        const yoff = bobAmp * Math.sin(bobK * ad + tBob);
+        // Wrapped ring: bring the cell back into [0, W) and draw a second
+        // copy when it straddles the edge.
+        let x = c * cellSize + rowOff + xoff;
+        x = ((x % W) + W) % W;
         ctx.fillStyle = `hsl(${hue}, ${base[1]}%, ${Math.min(78, base[2] + 12)}%)`;
-        ctx.fillRect(x + inset, y + inset, size, size);
+        ctx.fillRect(x + pad, y + yoff + pad, size, size);
+        if (x + cellSize > W) ctx.fillRect(x - W + pad, y + yoff + pad, size, size);
       }
     }
 

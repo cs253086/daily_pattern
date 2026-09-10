@@ -172,34 +172,135 @@
     return poly;
   }
 
-  // Seed points, cell polygons, and per-cell colours are all fixed ONCE
-  // for the whole video, never re-rolled per cycle -- the "any coverage-
-  // affecting parameter re-randomised per cycle creates a real (not
-  // aliased) brightness swing" lesson CLAUDE.md documents for eleven
-  // prior engines in a row. Cell count is higher than "a few big bold
-  // cells" alone would suggest -- many independent, uncorrelated-colour
-  // cells further dilute any residual whole-canvas-wobble brightness
-  // swing (the same "many independent elements average out" principle
-  // dendrite.html/phyllotaxis.html already rely on, applied here as a
-  // second, complementary lever alongside bounding the wobble itself).
-  let cells;
+  // UNIT CHOREOGRAPHY (2026-09-10, user definition of "dynamic": the basic
+  // pattern units themselves must visibly move relative to each other,
+  // not just the whole composition spinning as a rigid block):
+  //   1. Every SEED POINT drifts on its own small bounded Lissajous orbit
+  //      (radius 14-30% of the mean seed spacing, periods ~3-8s, random
+  //      sign, guaranteed-minimum rate) around a fixed home position, and
+  //      the Voronoi cells are RECOMPUTED EVERY FRAME from the moving
+  //      seeds -- so cell edges slide, cells grow/shrink and swap
+  //      neighbours continuously, while the mosaic still tiles its
+  //      bounding square completely at every instant (coverage-neutral by
+  //      construction: a Voronoi partition has no gaps for any seed set).
+  //   2. Each cell's inner fill is scaled about its own centroid in a
+  //      travelling wave (up to ~18% linear), revealing a RIM in a
+  //      strongly contrasting hue that breathes open and closed across the
+  //      mosaic in a moving front. The rim is drawn at the SAME
+  //      luma-equalised brightness as the fill (see lightForLuma), so the
+  //      pulse changes colour balance but never frame brightness -- a
+  //      first version revealed a DARK border instead and tripped the
+  //      brightness-trend check (+119 luma projected on seed 4; measured
+  //      as the dominant variance source, sd 1.69 vs 0.56 with it off),
+  //      and even nearest-neighbour opposite-phase pairing with
+  //      area-matched amplitudes only partly cancelled it once the cells
+  //      began morphing. Equal-luma rims remove the mechanism entirely.
+  // Cell COLOURS, seed home positions, orbit radii/rates/phases and the
+  // wave vector are all fixed once per video in initMosaic(); the shared
+  // clock drives every position, so same seed => same frames.
+  //
+  // Seed home positions and per-cell colours are fixed ONCE for the whole
+  // video, never re-rolled per cycle -- the "any coverage-affecting
+  // parameter re-randomised per cycle creates a real (not aliased)
+  // brightness swing" lesson CLAUDE.md documents for eleven prior engines
+  // in a row. Cell count is higher than "a few big bold cells" alone would
+  // suggest -- many independent, uncorrelated-colour cells dilute any
+  // residual whole-canvas-wobble brightness swing (the same "many
+  // independent elements average out" principle dendrite.html/
+  // phyllotaxis.html already rely on).
+  let cells, boundingPoly, waveK, waveKx, waveKy, waveRate, PULSE, bgFill;
+  const seedsNow = [];
   function initMosaic() {
     const d = Math.max(0.7, Math.min(1.4, DENSITY));
     const n = Math.round(60 * d);
     const boxHalf = halfDiag * 1.05;
-    const seeds = [];
-    for (let i = 0; i < n; i++) seeds.push([rand(-boxHalf, boxHalf), rand(-boxHalf, boxHalf)]);
-    const boundingPoly = [[-boxHalf, -boxHalf], [boxHalf, -boxHalf], [boxHalf, boxHalf], [-boxHalf, boxHalf]];
+    boundingPoly = [[-boxHalf, -boxHalf], [boxHalf, -boxHalf], [boxHalf, boxHalf], [-boxHalf, boxHalf]];
+    const spacing = (2 * boxHalf) / Math.sqrt(n); // mean seed spacing = typical cell size
 
     const hue0 = rng() * 360;
+    // Target luma = the palette's own mean luma at its base lightness, so
+    // the overall brightness level matches the un-equalised design.
+    let targetLuma = 0;
+    for (const c of PAL) targetLuma += hslLuma(c[0], c[1], c[2]);
+    targetLuma /= PAL.length;
     cells = [];
     for (let i = 0; i < n; i++) {
-      const poly = voronoiCell(i, seeds, boundingPoly);
-      if (poly.length < 3) continue; // degenerate cell (shouldn't happen for well-spread seeds, but skip defensively)
       const baseCol = PAL[i % PAL.length];
       const hue = ((baseCol[0] + hue0 + rand(-14, 14)) % 360 + 360) % 360;
-      const light = Math.max(52, Math.min(64, baseCol[2] + rand(-2, 2)));
-      cells.push({ poly, hue, sat: baseCol[1], light });
+      // Luma-equalised lightness: HSL hue carries very different luma at
+      // the same S/L (yellow reads far brighter than blue), and now that
+      // cells MORPH every frame the visible mix of hues changes
+      // continuously -- with raw palette lightness that swung the frame
+      // average enough to trip the brightness-trend check on 2/9 seeds.
+      // Nudging each cell's lightness so every fill lands near one target
+      // luma (+-10, a small zero-mean per-cell spread so cells stay
+      // distinguishable in luminance) removes the mechanism at the
+      // source, while hue and saturation stay fully vivid. Measured
+      // mean-luma sd over validate.js's 300s window: 0.39 at +-6, up to
+      // 1.39 on an unlucky seed at +-22 (worst-case projected rise 64),
+      // so the spread is kept small on purpose -- the trade-off is that
+      // a luma-only motion metric under-reads this engine's (colour-
+      // visible) cell morphing.
+      const light = lightForLuma(hue, baseCol[1], targetLuma + rand(-10, 10));
+      const sgn = () => (rng() < 0.5 ? -1 : 1);
+      cells.push({
+        hx: rand(-boxHalf, boxHalf), hy: rand(-boxHalf, boxHalf),
+        // Primary orbit: 14-30% of a cell in radius, period ~3.3-6.3s.
+        r1: spacing * rand(0.14, 0.30), w1: sgn() * rand(1.0, 1.9) * SPEED, p1: rand(0, Math.PI * 2),
+        // Secondary (Lissajous) term at a different rate so the path is a
+        // slowly-precessing loop rather than a plain circle.
+        r2: spacing * rand(0.05, 0.12), w2: sgn() * rand(0.5, 1.0) * SPEED, p2: rand(0, Math.PI * 2),
+        pulseOff: rand(-0.6, 0.6),
+        // Rim colour: a strongly contrasting hue at the SAME equalised
+        // luma, so the breathing rim changes colour balance, never
+        // brightness (see the pulse note in the choreography block).
+        rimFill: (() => { const rh = (hue + rand(130, 200)) % 360; return `hsl(${rh}, ${baseCol[1]}%, ${lightForLuma(rh, baseCol[1], targetLuma)}%)`; })(),
+        hue, sat: baseCol[1], light,
+        fill: `hsl(${hue}, ${baseCol[1]}%, ${light}%)`,
+        poly: null,
+      });
+      seedsNow.push([0, 0]);
+    }
+    // Travelling pulse wave: wavelength ~0.9 x minDim (several wavelengths
+    // across the bounding square), period ~4-6.3s, random direction.
+    const waveAng = rand(0, Math.PI * 2);
+    waveK = (Math.PI * 2) / (Math.min(W, H) * 0.9);
+    waveKx = Math.cos(waveAng) * waveK; waveKy = Math.sin(waveAng) * waveK;
+    waveRate = (rng() < 0.5 ? -1 : 1) * rand(1.0, 1.55) * SPEED;
+    PULSE = 0.18; // max linear shrink of a cell's fill about its centroid
+    const bgBase = PAL[SEED % PAL.length];
+    bgFill = `hsl(${((bgBase[0] + hue0) % 360 + 360) % 360}, ${Math.max(20, bgBase[1] - 35)}%, 7%)`;
+  }
+
+  // Rec.709 luma of an HSL colour (0-255), and the lightness that lands a
+  // given hue/saturation at a target luma (bisection, clamped to a
+  // vivid-but-not-pastel range).
+  function hslLuma(h, s, l) {
+    const S = s / 100, L = l / 100;
+    const C = (1 - Math.abs(2 * L - 1)) * S;
+    const hp = (((h % 360) + 360) % 360) / 60;
+    const X = C * (1 - Math.abs((hp % 2) - 1));
+    let r = 0, g = 0, b = 0;
+    if (hp < 1) { r = C; g = X; } else if (hp < 2) { r = X; g = C; } else if (hp < 3) { g = C; b = X; }
+    else if (hp < 4) { g = X; b = C; } else if (hp < 5) { r = X; b = C; } else { r = C; b = X; }
+    const m = L - C / 2;
+    return 255 * (0.2126 * (r + m) + 0.7152 * (g + m) + 0.0722 * (b + m));
+  }
+  function lightForLuma(h, s, target) {
+    let lo = 40, hi = 70;
+    for (let k = 0; k < 14; k++) {
+      const mid = (lo + hi) / 2;
+      if (hslLuma(h, s, mid) < target) lo = mid; else hi = mid;
+    }
+    return Math.round(((lo + hi) / 2) * 10) / 10;
+  }
+
+  function updateSeeds(t) {
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      const a1 = c.p1 + t * c.w1, a2 = c.p2 + t * c.w2;
+      seedsNow[i][0] = c.hx + c.r1 * Math.cos(a1) + c.r2 * Math.sin(a2);
+      seedsNow[i][1] = c.hy + c.r1 * Math.sin(a1) + c.r2 * Math.cos(a2);
     }
   }
 
@@ -215,14 +316,15 @@
     baseAngle = rand(0, Math.PI * 2);
     wobblePhase0 = rand(0, Math.PI * 2);
     // Guaranteed-minimum-magnitude, random-sign rate, same house-style
-    // convention as every other engine's motion parameters. A fast rate
-    // at small amplitude keeps peak angular velocity (amplitude*rate)
-    // comparable to a slow full rotation's, for the same lively-pace
-    // fastMotion reading, while the total excursion stays bounded.
-    wobbleRate = (rng() < 0.5 ? -1 : 1) * rand(2.0, 3.2) * SPEED;
+    // convention as every other engine's motion parameters. Slowed from
+    // the original 2.0-3.2 rad/s once the per-unit choreography (moving
+    // seeds + breathing borders) became the main source of visible motion
+    // -- a fast rigid wobble only drowned the unit-level motion in the
+    // audit, while the total excursion stays bounded either way.
+    wobbleRate = (rng() < 0.5 ? -1 : 1) * rand(0.5, 0.85) * SPEED;
   }
 
-  const strokeW = Math.max(1.5, Math.min(W, H) * 0.006);
+  const strokeW = Math.max(2, Math.min(W, H) * 0.009);
 
   const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
   let cycleFrame = 0;
@@ -239,6 +341,12 @@
     cycleFrame++;
     clk += dt;
 
+    updateSeeds(clk);
+    for (let i = 0; i < cells.length; i++) cells[i].poly = voronoiCell(i, seedsNow, boundingPoly);
+
+    ctx.fillStyle = bgFill; // never visible (the mosaic tiles the viewport) -- defensive clear
+    ctx.fillRect(0, 0, W, H);
+
     ctx.save();
     ctx.translate(cx, cy);
     ctx.rotate(baseAngle + WOBBLE_MAX * Math.sin(wobblePhase0 + clk * wobbleRate));
@@ -247,14 +355,30 @@
     ctx.strokeStyle = 'rgba(0,0,0,0.55)';
     ctx.lineWidth = strokeW;
 
+    const wt = clk * waveRate;
     for (const cell of cells) {
-      ctx.fillStyle = `hsl(${cell.hue}, ${cell.sat}%, ${cell.light}%)`;
+      const poly = cell.poly;
+      if (!poly || poly.length < 3) continue;
+      // Centroid (vertex mean is fine as a scale pivot for a convex cell).
+      let mx = 0, my = 0;
+      for (const v of poly) { mx += v[0]; my += v[1]; }
+      mx /= poly.length; my /= poly.length;
+      const s = 1 - PULSE * (0.5 + 0.5 * Math.sin(waveKx * cell.hx + waveKy * cell.hy + wt + cell.pulseOff));
+      // Full cell in the rim colour, then the pulsing inner fill, then the
+      // crisp dark edge on the true cell boundary.
+      ctx.fillStyle = cell.rimFill;
       ctx.beginPath();
-      ctx.moveTo(cell.poly[0][0], cell.poly[0][1]);
-      for (let k = 1; k < cell.poly.length; k++) ctx.lineTo(cell.poly[k][0], cell.poly[k][1]);
+      ctx.moveTo(poly[0][0], poly[0][1]);
+      for (let k = 1; k < poly.length; k++) ctx.lineTo(poly[k][0], poly[k][1]);
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
+      ctx.fillStyle = cell.fill;
+      ctx.beginPath();
+      ctx.moveTo(mx + (poly[0][0] - mx) * s, my + (poly[0][1] - my) * s);
+      for (let k = 1; k < poly.length; k++) ctx.lineTo(mx + (poly[k][0] - mx) * s, my + (poly[k][1] - my) * s);
+      ctx.closePath();
+      ctx.fill();
     }
 
     ctx.restore();

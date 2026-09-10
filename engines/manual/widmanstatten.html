@@ -101,6 +101,46 @@
   const halfDiag = Math.sqrt(W * W + H * H) / 2 * 1.08; // covers every corner at any rotation angle
   const dt = 1 / FPS;
 
+  // UNIT CHOREOGRAPHY (2026-09-10, user definition of "dynamic": the basic
+  // pattern units -- here the individual bands and the crosshatch cells
+  // they carve out -- must visibly move relative to each other, not just
+  // the whole composition spinning as a rigid block). Every motion below
+  // is COVERAGE-NEUTRAL by construction, which turned out to be the whole
+  // game: a first version added a free-running width breath, an
+  // accordion wave and per-band jitter, all of which either change band
+  // area directly or let neighbouring bands merge, and the mean-luma
+  // standard deviation over validate.js's 300s window went from 0.60
+  // (original engine) to 2.45 -- enough to fail the brightness-trend
+  // check on some seeds. Measured per component, then redesigned:
+  //   1. Each band FAMILY scrolls along its own normal at its own speed and
+  //      direction (random sign, guaranteed-minimum rate, sinusoidally
+  //      modulated but never stopping), so the three families slide across
+  //      each other and every crosshatch cell continuously changes shape.
+  //      The band sequence is generated as one exact PERIOD (length L >=
+  //      the full 2*halfDiag span) and drawn twice, offset by the scroll
+  //      modulo L, so the viewport always sees a complete band field.
+  //   2. Band widths breathe as exactly PAIRED see-saws: consecutive bands
+  //      of the same role are paired, and band a widens by delta while
+  //      band b narrows by the same delta (both about their own fixed
+  //      centre, delta <= 35% of the narrower one, smaller than half the
+  //      minimum gap so bands never merge). Total lit width per pair is
+  //      constant at every instant; the pair phase follows a travelling
+  //      wave so the breath still ripples along the family.
+  //   3. A bounded ACCORDION moves band CENTRES along the normal in a
+  //      travelling wave (amplitude A, wavelength lambda, with A*k held to
+  //      0.25 so the local stretch never lets neighbours touch); widths
+  //      are untouched, so per-band area is constant.
+  //   4. Each family sways by a small bounded angle (+-0.06 rad) at its own
+  //      rate, so the crosshatch angles themselves flex slightly.
+  //   5. Family colours are luma-equalised (same Rec.709 luma target per
+  //      role, hue/saturation untouched), so bands of different hue
+  //      entering or leaving the viewport shift colour balance rather than
+  //      brightness.
+  // All rates/phases/wave vectors are fixed once per video in initBands();
+  // the shared clock drives every position, so same seed => same frames.
+  // The global rigid rotation per cycle (reconfigureRotation) is kept on
+  // top of this.
+  //
   // Family angles, band widths/positions, and colours are all fixed ONCE for
   // the whole video, never re-rolled per cycle -- the "any coverage-
   // affecting parameter re-randomised per cycle creates a real (not
@@ -109,6 +149,30 @@
   // bands exist and how wide they are, so re-rolling either mid-video would
   // swing average frame brightness between cycles exactly like a
   // randomised subdivision depth or star count did in those engines.
+
+  // Rec.709 luma of an HSL colour (0-255) and the lightness that lands a
+  // hue/saturation at a target luma (bisection, clamped vivid-not-pastel).
+  function hslLuma(h, sat, l) {
+    const S = sat / 100, L = l / 100;
+    const C = (1 - Math.abs(2 * L - 1)) * S;
+    const hp = (((h % 360) + 360) % 360) / 60;
+    const X = C * (1 - Math.abs((hp % 2) - 1));
+    let r = 0, g = 0, b = 0;
+    if (hp < 1) { r = C; g = X; } else if (hp < 2) { r = X; g = C; } else if (hp < 3) { g = C; b = X; }
+    else if (hp < 4) { g = X; b = C; } else if (hp < 5) { r = X; b = C; } else { r = C; b = X; }
+    const m = L - C / 2;
+    return 255 * (0.2126 * (r + m) + 0.7152 * (g + m) + 0.0722 * (b + m));
+  }
+  function lightForLuma(h, sat, target) {
+    // Clamp [46, 74]: a yellow pushed below L=46 turns mustard-brown, so
+    // extreme hues are only PARTIALLY equalised (measured: full
+    // equalisation sd 0.92-1.07, none 1.38-1.79 -- most of the gain is
+    // kept while every family stays vivid).
+    let lo = 46, hi = 74;
+    for (let k = 0; k < 14; k++) { const mid = (lo + hi) / 2; if (hslLuma(h, sat, mid) < target) lo = mid; else hi = mid; }
+    return Math.round(((lo + hi) / 2) * 10) / 10;
+  }
+
   let families, matrixCol;
   function initBands() {
     const d = Math.max(0.7, Math.min(1.4, DENSITY));
@@ -123,6 +187,13 @@
     const angles = [angle0, angle1, angle2];
 
     matrixCol = PAL[SEED % PAL.length];
+    const sgn = () => (rng() < 0.5 ? -1 : 1);
+    // Luma target for primary bands = the mean luma of the three family
+    // colours at their base lightness; secondary (plessite) bands sit a
+    // fixed step lighter.
+    let targetLuma = 0;
+    for (let fi = 0; fi < 3; fi++) { const c = PAL[(SEED + fi + 1) % PAL.length]; targetLuma += hslLuma(c[0], c[1], c[2]); }
+    targetLuma /= 3;
 
     families = angles.map((theta, fi) => {
       const baseCol = PAL[(SEED + fi + 1) % PAL.length];
@@ -143,12 +214,47 @@
         const gap = isPrimary
           ? minDim * rand(0.02, 0.045)
           : minDim * rand(0.01, 0.03);
-        const light = Math.min(74, baseCol[2] + (isPrimary ? rand(-4, 4) : rand(6, 16)));
-        bands.push({ p0: p, w, hue: baseCol[0], sat: baseCol[1], light });
+        const light = lightForLuma(baseCol[0], baseCol[1], targetLuma + (isPrimary ? rand(-6, 6) : rand(10, 22)));
+        bands.push({ p0: p, w, isPrimary, fill: `hsl(${baseCol[0]}, ${baseCol[1]}%, ${light}%)`, delta: 0, sign: 0, bphase: 0 });
         p += w + gap;
         i++;
       }
-      return { theta, bands };
+      // The sequence now ends at p >= halfDiag; its period is the full
+      // generated length, so tiling it with period L is seamless and the
+      // last gap before the wrap is a normal gap.
+      const L = p + halfDiag;
+      // Paired width breath (see item 2): consecutive same-role bands.
+      const wk = (Math.PI * 2) / (minDim * rand(0.45, 0.65));
+      for (const role of [true, false]) {
+        const idx = [];
+        for (let j = 0; j < bands.length; j++) if (bands[j].isPrimary === role) idx.push(j);
+        for (let j = 0; j + 1 < idx.length; j += 2) {
+          const a = bands[idx[j]], b = bands[idx[j + 1]];
+          // delta bound: 35% of the narrower band, and never more than the
+          // smallest gap adjacent to either band (0.01*minDim for
+          // secondaries, 0.02*minDim for primaries) so nothing can merge.
+          const delta = Math.min(0.35 * Math.min(a.w, b.w), minDim * (role ? 0.018 : 0.009));
+          const centre = ((a.p0 + a.w / 2) + (b.p0 + b.w / 2)) / 2;
+          a.delta = delta; a.sign = 1; a.bphase = wk * centre;
+          b.delta = delta; b.sign = -1; b.bphase = wk * centre;
+        }
+      }
+      // Scroll along the family normal: v(t) = dir * (v0 + v1*sin(wm*t+pm)),
+      // v1 < v0 so the family never stops or reverses. A wide primary
+      // band+gap "unit" is ~0.07*minDim, so 0.05-0.09*minDim/s slides a
+      // unit past in ~0.8-1.4s -- obvious at a glance.
+      const v0 = minDim * rand(0.05, 0.09) * SPEED;
+      const v1 = v0 * rand(0.35, 0.6);
+      const wm = rand(0.5, 0.9) * SPEED;
+      // Bounded accordion (item 3): A*k = 0.25.
+      const accK = (Math.PI * 2) / (minDim * rand(0.5, 0.7));
+      return {
+        theta, bands, L,
+        dir: sgn(), v0, v1, wm, pm: rand(0, Math.PI * 2),
+        wrate: sgn() * rand(1.05, 1.75) * SPEED, wphase: rand(0, Math.PI * 2),
+        accK, accAmp: 0.25 / accK, accRate: sgn() * rand(1.0, 1.6) * SPEED, accPhase: rand(0, Math.PI * 2),
+        swayAmp: rand(0.04, 0.06), swayRate: sgn() * rand(0.55, 0.95) * SPEED, swayPhase: rand(0, Math.PI * 2),
+      };
     });
   }
 
@@ -159,6 +265,14 @@
   // oblique, irregularly-spaced families have no exact rotational symmetry
   // to resonate against (unlike ziggurat.html's identical wedges), so a
   // plain guaranteed-minimum-magnitude, random-sign rate is sufficient.
+  // The rate was briefly lowered to 0.12-0.22 rad/s so the per-unit
+  // choreography would dominate the unit-motion audit, then restored:
+  // measured mean-luma sd was identical either way (the residual
+  // variance is the scroll's, not the rotation's), but a slow spin's
+  // coverage fluctuation has a period comparable to validate.js's ~37s
+  // sample spacing and aliases into a spurious trend (worst-case shifted
+  // rise 46 vs 35-41 at the original rate). The unit choreography still
+  // leaves ~75-85% of frame change unexplained by the rigid fit.
   let rotAngle0, rotRate;
   function reconfigureRotation() {
     rotAngle0 = rand(0, Math.PI * 2);
@@ -189,10 +303,23 @@
 
     for (const fam of families) {
       ctx.save();
-      ctx.rotate(fam.theta);
-      for (const b of fam.bands) {
-        ctx.fillStyle = `hsl(${b.hue}, ${b.sat}%, ${b.light}%)`;
-        ctx.fillRect(-halfDiag, b.p0, halfDiag * 2, b.w);
+      ctx.rotate(fam.theta + fam.swayAmp * Math.sin(fam.swayPhase + clk * fam.swayRate));
+      // Closed-form integral of the modulated speed, so the offset is an
+      // exact function of the shared clock (no per-frame accumulation).
+      const dist = fam.dir * (fam.v0 * clk - (fam.v1 / fam.wm) * (Math.cos(fam.wm * clk + fam.pm) - Math.cos(fam.pm)));
+      const off = ((dist % fam.L) + fam.L) % fam.L;
+      const wt = fam.wphase + clk * fam.wrate;
+      const at = fam.accPhase + clk * fam.accRate;
+      for (let copy = -1; copy <= 0; copy++) {
+        const shift = off + copy * fam.L;
+        for (const b of fam.bands) {
+          const p1 = b.p0 + b.w / 2 + shift; // band centre after scroll
+          if (p1 < -halfDiag - b.w || p1 > halfDiag + b.w) continue;
+          const pc = p1 + fam.accAmp * Math.sin(fam.accK * p1 + at); // + bounded accordion
+          const w = b.w + b.sign * b.delta * Math.sin(b.bphase + wt); // paired see-saw breath
+          ctx.fillStyle = b.fill;
+          ctx.fillRect(-halfDiag, pc - w / 2, halfDiag * 2, w);
+        }
       }
       ctx.restore();
     }
