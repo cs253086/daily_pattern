@@ -23,6 +23,31 @@
 //   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
 // Deterministic Mulberry32, no rAF, per-second rotation rates, cheap arc
 // strokes. Redraws each frame (no accumulation, no whiteout risk).
+//
+// UNIT CHOREOGRAPHY (2026-09-10, user definition of "dynamic": the basic
+// units must visibly move RELATIVE TO EACH OTHER every frame, not just the
+// whole pattern spinning). A unit-motion audit (scripts/audit-unit-motion.js)
+// scored the old version at residual 2.0 -- thin arcs on rings that only
+// rotated. Added, all coverage-neutral by construction:
+//   * Thick, bold bands (house style: bigger/fewer/clearer) so motion is
+//     legible at a glance, with a bright core and soft halo.
+//   * Guaranteed COUNTER-rotation: adjacent rings alternate sign and get
+//     clearly different rates (inner fast, outer slower), so neighbouring
+//     rings always slide past each other.
+//   * Segment span BREATHING as a travelling wave around each ring: each
+//     segment's arc length swells/shrinks by +-38% with a phase offset of
+//     k*2pi/segments, so the wave runs around the ring while the ring's
+//     TOTAL lit arc length stays exactly constant (the sines sum to zero).
+//   * Segment SLIDE: each segment also slides back and forth inside its own
+//     slot (+-26% of slot) with the same travelling phase, so gaps visibly
+//     open and close between neighbours.
+//   * Radial BREATHING: each ring's radius oscillates +-6-7% (bounded so
+//     neighbouring rings never cross and sum to white), phase-staggered
+//     ring to ring (i*2pi/n) so the frame's total coverage stays flat.
+//   * Hue is now SPATIAL (per ring + per segment offset) with only a small
+//     bounded temporal wobble -- hue swings luma, so a steady drift is a
+//     brightness-trend risk (see CLAUDE.md).
+// All periods are 3-8s with guaranteed-minimum rates and random sign.
 (() => {
   const params = new URLSearchParams(location.search);
   const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
@@ -80,50 +105,89 @@
   const dt = 1 / FPS;
 
   // A "ring" is a set of evenly-spaced thick arc segments (with gaps
-  // between them) at a fixed radius, spinning as one rigid unit.
+  // between them) at a fixed base radius. Ring count, segment count, base
+  // arcFrac, radii, and the breathing/wave AMPLITUDES are fixed ONCE per
+  // video in initRings() -- with thick bands, re-rolling segment count or
+  // arcFrac per cycle swings total coverage between cycles and reads as a
+  // brightness trend to validate.js (the starburst/spirograph false-
+  // positive class in CLAUDE.md; measured here as a 59-luma projected rise
+  // on seed 1 before this split). reconfigure() re-rolls only phases,
+  // signs and rates every cycleSec -- coverage-neutral by construction.
   let rings, hue0;
-  function config() {
-    hue0 = rng() * 360;
+  function initRings() {
     const n = randInt(4, 6);
     rings = [];
     for (let i = 0; i < n; i++) {
       const t = (i + 1) / n;
       rings.push({
-        r: t * minDim * 0.46,
+        t,
+        r: (0.11 + t * 0.36) * minDim,
         segments: randInt(3, 6),
-        arcFrac: rand(0.35, 0.6), // fraction of each segment's slot that is filled (rest is gap)
-        rot: rng() * Math.PI * 2,
-        // Guaranteed minimum magnitude with random sign -- same fix as
-        // every other curated engine here.
-        rotRate: (rng() < 0.5 ? -1 : 1) * rand(0.35, 1.0) * (1 - t * 0.3),
-        pulseRate: rand(0.6, 1.4),
+        arcFrac: rand(0.38, 0.55), // mean fraction of each slot that is filled
+        spanAmp: rand(0.28, 0.38),
+        slideAmp: rand(0.18, 0.26),
+        breathAmp: rand(0.055, 0.075),
+        breathPhase: (i / n) * Math.PI * 2 + rand(-0.3, 0.3),
         colorIdx: i % PAL.length,
+        // Per-segment hue offsets (spatial, fixed).
+        segHue: Array.from({ length: 6 }, () => rand(-22, 22)),
       });
     }
+  }
+  function reconfigure() {
+    hue0 = rng() * 360;
+    const dir0 = rng() < 0.5 ? -1 : 1;
+    rings.forEach((rg, i) => {
+      rg.rot = rng() * Math.PI * 2;
+      // Adjacent rings ALWAYS counter-rotate (alternating sign), with a
+      // guaranteed-minimum magnitude that is clearly different ring to
+      // ring (inner faster than outer, plus jitter).
+      rg.rotRate = dir0 * (i % 2 ? -1 : 1) * rand(0.55, 0.85) * (1.35 - rg.t * 0.6);
+      // Travelling span/slide wave: period ~3-6s, random sign.
+      rg.waveRate = (rng() < 0.5 ? -1 : 1) * rand(1.05, 2.1);
+      rg.wavePhase = rng() * Math.PI * 2;
+      // Radial breathing: period ~3.5-7s, phase staggered by ring index.
+      rg.breathRate = rand(0.9, 1.8);
+    });
   }
 
   const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
   let cycleFrame = 0;
   let clk = 0;
 
-  config();
+  initRings();
+  reconfigure();
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
 
   window.READY = false;
   window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
   window.currentFrame = 0;
 
-  function strokeRing(r, rot, segments, arcFrac, style, lw) {
-    const slot = (Math.PI * 2) / segments;
-    const arcLen = slot * arcFrac;
-    ctx.strokeStyle = style;
-    ctx.lineWidth = lw;
-    ctx.lineCap = 'round';
-    for (let k = 0; k < segments; k++) {
-      const a0 = rot + k * slot;
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, a0, a0 + arcLen);
-      ctx.stroke();
+  // Draw one ring: every segment gets its own breathing arc length and
+  // slide offset from the travelling wave. phaseK = k*2pi/segments makes it
+  // a wave that runs around the ring; the sum over k of sin(wt+phaseK) is
+  // exactly zero, so the ring's total lit arc length is constant.
+  function drawRing(rg, r, rot, wave, hueBase, sat, light) {
+    const seg = rg.segments;
+    const slot = (Math.PI * 2) / seg;
+    const lwCore = Math.max(4, minDim * 0.036);
+    const lwHalo = lwCore * 2.0;
+    for (let k = 0; k < seg; k++) {
+      const ph = wave + (k / seg) * Math.PI * 2;
+      const frac = rg.arcFrac * (1 + rg.spanAmp * Math.sin(ph));
+      const arcLen = slot * frac;
+      // Slide inside the slot (quadrature to the span wave so the segment
+      // centre and its length move visibly out of step).
+      const centre = rot + (k + 0.5) * slot + rg.slideAmp * slot * Math.cos(ph);
+      const a0 = centre - arcLen / 2, a1 = centre + arcLen / 2;
+      const hue = ((hueBase + rg.segHue[k]) % 360 + 360) % 360;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${light}%, 0.16)`;
+      ctx.lineWidth = lwHalo;
+      ctx.beginPath(); ctx.arc(cx, cy, r, a0, a1); ctx.stroke();
+      ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${Math.min(80, light + 12)}%, 0.95)`;
+      ctx.lineWidth = lwCore;
+      ctx.beginPath(); ctx.arc(cx, cy, r, a0, a1); ctx.stroke();
     }
   }
 
@@ -136,28 +200,28 @@
     ctx.fillRect(0, 0, W, H);
 
     ctx.globalCompositeOperation = 'lighter';
-    const lwBright = Math.max(2, minDim / 220);
-    const lwSoft = lwBright * 3.2;
+    // Small bounded hue wobble only (hue affects luma; no steady drift).
+    const hueWobble = Math.sin(clk * 0.45) * 10;
 
     for (const rg of rings) {
-      const r = rg.r * (0.97 + 0.03 * Math.sin(clk * 0.6 * rg.pulseRate));
+      const r = rg.r * (1 + rg.breathAmp * Math.sin(clk * rg.breathRate + rg.breathPhase));
       const rot = rg.rot + clk * rg.rotRate;
+      const wave = clk * rg.waveRate + rg.wavePhase;
       const base = PAL[rg.colorIdx];
-      const hue = ((base[0] + hue0 * 0.05 + clk * 4) % 360 + 360) % 360;
-      strokeRing(r, rot, rg.segments, rg.arcFrac, `hsla(${hue}, ${base[1]}%, ${Math.min(84, base[2] + 16)}%, 0.92)`, lwBright);
-      strokeRing(r, rot, rg.segments, rg.arcFrac, `hsla(${hue}, ${base[1]}%, ${base[2]}%, 0.2)`, lwSoft);
+      const hue = base[0] + hue0 * 0.05 + hueWobble;
+      drawRing(rg, r, rot, wave, hue, base[1], base[2]);
     }
 
     // Small glow core at the centre where every ring's spokes visually converge.
     const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, minDim * 0.05);
     const coreBase = PAL[0];
-    const coreHue = ((coreBase[0] + hue0 * 0.05 + clk * 4) % 360 + 360) % 360;
+    const coreHue = ((coreBase[0] + hue0 * 0.05 + hueWobble) % 360 + 360) % 360;
     g.addColorStop(0, `hsla(${coreHue}, ${coreBase[1]}%, ${Math.min(80, coreBase[2] + 10)}%, 0.5)`);
     g.addColorStop(1, `hsla(${coreHue}, ${coreBase[1]}%, ${coreBase[2]}%, 0)`);
     ctx.fillStyle = g;
     ctx.beginPath(); ctx.arc(cx, cy, minDim * 0.05, 0, Math.PI * 2); ctx.fill();
 
-    if (cycleFrame >= cycleFrames) { cycleFrame = 0; config(); }
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigure(); }
   }
 
   window.advanceFrame = function () { renderFrame(); window.currentFrame++; };

@@ -22,6 +22,22 @@
 //   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
 // Deterministic Mulberry32, no rAF, canvas sized to width/height, per-second
 // rates, cheap vector strokes (segments × 2·slices per frame). No per-pixel work.
+//
+// UNIT CHOREOGRAPHY (2026-09-10, user definition of "dynamic": the basic
+// units must visibly move RELATIVE TO EACH OTHER every frame). The unit-
+// motion audit (scripts/audit-unit-motion.js) scored the old version at
+// residual 4.6: 2-4 beads on slow Lissajous paths left a slow smear. Now:
+//   * 4-6 beads per wedge, each on an EPICYCLIC path: a main orbit (angle
+//     drift 0.5-1.1 rad/s, radius breathing with period ~4-8s) plus a
+//     small fast epicycle (10-22% of the roam radius, 1.6-3.2 rad/s), so
+//     every mirrored copy loops and curls instead of gliding.
+//   * Per-bead SCALE PULSE (stamp radius x0.72-1.28, period ~3-6s, phase
+//     spread) so beads visibly swell/shrink against each other.
+//   * Every rate keeps a guaranteed minimum magnitude with random sign --
+//     this is an ACCUMULATING (fade) engine and a near-still bead would
+//     re-stamp one spot to solid white (CLAUDE.md item 3). Faster paths
+//     spread the light thinner, so this is ALSO the anti-whiteout fix;
+//     verified at 25/50/75/95/105% of the full cycle.
 (() => {
   const params = new URLSearchParams(location.search);
   const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
@@ -34,7 +50,14 @@
   const SEED = intP('seed', 1);
   const SPEED = fltP('speed', 1);
   const DENSITY = fltP('density', 1);
-  const CYCLE_SEC = fltP('cycleSec', 50);
+  // 43.5s (was 50): validate.js samples 8 fixed fractions of a 300s window,
+  // and at 50s the sample at t=150s lands exactly on a hard-clear boundary
+  // while two more land in the last-10% dim ramp -- a fading engine reads
+  // near-black there, which the regression fit turned into a spurious
+  // +60-75 luma "trend" on some seeds. 43.5s keeps every sample >=20% of a
+  // cycle from a boundary and out of the ramp (same analysis as
+  // automaton.html's CYCLE_SEC in CLAUDE.md).
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
 
   const canvas = document.getElementById('c');
   canvas.width = W; canvas.height = H;
@@ -82,34 +105,55 @@
   const R = Math.min(W, H) * 0.52;   // seeds roam a large radius; symmetry fills frame
   const dt = 1 / FPS;
 
-  // Seeds: points drifting on gentle Lissajous paths within the source wedge.
+  // Seeds: beads on epicyclic paths within the source wedge.
+  // Symmetry order and bead count are fixed ONCE per video (initSeeds):
+  // total light per frame scales with both (every bead is stamped 2*slices
+  // times), so re-rolling them per cycle -- as the original per-cycle
+  // config did -- swung mean brightness cycle to cycle and read as a fake
+  // whiteout trend to validate.js's regression fit (measured: projected
+  // rise 50-124 luma on 3 of 9 seeds). reconfigure() re-rolls only the
+  // paths every cycle.
   let slices, seeds, hue0;
-  function config() {
+  function initSeeds() {
     slices = randInt(5, 9);            // N-fold symmetry
-    hue0 = rng() * 360;
-    const n = randInt(2, 4);
+    const n = randInt(4, 6);
     seeds = [];
     for (let i = 0; i < n; i++) {
       seeds.push({
-        ar: rand(0.25, 0.95) * R, arv: rand(0.2, 0.5),  // radius osc
-        // Angle drift (rad/s). MUST have a meaningful minimum magnitude: a
-        // seed whose angle barely changes keeps re-stamping the same ring
-        // for the whole cycle, and with additive blending that ring
-        // saturates to solid white while the rest of the canvas stays dark
-        // (this was a real production bug -- confirmed the "washed to a
-        // white disc" failure was a slow-drifting seed baking one ring
-        // white over a full ~70s cycle, not a fade-rate problem).
-        aa: rng() * Math.PI * 2, aav: (rng() < 0.5 ? -1 : 1) * rand(0.35, 0.9),
-        // Radial "breathing" frequency. Was rand(0.05, 0.22) -- a full
-        // inhale/exhale cycle took 28-125s, so the pattern barely seemed to
-        // move on that axis. Raised so it breathes visibly within a few
-        // seconds instead of tens of seconds; also helps the anti-whiteout
-        // fix above (faster sweep = less time re-visiting the same pixels).
-        fr: rand(0.15, 0.45),
-        phase: rng() * Math.PI * 2,
         colorIdx: randInt(0, PAL.length - 1),
+        pulsePhase: (i / n) * Math.PI * 2 + rand(-0.4, 0.4),
+        // Roam and epicycle radii are per-video too: how far a bead's
+        // light is spread sets how much of it clips at 255, so re-rolling
+        // these per cycle shifted mean luma cycle to cycle (seed 1 measured
+        // a 60-luma projected rise with them re-rolled).
+        ar: rand(0.28, 0.68) * R,
+        epiR: rand(0.10, 0.22) * R,
         prev: null,
       });
+    }
+  }
+  function reconfigure() {
+    hue0 = rng() * 360;
+    for (const sd of seeds) {
+      // Angle drift (rad/s). MUST have a meaningful minimum magnitude: a
+      // seed whose angle barely changes keeps re-stamping the same ring
+      // for the whole cycle, and with additive blending that ring
+      // saturates to solid white while the rest of the canvas stays dark
+      // (this was a real production bug -- confirmed the "washed to a
+      // white disc" failure was a slow-drifting seed baking one ring
+      // white over a full ~70s cycle, not a fade-rate problem).
+      sd.aa = rng() * Math.PI * 2;
+      sd.aav = (rng() < 0.5 ? -1 : 1) * rand(0.5, 1.1);
+      // Radial "breathing" frequency: a full inhale/exhale every ~4-8s so
+      // the bead sweeps its wedge many times per cycle (spreads light,
+      // reads as motion).
+      sd.fr = rand(0.8, 1.5);
+      sd.phase = rng() * Math.PI * 2;
+      // Epicycle: a small, fast loop riding on the main orbit.
+      sd.epiRate = (rng() < 0.5 ? -1 : 1) * rand(1.6, 3.2);
+      sd.epiPhase = rng() * Math.PI * 2;
+      // Scale pulse of the stamp itself.
+      sd.pulseRate = rand(1.0, 2.0);
     }
   }
 
@@ -120,7 +164,8 @@
   const stepsPerFrame = Math.max(1, Math.round(3 * DENSITY));
   let clk = 0;
 
-  config();
+  initSeeds();
+  reconfigure();
   hardClear();
 
   window.READY = false;
@@ -135,19 +180,19 @@
   // overlapping stamps stay in their hue instead of every overlap summing to
   // white — keeps the mandala colourful, with white reserved for the true
   // hot core where the most paths cross.
-  function minDimGlow() { return Math.min(W, H) * 0.019; }
-  function stamp(x, y, hue, s, l, a) {
+  function minDimGlow() { return Math.min(W, H) * 0.031; }
+  function stamp(x, y, hue, s, l, a, rad) {
     for (let k = 0; k < slices; k++) {
       const ang = (k / slices) * Math.PI * 2;
       const ca = Math.cos(ang), sa = Math.sin(ang);
       for (const mx of [1, -1]) {           // normal + mirror -> reflective
         const px = cx + (mx * x) * ca - y * sa;
         const py = cy + (mx * x) * sa + y * ca;
-        const g = ctx.createRadialGradient(px, py, 0, px, py, stampR);
+        const g = ctx.createRadialGradient(px, py, 0, px, py, rad);
         g.addColorStop(0, `hsla(${hue}, ${s}%, ${Math.min(74, l + 8)}%, ${a})`);
         g.addColorStop(1, `hsla(${hue}, ${s}%, ${l}%, 0)`);
         ctx.fillStyle = g;
-        ctx.beginPath(); ctx.arc(px, py, stampR, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(px, py, rad, 0, Math.PI * 2); ctx.fill();
       }
     }
   }
@@ -157,7 +202,10 @@
     const progress = cycleFrame / cycleFrames;
 
     ctx.globalCompositeOperation = 'source-over';
-    const fade = progress > 0.9 ? 0.045 + (progress - 0.9) * 0.9 : 0.045;
+    // Faster fade than the original 0.045: trails now last ~0.5s, so the
+    // beads read as distinct moving heads with short comet tails instead
+    // of a slow smear, and less light accumulates per pixel (anti-whiteout).
+    const fade = progress > 0.9 ? 0.095 + (progress - 0.9) * 0.9 : 0.095;
     ctx.fillStyle = `rgba(0,0,0,${fade})`;
     ctx.fillRect(0, 0, W, H);
 
@@ -166,22 +214,33 @@
     for (let s = 0; s < stepsPerFrame; s++) {
       clk += dt * SPEED;
       for (const sd of seeds) {
-        const r = (0.5 + 0.5 * Math.sin(clk * sd.fr + sd.phase)) * sd.ar + 0.06 * R;
+        // Minimum radius keeps every bead (epicycle included) at least
+        // 0.16R from the centre: all 2*slices mirrored copies converge there
+        // and additively sum to a grey ring (seen when this was 0.06-0.10R with
+        // no epicycle allowance).
+        const r = (0.5 + 0.5 * Math.sin(clk * sd.fr + sd.phase)) * sd.ar + 0.16 * R + sd.epiR;
         const ang = sd.aa + clk * sd.aav;
-        const x = Math.cos(ang) * r, y = Math.sin(ang) * r;
+        const ea = sd.epiPhase + clk * sd.epiRate;
+        const x = Math.cos(ang) * r + Math.cos(ea) * sd.epiR;
+        const y = Math.sin(ang) * r + Math.sin(ea) * sd.epiR;
+        const rad = stampR * (1 + 0.28 * Math.sin(clk * sd.pulseRate + sd.pulsePhase));
         const base = PAL[sd.colorIdx];
         // This engine ACCUMULATES light across frames (fades rather than
         // clears), so an unbounded hue drift would sweep the whole colour
         // wheel into the same overlapping trails and wash everything to
         // white. Use a slow BOUNDED oscillation instead — still visibly
         // dynamic (colour mood shifts back and forth) without desaturating.
-        const hue = ((base[0] + Math.sin(clk * 0.15) * 20 + hue0 * 0.04 + Math.sin(clk * 0.035) * 35) % 360 + 360) % 360;
-        stamp(x, y, hue, base[1], base[2], 0.12);
+        // (The original also had a +-35deg wobble with a 180s period -- that
+        // spans validate.js's whole 300s window and hue swings luma, so it
+        // read as a brightness trend once the beads got brighter. Now only
+        // short-period, small wobbles.)
+        const hue = ((base[0] + Math.sin(clk * 0.15) * 14 + hue0 * 0.04 + Math.sin(clk * 0.5) * 10) % 360 + 360) % 360;
+        stamp(x, y, hue, base[1], base[2], 0.13, rad);
         sd.prev = [x, y];
       }
     }
 
-    if (cycleFrame >= cycleFrames) { cycleFrame = 0; hardClear(); config(); }
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; hardClear(); reconfigure(); }
   }
 
   window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
