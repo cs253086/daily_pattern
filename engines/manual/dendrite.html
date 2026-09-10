@@ -51,6 +51,26 @@
 // Deterministic Mulberry32, no rAF, per-second rotation rates. Redraws each
 // frame from a fixed per-dendrite segment list computed once at start-up
 // (no accumulation, no whiteout risk).
+//
+// UNIT CHOREOGRAPHY (2026-09-10, user definition of "dynamic": the basic
+// units must visibly move RELATIVE TO EACH OTHER every frame, not just the
+// whole pattern spinning). The unit-motion audit (scripts/audit-unit-
+// motion.js) scored the old version at residual 3.9: rigid trees that only
+// spun about their roots. Now every tree SWAYS like a plant in wind:
+//   * Each branch's angle relative to its parent gets an oscillation
+//     amp(gen)*sin(omega*t + phase_tree + gen*lag), with amplitude GROWING
+//     with generation (trunk barely moves, twigs swing hardest) and a phase
+//     lag per generation, so the sway propagates outward along the tree.
+//     Because child angles are relative, offsets accumulate along a path
+//     and the tips travel a long way (10-35% of the tree radius) while the
+//     branching topology, lengths and widths never change -- so coverage is
+//     steady by construction (positions are re-walked from the stored
+//     relative angles every frame; nothing is re-rolled per cycle).
+//   * A brightness+width PULSE travels from trunk to tips (phase by
+//     generation, spread over a full turn so the lit total stays flat).
+//   * The per-tree spin about its root is kept as before.
+// Sway period ~3-5s, random sign per tree; the trunk is sized so the
+// swaying reach still stays inside its cell (see trunkLen).
 (() => {
   const params = new URLSearchParams(location.search);
   const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
@@ -128,7 +148,11 @@
   let dendrites;
   function initDendrites() {
     const d = Math.max(0.7, Math.min(1.4, DENSITY));
-    const grid = d < 0.85 ? { cols: 2, rows: 1 } : d > 1.15 ? { cols: 2, rows: 2 } : { cols: 3, rows: 1 };
+    // 3x2 (was 3x1) at default density: a 16:9 frame split into three
+    // tall cells confined each tree to a circle of half the cell WIDTH and
+    // left the top/bottom 40% of every cell black. Two rows of three gives
+    // six trees of the same on-screen size and a much fuller frame.
+    const grid = d < 0.85 ? { cols: 2, rows: 2 } : d > 1.15 ? { cols: 4, rows: 2 } : { cols: 3, rows: 2 };
     const cellW = W / grid.cols, cellH = H / grid.rows;
     const MAX_GEN = 9;
     const hue0 = rng() * 360;
@@ -144,39 +168,42 @@
         const dir0 = rand(0, Math.PI * 2);
         const baseCol = PAL[i % PAL.length];
         const dendHue0 = hue0 + rand(-30, 30);
-        // Capped at half the SMALLER cell dimension (with margin) so a
-        // dendrite's full reach -- in any direction, since it also spins
-        // over time -- stays within its own cell. A real bug found only
-        // by rendering and looking: an earlier, larger clusterR (up to
-        // 0.72x the cell's smaller dimension) exceeded HALF that
-        // dimension for a wide (3-column) grid, visibly clipping trees at
-        // cell/canvas edges.
-        const clusterR = Math.min(cellW, cellH) * rand(0.44, 0.5);
-        // Reach after MAX_GEN generations of decay~0.7 sums to roughly
-        // trunkLen/(1-0.7) ~= 3.3x -- scale the trunk down from the
-        // cluster radius by that factor so the full fractal fits its cell.
-        const trunkLen = clusterR * 0.3;
-        const baseWidth = Math.max(6, minDim * 0.012);
+        // Allowed radius: half the SMALLER cell dimension minus the root
+        // jitter and a margin, so a tree's full reach -- in any direction,
+        // since it also spins over time -- stays within its own cell. The
+        // tree is grown with a nominal trunk and then NORMALISED to this
+        // radius from its measured rest-pose reach (below): an earlier
+        // estimate (reach ~3.3x trunk, times a fudge for fork folding) was
+        // wrong in both directions -- alternating +/- forks make many
+        // root-to-tip paths nearly straight, so trees clipped the canvas
+        // edge at one setting and left the cell mostly black at another.
+        // Measuring instead of estimating fits by construction.
+        const allowedR = Math.min(cellW, cellH) * 0.5 - Math.max(Math.abs(jx), Math.abs(jy)) - minDim * 0.015;
+        const trunkLen = Math.min(cellW, cellH) * 0.12; // nominal; rescaled below
+        const baseWidth = Math.max(6, minDim * 0.017);
 
         const segments = [];
-        // Recursive branch generator: each call draws ONE segment then
-        // spawns two shorter, angularly-offset children. Angle offsets and
-        // length-decay ratio are randomised PER CALL (not just once), so
-        // sibling branches diverge organically -- the real dendritic-growth
-        // look -- while every value is still drawn once at init time and
-        // never touched again, so total coverage never varies frame to
-        // frame or cycle to cycle. Spread range tightened from an earlier
-        // 0.32-0.62 rad: that wider range occasionally accumulated across
-        // generations into branches curling back and crossing their own
-        // trunk (a real bug found only by rendering and looking), rather
-        // than reading as a clean fractal fork.
-        function grow(x, y, angle, len, gen) {
-          const nx = x + Math.cos(angle) * len;
-          const ny = y + Math.sin(angle) * len;
-          const width = Math.max(1.5, baseWidth * Math.pow(0.78, gen));
+        // Recursive branch generator: each call records ONE segment (as an
+        // angle RELATIVE to its parent, plus its length) then spawns two
+        // shorter, angularly-offset children. Angle offsets and length-decay
+        // ratio are randomised PER CALL (not just once), so sibling branches
+        // diverge organically -- the real dendritic-growth look -- while
+        // every value is still drawn once at init time and never touched
+        // again, so total coverage never varies frame to frame or cycle to
+        // cycle. Positions are computed per frame in renderFrame() by
+        // walking the list (parents always precede children), adding the
+        // per-generation sway to each relative angle. Spread range
+        // tightened from an earlier 0.32-0.62 rad: that wider range
+        // occasionally accumulated across generations into branches curling
+        // back and crossing their own trunk (a real bug found only by
+        // rendering and looking), rather than reading as a clean fractal
+        // fork.
+        function grow(parent, relAngle, len, gen) {
+          const width = Math.max(1.8, baseWidth * Math.pow(0.82, gen));
           const hue = ((baseCol[0] + dendHue0 + gen * 9) % 360 + 360) % 360;
-          const light = Math.min(76, baseCol[2] + gen * 2);
-          segments.push({ x1: x, y1: y, x2: nx, y2: ny, width, hue, sat: baseCol[1], light });
+          const light = Math.min(74, baseCol[2] + gen * 2);
+          const idx = segments.length;
+          segments.push({ parent, relAngle, len, gen, width, hue, sat: baseCol[1], light, ax: 0, ay: 0, bx: 0, by: 0, ang: 0 });
           if (gen >= MAX_GEN || len < minDim * 0.006) return;
           const childLen = len * rand(0.62, 0.78);
           const spread1 = rand(0.26, 0.46);
@@ -185,12 +212,57 @@
           // zero) so no child branch grows nearly collinear with its
           // parent -- collinear branches would visually fuse into one long
           // segment instead of reading as a fork.
-          grow(nx, ny, angle + spread1, childLen, gen + 1);
-          grow(nx, ny, angle - spread2, childLen, gen + 1);
+          grow(idx, spread1, childLen, gen + 1);
+          grow(idx, -spread2, childLen, gen + 1);
         }
-        grow(startX, startY, dir0, trunkLen, 0);
+        grow(-1, dir0, trunkLen, 0);
+        // Measure the rest-pose geometry, find the centre of the tree's
+        // enclosing circle (bounding-box centre) and its radius, then
+        // rescale every length so that radius is exactly allowedR /
+        // SWAY_REACH -- the sway can straighten a zigzag path a little, so
+        // leave that headroom. The tree PIVOTS about that circle centre,
+        // not its root: a fan-shaped tree spinning about its root needs a
+        // confinement circle of its whole reach and ends up filling only a
+        // quarter of its cell (measured by rendering); pivoting about the
+        // enclosing-circle centre lets the same cell hold a tree twice as
+        // large. Verified by a border-pixel scan over 40s at several seeds:
+        // zero lit border pixels.
+        const SWAY_REACH = 1.12;
+        let pivotX = 0, pivotY = 0;
+        {
+          const ax = [], ay = [];
+          let minX = 0, maxX = 0, minY = 0, maxY = 0;
+          for (let k = 0; k < segments.length; k++) {
+            const sg = segments[k];
+            const ang = sg.parent < 0 ? sg.relAngle : ax[sg.parent] + sg.relAngle;
+            const px = sg.parent < 0 ? 0 : ay[sg.parent * 2], py = sg.parent < 0 ? 0 : ay[sg.parent * 2 + 1];
+            const ex = px + Math.cos(ang) * sg.len, ey = py + Math.sin(ang) * sg.len;
+            ax[k] = ang; ay[k * 2] = ex; ay[k * 2 + 1] = ey;
+            if (ex < minX) minX = ex; if (ex > maxX) maxX = ex;
+            if (ey < minY) minY = ey; if (ey > maxY) maxY = ey;
+          }
+          const bcx = (minX + maxX) / 2, bcy = (minY + maxY) / 2;
+          let reach = Math.hypot(bcx, bcy); // the root itself
+          for (let k = 0; k < segments.length; k++) {
+            const rr = Math.hypot(ay[k * 2] - bcx, ay[k * 2 + 1] - bcy);
+            if (rr > reach) reach = rr;
+          }
+          const scale = allowedR / (reach * SWAY_REACH);
+          for (const sg of segments) sg.len *= scale;
+          pivotX = bcx * scale; pivotY = bcy * scale;
+        }
 
-        dendrites.push({ startX, startY, segments });
+        dendrites.push({
+          // The cell centre is the PIVOT; the root sits at pivot - (pivotX, pivotY).
+          startX, startY, rootX: startX - pivotX, rootY: startY - pivotY, segments,
+          // Sway: per-tree phase and guaranteed-minimum rate with random sign.
+          swayPhase: rand(0, Math.PI * 2),
+          swayRate: (rng() < 0.5 ? -1 : 1) * rand(1.5, 2.5),
+          swayLag: rand(0.5, 0.9),
+          swayAmp: rand(0.03, 0.04),
+          pulsePhase: rand(0, Math.PI * 2),
+          pulseRate: rand(1.4, 2.4),
+        });
       }
     }
   }
@@ -234,12 +306,32 @@
       ctx.translate(den.startX, den.startY);
       ctx.rotate(den.rotAngle0 + clk * den.rotRate);
       ctx.translate(-den.startX, -den.startY);
-      for (const s of den.segments) {
-        ctx.strokeStyle = `hsl(${s.hue}, ${s.sat}%, ${s.light}%)`;
-        ctx.lineWidth = s.width;
+      const segs = den.segments;
+      const swT = clk * den.swayRate + den.swayPhase;
+      const puT = clk * den.pulseRate + den.pulsePhase;
+      // Per-generation sway and pulse, computed once per frame per tree.
+      const sway = [], pulse = [];
+      for (let g = 0; g <= 10; g++) {
+        // Amplitude grows with depth: trunk ~0.035 rad, twigs ~0.35 rad, and
+        // offsets accumulate along the path from root to tip.
+        sway[g] = den.swayAmp * (1 + g) * Math.sin(swT + g * den.swayLag);
+        const pw = Math.sin(puT - g * 0.62);
+        pulse[g] = pw > 0 ? pw * pw : 0;
+      }
+      // Walk the tree: parents precede children, so the parent's absolute
+      // angle and end point are already up to date.
+      for (let i = 0; i < segs.length; i++) {
+        const sg = segs[i];
+        if (sg.parent < 0) { sg.ax = den.rootX; sg.ay = den.rootY; sg.ang = sg.relAngle + sway[0]; }
+        else { const pr = segs[sg.parent]; sg.ax = pr.bx; sg.ay = pr.by; sg.ang = pr.ang + sg.relAngle + sway[sg.gen]; }
+        sg.bx = sg.ax + Math.cos(sg.ang) * sg.len;
+        sg.by = sg.ay + Math.sin(sg.ang) * sg.len;
+        const p = pulse[sg.gen];
+        ctx.strokeStyle = `hsl(${sg.hue}, ${sg.sat}%, ${Math.min(84, sg.light + 20 * p)}%)`;
+        ctx.lineWidth = sg.width * (1 + 0.45 * p);
         ctx.beginPath();
-        ctx.moveTo(s.x1, s.y1);
-        ctx.lineTo(s.x2, s.y2);
+        ctx.moveTo(sg.ax, sg.ay);
+        ctx.lineTo(sg.bx, sg.by);
         ctx.stroke();
       }
       ctx.restore();
