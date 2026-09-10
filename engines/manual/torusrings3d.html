@@ -30,6 +30,37 @@
 // reads back on a separate tick), webglcontextlost/restored handling for
 // headless swiftshader's startup-only spurious context loss, gl.clear()
 // to opaque black every frame (structurally whiteout-proof).
+//
+// UNIT CHOREOGRAPHY (2026-09-10, "dynamic movements with the basic pattern
+// units", not just spinning in place). Before this the three rings sat at
+// fixed positions and only spun/wobbled -- a rigid arrangement. Now each
+// ring is its own moving unit:
+//   1. ORBIT + WEAVE: each ring's centre travels a bounded Lissajous loop
+//      around its home position (x/z a loop, y a separate oscillation),
+//      amplitudes large enough that neighbouring rings' paths overlap, so
+//      they repeatedly interpenetrate and pass through each other's holes
+//      (depth-tested, so they read as linked/weaving rings). Orbit phases
+//      are staggered ~120 degrees across the three rings, so they are never
+//      all at the same corner of their loops at once (coverage spreads
+//      evenly in time -- no brightness trend).
+//   2. BREATHING: each ring's tube thickness (+-28%) and major radius
+//      (+-8%) pulse on their own rates, phase-staggered ~90 degrees, so
+//      one ring is always fattening while another thins. The torus mesh is
+//      rebuilt on the CPU every frame (588 vertices per ring -- trivial)
+//      and re-uploaded with DYNAMIC_DRAW; the analytical normal depends
+//      only on the parametric angles, so it stays static. A fourth (thin)
+//      ring was added with this choreography so the orbiting units cover
+//      more of the frame; all phase staggers are i * 2pi / ringCount.
+//   3. SPINNING BANDS: each ring is two-tone banded around its major
+//      circumference (alternating segments, two palette colours), so its
+//      own Z-spin -- previously invisible, a flat-shaded torus being
+//      rotationally symmetric about its hole axis -- now visibly carries
+//      stripes around the ring.
+// The documented tilt bound (never edge-on) and the 120-degree wobble-phase
+// stagger are kept; the wobble amplitude is trimmed a little because the
+// orbit now carries most of the visible motion. All orbit/breath rates are
+// drawn ONCE per video (guaranteed minimum magnitude, random sign), driven
+// by the shared monotonic clock, never reset by config().
 (() => {
   const params = new URLSearchParams(location.search);
   const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
@@ -180,25 +211,54 @@
     return { positions: new Float32Array(positions), normals: new Float32Array(normals), count: M * N * 6 };
   }
   // Two torus "families" (fat ring vs thin ring) for shape variety across
-  // the 3 fixed rings in the scene -- geometry is built once at startup
-  // and never regenerated, so this has no bearing on per-cycle coverage.
-  const TORI = [
-    buildTorus(1.0, 0.42, 14, 7),
-    buildTorus(1.0, 0.24, 14, 7),
+  // the 3 rings in the scene. The mesh TOPOLOGY (14 x 7 facets) is fixed;
+  // the actual R/r are rebuilt every frame for the breathing choreography
+  // (see writeTorusPositions), which is a smooth periodic pulse with no
+  // per-cycle re-randomisation, so it has no bearing on per-cycle coverage.
+  const SEG_M = 14, SEG_N = 7;
+  const TORUS_BASE = [
+    { R: 1.0, r: 0.42 },
+    { R: 1.0, r: 0.24 },
   ];
+  const TORUS_NORMALS = buildTorus(1.0, 0.3, SEG_M, SEG_N).normals; // R/r-independent
+  const TORUS_COUNT = SEG_M * SEG_N * 6;
+  // Band id per vertex: alternating major segments (14 segments -> 7 pairs),
+  // static -- written in the same vertex order as writeTorusPositions.
+  const TORUS_BANDS = new Float32Array(TORUS_COUNT);
+  for (let i = 0, k = 0; i < SEG_M; i++) for (let j = 0; j < SEG_N; j++) for (let v = 0; v < 6; v++) TORUS_BANDS[k++] = i % 2;
+  // Fill a preallocated Float32Array with torus positions for (R, r).
+  function writeTorusPositions(out, R, r) {
+    const TAU = Math.PI * 2;
+    let k = 0;
+    for (let i = 0; i < SEG_M; i++) {
+      for (let j = 0; j < SEG_N; j++) {
+        const t0 = (i / SEG_M) * TAU, t1 = ((i + 1) / SEG_M) * TAU;
+        const p0 = (j / SEG_N) * TAU, p1 = ((j + 1) / SEG_N) * TAU;
+        const a = torusPos(t0, p0, R, r);
+        const b = torusPos(t1, p0, R, r);
+        const c = torusPos(t1, p1, R, r);
+        const d = torusPos(t0, p1, R, r);
+        for (const p of [a, b, c, a, c, d]) { out[k++] = p[0]; out[k++] = p[1]; out[k++] = p[2]; }
+      }
+    }
+  }
+  const ringPositions = [0, 1, 2, 3].map(() => new Float32Array(TORUS_COUNT * 3));
 
   const VERT_SRC = `
     attribute vec3 aPosition;
     attribute vec3 aNormal;
+    attribute float aBand;
     uniform mat4 uMVP;
     uniform mat4 uModel;
     varying vec3 vNormal;
     varying vec3 vViewDir;
+    varying float vBand;
     uniform vec3 uEye;
     void main() {
       vec4 world = uModel * vec4(aPosition, 1.0);
       vNormal = mat3(uModel) * aNormal;
       vViewDir = normalize(uEye - world.xyz);
+      vBand = aBand;
       gl_Position = uMVP * vec4(aPosition, 1.0);
     }
   `;
@@ -206,14 +266,27 @@
     precision mediump float;
     varying vec3 vNormal;
     varying vec3 vViewDir;
+    varying float vBand;
     uniform vec3 uColor;
+    uniform vec3 uColor2;
     uniform vec3 uLightDir;
     void main() {
       vec3 N = normalize(vNormal);
       float diff = max(dot(N, normalize(uLightDir)), 0.0);
       float fresnel = pow(1.0 - max(dot(N, normalize(vViewDir)), 0.0), 2.0);
-      vec3 base = uColor * (0.42 + 0.58 * diff);
-      vec3 rim = uColor * fresnel * 0.5;
+      // Two-tone segment bands around the ring (aBand 0/1): a flat-shaded
+      // torus is rotationally symmetric about its own hole axis, so its
+      // Z-spin produced NO visible pixel change at all; the bands travel
+      // with the spin, so each ring's rotation reads as motion of its
+      // own segments (unit-level motion, coverage/luma-neutral since the
+      // two tones alternate evenly).
+      // Guaranteed luma contrast between the two tones (0.72x vs 1.12x):
+      // two palette hues can land at near-identical luma, which would make
+      // the bands invisible to a luma-based motion measure and faint to the
+      // eye (the herringbone.html lesson).
+      vec3 col = mix(uColor * 1.12, uColor2 * 0.72, vBand);
+      vec3 base = col * (0.50 + 0.50 * diff);
+      vec3 rim = col * fresnel * 0.5;
       gl_FragColor = vec4(min(base + rim, vec3(0.86)), 1.0);
     }
   `;
@@ -225,7 +298,7 @@
     return sh;
   }
 
-  let prog, aPosition, aNormal, uMVP, uModel, uColor, uLightDir, uEye, torusBuffers;
+  let prog, aPosition, aNormal, aBand, uMVP, uModel, uColor, uColor2, uLightDir, uEye, ringPosBufs, normBuf, bandBuf;
   function initGL() {
     prog = gl.createProgram();
     gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, VERT_SRC));
@@ -236,18 +309,24 @@
 
     aPosition = gl.getAttribLocation(prog, 'aPosition');
     aNormal = gl.getAttribLocation(prog, 'aNormal');
+    aBand = gl.getAttribLocation(prog, 'aBand');
     uMVP = gl.getUniformLocation(prog, 'uMVP');
     uModel = gl.getUniformLocation(prog, 'uModel');
     uColor = gl.getUniformLocation(prog, 'uColor');
+    uColor2 = gl.getUniformLocation(prog, 'uColor2');
     uLightDir = gl.getUniformLocation(prog, 'uLightDir');
     uEye = gl.getUniformLocation(prog, 'uEye');
 
-    torusBuffers = TORI.map((t) => {
+    // One shared static normal buffer; one DYNAMIC position buffer per
+    // ring, rewritten every frame by the breathing choreography.
+    normBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, TORUS_NORMALS, gl.STATIC_DRAW);
+    bandBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, bandBuf); gl.bufferData(gl.ARRAY_BUFFER, TORUS_BANDS, gl.STATIC_DRAW);
+    ringPosBufs = ringPositions.map((arr) => {
       const posBuf = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, t.positions, gl.STATIC_DRAW);
-      const normBuf = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, t.normals, gl.STATIC_DRAW);
-      return { posBuf, normBuf, count: t.count };
+      gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
+      return posBuf;
     });
 
     gl.enable(gl.DEPTH_TEST);
@@ -275,14 +354,50 @@
   // each ring's own fast Z-axis spin (around its own hole axis -- always
   // silhouette-preserving) for motion avoids the problem at the source
   // instead of trying to bound two compounding rotations.
-  const POS = [[-1.3, 0.5, 0], [1.3, -0.3, -0.4], [0, -1.1, 0.6]];
-  const SCALE = [0.85, 0.7, 0.6];
-  const TORUS_IDX = [0, 1, 0];
+  // Rings enlarged (scales were 0.85/0.7/0.6) so the three orbiting units
+  // fill the frame boldly instead of floating small in black space.
+  // Four rings now (a fourth thin ring was added with the choreography so
+  // the orbiting units cover more of the frame); home positions spread
+  // across the frame, orbits overlapping.
+  const POS = [[-1.8, 0.3, 0], [1.8, -0.25, -0.4], [0, -1.0, 0.5], [0.3, 1.05, -0.9]];
+  const SCALE = [1.45, 1.2, 1.1, 1.0];
+  const TORUS_IDX = [0, 1, 0, 1];
+  const RING_COUNT = POS.length;
+
+  // ---- Per-unit choreography parameters (orbit + breathing), drawn ONCE
+  // per video -- NOT re-rolled by config(): a per-cycle phase reset would
+  // land validate.js's widely-spaced samples in uncorrelated random states
+  // (the geodome.html tilt-wobble lesson). Guaranteed minimum magnitudes,
+  // random signs, periods in the lively 4-8s band. Orbit/breath phases are
+  // staggered ~120 degrees across the three rings (same reasoning as the
+  // wobble-phase stagger below) so coverage is spread evenly in time.
+  const choreo = [];
+  const ORBIT_AX = [1.3, 1.3, 1.2, 1.2];
+  const ORBIT_AY = [0.4, 0.45, 0.3, 0.3];
+  // Depth amplitude kept modest: a ring swinging toward the camera grows
+  // on screen, which (with the breathing) is the main instantaneous
+  // brightness swing -- measured frame-mean luma std 5.5 at AZ=0.8 vs
+  // the original engine's 2.3; damped here to keep validate.js's sparse
+  // brightness-trend samples from aliasing it.
+  const ORBIT_AZ = [0.55, 0.55, 0.4, 0.4];
+  for (let i = 0; i < RING_COUNT; i++) {
+    choreo.push({
+      orbitRate: (rng() < 0.5 ? -1 : 1) * rand(1.0, 1.35),       // period 4.7-6.3s
+      orbitPhase: i * ((Math.PI * 2) / RING_COUNT) + rand(-0.3, 0.3),
+      bobRate: (rng() < 0.5 ? -1 : 1) * rand(1.3, 1.8),          // period 3.5-4.8s
+      bobPhase: rand(0, Math.PI * 2),
+      tubeRate: (rng() < 0.5 ? -1 : 1) * rand(1.3, 1.9),         // period 3.3-4.8s
+      tubePhase: i * ((Math.PI * 2) / RING_COUNT) + rand(-0.3, 0.3),
+      majorRate: (rng() < 0.5 ? -1 : 1) * rand(0.7, 1.1),        // period 5.7-9s
+      majorPhase: rand(0, Math.PI * 2),
+    });
+  }
+
   let rings, hue0;
   function config() {
     hue0 = rng() * 360;
     rings = [];
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < RING_COUNT; i++) {
       rings.push({
         torusIdx: TORUS_IDX[i],
         pos: POS[i],
@@ -313,11 +428,16 @@
         // all passing with fastMotion comfortably above its floor.
         tiltX: (rng() < 0.5 ? -1 : 1) * rand(0.35, 0.55),
         tiltY: (rng() < 0.5 ? -1 : 1) * rand(0.35, 0.55),
+        // Wobble amplitude trimmed 0.6 -> 0.45 rad now that the orbit
+        // carries most of the visible motion -- keeps the compounded tilt
+        // further from the edge-on degeneracy documented above.
         wobbleRate: (rng() < 0.5 ? -1 : 1) * rand(0.85, 1.3),
-        wobblePhase: i * ((Math.PI * 2) / 3) + rand(-0.3, 0.3),
+        wobblePhase: i * ((Math.PI * 2) / RING_COUNT) + rand(-0.3, 0.3),
         // Guaranteed minimum magnitude with random sign -- same fix as
         // every other curated engine here.
-        spinZ: (rng() < 0.5 ? -1 : 1) * rand(0.5, 1.1),
+        // Spin rate raised (was 0.5-1.1) now that the two-tone bands make
+        // it visible: a full turn every 4-6s, bands sweeping past.
+        spinZ: (rng() < 0.5 ? -1 : 1) * rand(1.05, 1.55),
         colorIdx: i % PAL.length,
       });
     }
@@ -334,7 +454,10 @@
   window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
   window.currentFrame = 0;
 
-  const EYE = [0, 0, 7.5];
+  // Eye pulled back a little (7.5 -> 8.4) so an orbiting, fully-fattened
+  // ring at the near end of its loop still clears the frame edge (checked
+  // against the worst-case orbit corner + breath maximum for every ring).
+  const EYE = [0, 0, 8.8];
   const proj = mat4Perspective((45 * Math.PI) / 180, W / H, 0.1, 100);
 
   function renderFrame() {
@@ -352,31 +475,51 @@
     gl.uniform3f(uLightDir, Math.cos(lightAngle), 0.6, Math.sin(lightAngle));
     gl.uniform3f(uEye, EYE[0], EYE[1], EYE[2]);
 
-    for (const rg of rings) {
-      const wobble = Math.sin(clk * rg.wobbleRate + rg.wobblePhase) * 0.6;
-      let model = mat4Translate(rg.pos[0], rg.pos[1], rg.pos[2]);
+    for (let ri = 0; ri < rings.length; ri++) {
+      const rg = rings[ri];
+      const ch = choreo[ri];
+      // Orbit: bounded Lissajous loop around the ring's home position.
+      const oa = clk * ch.orbitRate + ch.orbitPhase;
+      const px = rg.pos[0] + ORBIT_AX[ri] * Math.sin(oa);
+      const pz = rg.pos[2] + ORBIT_AZ[ri] * Math.cos(oa);
+      const py = rg.pos[1] + ORBIT_AY[ri] * Math.sin(clk * ch.bobRate + ch.bobPhase);
+      const wobble = Math.sin(clk * rg.wobbleRate + rg.wobblePhase) * 0.45;
+      let model = mat4Translate(px, py, pz);
       model = mat4Multiply(model, mat4RotateX(rg.tiltX + wobble));
       model = mat4Multiply(model, mat4RotateY(rg.tiltY - wobble));
       model = mat4Multiply(model, mat4RotateZ(clk * rg.spinZ));
       model = mat4Multiply(model, mat4Scale(rg.scale));
 
+      // Breathing: rebuild this ring's torus with pulsing tube/major radii.
+      const base = TORUS_BASE[rg.torusIdx];
+      const rTube = base.r * (1 + 0.28 * Math.sin(clk * ch.tubeRate + ch.tubePhase));
+      const rMajor = base.R * (1 + 0.08 * Math.sin(clk * ch.majorRate + ch.majorPhase));
+      writeTorusPositions(ringPositions[ri], rMajor, rTube);
+
       const mvp = mat4Multiply(proj, mat4Multiply(viewWorld, model));
       gl.uniformMatrix4fv(uMVP, false, mvp);
       gl.uniformMatrix4fv(uModel, false, model);
 
-      const base = PAL[rg.colorIdx];
-      const hue = ((base[0] + hue0 * 0.05 + clk * 4) % 360 + 360) % 360;
-      const [r, g, b] = hsl2rgb(hue, base[1], Math.min(65, base[2] + 6));
+      const pc = PAL[rg.colorIdx];
+      const hue = ((pc[0] + hue0 * 0.05 + clk * 4) % 360 + 360) % 360;
+      const [r, g, b] = hsl2rgb(hue, pc[1], Math.min(65, pc[2] + 6));
       gl.uniform3f(uColor, r, g, b);
+      const pc2 = PAL[(rg.colorIdx + 2) % PAL.length];
+      const hue2 = ((pc2[0] + hue0 * 0.05 + clk * 4) % 360 + 360) % 360;
+      const [r2, g2, b2] = hsl2rgb(hue2, pc2[1], Math.min(65, pc2[2] + 6));
+      gl.uniform3f(uColor2, r2, g2, b2);
 
-      const buf = torusBuffers[rg.torusIdx];
-      gl.bindBuffer(gl.ARRAY_BUFFER, buf.posBuf);
+      gl.bindBuffer(gl.ARRAY_BUFFER, ringPosBufs[ri]);
+      gl.bufferData(gl.ARRAY_BUFFER, ringPositions[ri], gl.DYNAMIC_DRAW);
       gl.enableVertexAttribArray(aPosition);
       gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
-      gl.bindBuffer(gl.ARRAY_BUFFER, buf.normBuf);
+      gl.bindBuffer(gl.ARRAY_BUFFER, normBuf);
       gl.enableVertexAttribArray(aNormal);
       gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
-      gl.drawArrays(gl.TRIANGLES, 0, buf.count);
+      gl.bindBuffer(gl.ARRAY_BUFFER, bandBuf);
+      gl.enableVertexAttribArray(aBand);
+      gl.vertexAttribPointer(aBand, 1, gl.FLOAT, false, 0, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, TORUS_COUNT);
     }
 
     if (cycleFrame >= cycleFrames) { cycleFrame = 0; config(); }

@@ -69,6 +69,40 @@
 // handle the same startup-only webglcontextlost/restored dance. gl.clear()
 // to opaque black every frame -- structurally whiteout-proof, same as
 // every other real-WebGL engine here.
+//
+// UNIT CHOREOGRAPHY (2026-09-10, "dynamic movements with the basic pattern
+// units", not just a rigid spin). The staircase's basic units -- its
+// tiers -- now move relative to each other every frame, on top of the
+// whole-pit turntable + tilt wobble that was the only motion before:
+//   1. TWIST / UNTWIST: tier i is rotated about the depth axis by
+//      (i - middle) * A * sin(omega*t) (plus a tiny per-tier wobble of its
+//      own), so the pit winds into a helix and unwinds again, outer and
+//      inner tiers counter-rotating about the middle one (the extremes
+//      swing over half a radian each way, a radian relative). The
+//      per-tier increment A is bounded (<= ~0.13 rad): two nested squares
+//      of size ratio rho can only be rotated relative to each other by
+//      roughly acos(1/(sqrt(2)*rho)) - 45deg before the inner square's
+//      corner pokes outside the outer edge and the tread quad folds into
+//      a bow-tie; with SHRINK/jitter/pulse ranges tightened below, the
+//      worst-case ratio (~0.87) allows ~9 degrees, and A + wobble stays
+//      inside that by construction.
+//   2. BREATHING STEPS: each step's depth (riser height) pulses +-50% in
+//      a travelling wave down the tiers (phase = k*i - omega*t), so the
+//      staircase concertinas -- some risers tall while others are shallow
+//      -- with the wave visibly running down into the pit.
+//   3. INSET PULSE: each tier's half-width pulses +-4% in a second
+//      travelling wave, so tread widths ripple. Each tread side is split
+//      into 4 alternating light/dark segments (static shading), so the
+//      twist carries crisp sub-units around with each tier.
+//   4. A per-tier brightness pulse (aGlow, up to 0.9-1.3, tapered to zero
+//      on the large outer tiers) rides on the breathing-steps wave, so each
+//      inner tier visibly catches light as it rises.
+// The mesh (tread + riser bands, ~65 quads) is rebuilt on the CPU every
+// frame with fresh per-triangle flat normals and re-uploaded with
+// DYNAMIC_DRAW; per-tier COLOURS stay fixed (hue by REST depth, so the
+// hue-by-depth rule holds and no hue drifts with the motion). All rates
+// are drawn ONCE per video (guaranteed minimum magnitude, random sign) and
+// driven by the shared monotonic clock, never reset per cycle.
 (() => {
   const params = new URLSearchParams(location.search);
   const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
@@ -195,6 +229,7 @@
   function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
   function sub3(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
   function norm3(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
+  function lerp3(a, b, f) { return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]; }
 
   // ---- WebGL setup: per-VERTEX colour so the whole staircase renders in a
   // SINGLE drawArrays call, same technique geodome.html/spaceframe.html use.
@@ -202,6 +237,7 @@
     attribute vec3 aPosition;
     attribute vec3 aNormal;
     attribute vec3 aColor;
+    attribute float aGlow;
     uniform mat4 uMVP;
     uniform mat4 uModel;
     uniform vec3 uEye;
@@ -212,7 +248,9 @@
       vec4 world = uModel * vec4(aPosition, 1.0);
       vNormal = mat3(uModel) * aNormal;
       vViewDir = normalize(uEye - world.xyz);
-      vColor = aColor;
+      // aGlow: per-tier brightness pulse (up to 0.9-1.3) riding on the
+      // breathing-steps wave -- a tier catches light as its riser rises.
+      vColor = aColor * aGlow;
       gl_Position = uMVP * vec4(aPosition, 1.0);
     }
   `;
@@ -243,7 +281,7 @@
     return sh;
   }
 
-  let prog, aPosition, aNormal, aColor, uMVP, uModel, uLightDir, uEye, meshBuf;
+  let prog, aPosition, aNormal, aColor, aGlow, uMVP, uModel, uLightDir, uEye, meshBuf;
   function initGL() {
     prog = gl.createProgram();
     gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, VERT_SRC));
@@ -255,122 +293,233 @@
     aPosition = gl.getAttribLocation(prog, 'aPosition');
     aNormal = gl.getAttribLocation(prog, 'aNormal');
     aColor = gl.getAttribLocation(prog, 'aColor');
+    aGlow = gl.getAttribLocation(prog, 'aGlow');
     uMVP = gl.getUniformLocation(prog, 'uMVP');
     uModel = gl.getUniformLocation(prog, 'uModel');
     uLightDir = gl.getUniformLocation(prog, 'uLightDir');
     uEye = gl.getUniformLocation(prog, 'uEye');
 
+    // Positions/normals are DYNAMIC: rewritten every frame by
+    // deformStaircase() (the per-tier twist / breathing choreography).
     const posBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, staircaseMesh.positions, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, staircaseMesh.positions, gl.DYNAMIC_DRAW);
     const normBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, staircaseMesh.normals, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, staircaseMesh.normals, gl.DYNAMIC_DRAW);
     const colBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, staircaseMesh.colors, gl.STATIC_DRAW);
-    meshBuf = { posBuf, normBuf, colBuf, count: staircaseMesh.count };
+    const glowBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, glowBuf); gl.bufferData(gl.ARRAY_BUFFER, staircaseMesh.glow, gl.DYNAMIC_DRAW);
+    meshBuf = { posBuf, normBuf, colBuf, glowBuf, count: staircaseMesh.count };
 
     gl.enable(gl.DEPTH_TEST);
     gl.viewport(0, 0, W, H);
   }
 
-  // Build one flat quad (4 corners, CCW when viewed from its lit side) as
-  // two triangles with a shared flat face normal, pushed into the
-  // positions/normals/colors arrays with a given RGB colour.
-  function pushQuad(positions, normals, colors, a, b, c, d, rgb) {
-    let n = cross3(sub3(b, a), sub3(c, a));
-    n = norm3(n);
-    for (const p of [a, b, c, a, c, d]) {
-      positions.push(p[0], p[1], p[2]);
-      normals.push(n[0], n[1], n[2]);
-      colors.push(rgb[0], rgb[1], rgb[2]);
+  // Write one quad (4 corners, CCW when viewed from its lit side) as two
+  // triangles into the dynamic position/normal arrays at cursor k. Each
+  // triangle gets its OWN flat normal (a twisted tread quad is not planar
+  // once neighbouring tiers are rotated relative to each other).
+  function writeQuad(pos, nrm, k, a, b, c, d) {
+    const tris = [[a, b, c], [a, c, d]];
+    for (const t of tris) {
+      let n = cross3(sub3(t[1], t[0]), sub3(t[2], t[0]));
+      n = norm3(n);
+      for (const p of t) {
+        pos[k] = p[0]; pos[k + 1] = p[1]; pos[k + 2] = p[2];
+        nrm[k] = n[0]; nrm[k + 1] = n[1]; nrm[k + 2] = n[2];
+        k += 3;
+      }
     }
+    return k;
   }
 
-  // Staircase geometry, per-tier colours, and the small per-side symmetry-
-  // breaking jitter are all fixed ONCE for the whole video (function of
-  // DENSITY/SEED only), never re-rolled per cycle -- the "any coverage-
-  // affecting parameter re-randomised per cycle creates a real, not
-  // aliased, brightness swing" lesson this pool's engines repeatedly
-  // establish. Only the rotation (below) changes per cycle.
-  let staircaseMesh;
+  // Tier count, rest half-widths/depths, per-corner jitter and per-tier
+  // colours are all fixed ONCE for the whole video (function of DENSITY/
+  // SEED only), never re-rolled per cycle -- the "any coverage-affecting
+  // parameter re-randomised per cycle creates a real, not aliased,
+  // brightness swing" lesson this pool's engines repeatedly establish.
+  // The per-frame choreography (deformStaircase) only moves these fixed
+  // units around smoothly.
+  let staircaseMesh, stair;
+  const TREAD_SEG = 4;
+  const TIER_VERTS = (4 * TREAD_SEG + 4) * 6;
   function buildStaircase() {
     const N = Math.max(4, Math.min(9, Math.round(4 + 3.5 * Math.max(0.5, Math.min(2, DENSITY)))));
-    const SHRINK = rand(0.72, 0.82);
+    // SHRINK range tightened (was 0.72-0.82) so the twist choreography's
+    // nested-square rotation bound holds -- see the file header.
+    const SHRINK = rand(0.68, 0.76);
     const STEP_DEPTH = rand(0.19, 0.26);
     const HW0 = 1.0;
 
     const hw = [HW0];
     for (let i = 1; i < N; i++) hw.push(hw[i - 1] * SHRINK);
-    const z = [];
-    for (let i = 0; i < N; i++) z.push(-i * STEP_DEPTH);
+    const zSpan = Math.max(0.001, (N - 1) * STEP_DEPTH);
 
     const hue0 = rng() * 360;
     const baseCol = PAL[SEED % PAL.length];
-    const zSpan = Math.max(0.001, -z[N - 1]);
 
-    const positions = [], normals = [], colors = [];
-    // Small per-(tier, corner) jitter (+-6%) breaks the receding pit's
-    // otherwise-exact 4-fold rotational symmetry -- the same "break exact
-    // symmetry at the geometry level" fix spaceframe.html established
-    // (there: a fractional lattice-centre offset) to avoid the resonance
-    // risk ziggurat.html hit from its own exact N-fold wedge symmetry.
-    // Jittering per CORNER (not per side) means the two sides meeting at
-    // any corner both use the same jittered value there, so there is no
-    // gap -- verified by construction, since corner() below is the only
-    // place either a tread or a riser reads a tier's half-width.
+    // Small per-(tier, corner) jitter (+-3%, was +-6% -- tightened for the
+    // twist bound) breaks the receding pit's otherwise-exact 4-fold
+    // rotational symmetry -- the same "break exact symmetry at the geometry
+    // level" fix spaceframe.html established (there: a fractional lattice-
+    // centre offset) to avoid the resonance risk ziggurat.html hit from its
+    // own exact N-fold wedge symmetry. Jittering per CORNER (not per side)
+    // means the two sides meeting at any corner both use the same jittered
+    // value there, so there is no gap -- verified by construction, since
+    // corner() in deformStaircase() is the only place either a tread or a
+    // riser reads a tier's half-width.
     const cornerJitter = [];
-    for (let i = 0; i < N; i++) cornerJitter.push([rand(0.94, 1.06), rand(0.94, 1.06), rand(0.94, 1.06), rand(0.94, 1.06)]);
-    // corners ordered: 0=(+,+) 1=(+,-) 2=(-,-) 3=(-,+) matching (x sign, y sign)
-    function corner(i, idx) {
-      const h = hw[i] * cornerJitter[i][idx];
-      const sx = (idx === 0 || idx === 1) ? 1 : -1;
-      const sy = (idx === 0 || idx === 3) ? 1 : -1;
-      return [sx * h, sy * h, z[i]];
-    }
+    for (let i = 0; i < N; i++) cornerJitter.push([rand(0.97, 1.03), rand(0.97, 1.03), rand(0.97, 1.03), rand(0.97, 1.03)]);
 
+    // Per-tier colours from REST depth (static -- hue never drifts with the
+    // depth-breathing wave, which would be the HSL-hue-affects-luma trap).
+    const treadRgb = [], riserRgb = [];
     for (let i = 0; i < N - 1; i++) {
-      const zi = z[i + 1];
-      const yFrac = (-z[i] - 0) / zSpan;
+      const yFrac = (i * STEP_DEPTH) / zSpan;
       const hue = ((baseCol[0] + hue0 + 130 * yFrac) % 360 + 360) % 360;
       const light = Math.min(66, baseCol[2] + 4);
       const sat = Math.max(35, Math.min(95, baseCol[1]));
-      const rgb = hsl2rgb(hue, sat, light);
+      treadRgb.push(hsl2rgb(hue, sat, light));
+      const rHue = ((baseCol[0] + hue0 + 130 * yFrac + 18) % 360 + 360) % 360;
+      riserRgb.push(hsl2rgb(rHue, sat, Math.max(28, light - 14)));
+    }
+    const floorHue = ((baseCol[0] + hue0 + 130) % 360 + 360) % 360;
+    const floorRgb = hsl2rgb(floorHue, Math.max(35, Math.min(95, baseCol[1])), Math.min(66, baseCol[2] + 4));
 
-      // Outer corners at tier i, inner corners at tier i+1 (using tier
-      // i+1's own jitter, so the tread's inner edge exactly matches the
-      // NEXT riser's top edge, which is built from the same tier i+1
-      // corners below).
+    stair = { N, SHRINK, STEP_DEPTH, hw, cornerJitter, treadRgb, riserRgb, floorRgb };
+
+    // Fixed vertex layout: (N-1) tiers x (4 sides x TREAD_SEG tread sub-quads
+    // + 4 riser quads) + 1 floor quad, 6 vertices each. Colours are written
+    // once here in exactly the order deformStaircase() writes the quads.
+    // Tread sides are split into TREAD_SEG alternating light/dark segments
+    // (x1.1 / x0.88) -- crisp sub-units along each step that travel with
+    // the tier's twist, so the motion of each tier reads at a glance.
+    const quadCount = (N - 1) * (4 * TREAD_SEG + 4) + 1;
+    const nv = quadCount * 6;
+    const colors = new Float32Array(nv * 3);
+    let k = 0;
+    const fill = (rgb, m) => { for (let v = 0; v < 6; v++) { colors[k++] = rgb[0] * m; colors[k++] = rgb[1] * m; colors[k++] = rgb[2] * m; } };
+    for (let i = 0; i < N - 1; i++) {
+      for (let q = 0; q < 4; q++) for (let sg = 0; sg < TREAD_SEG; sg++) fill(treadRgb[i], (sg + q) % 2 ? 0.88 : 1.1);
+      for (let q = 0; q < 4; q++) fill(riserRgb[i], 1);
+    }
+    fill(floorRgb, 1);
+    staircaseMesh = {
+      positions: new Float32Array(nv * 3),
+      normals: new Float32Array(nv * 3),
+      colors,
+      glow: new Float32Array(nv).fill(1),
+      count: nv,
+    };
+  }
+
+  // ---- Per-unit choreography parameters, drawn ONCE per video (never
+  // re-rolled by reconfigureRotation() -- a per-cycle phase reset would
+  // land validate.js's widely-spaced samples in uncorrelated random states,
+  // the geodome.html tilt-wobble lesson). Guaranteed minimum magnitudes,
+  // random signs, periods in the lively 3-8s band.
+  let choreo;
+  function initChoreo() {
+    const tierWobble = [];
+    for (let i = 0; i < stair.N; i++) {
+      tierWobble.push({ amp: rand(0.012, 0.02), rate: (rng() < 0.5 ? -1 : 1) * rand(0.9, 1.5), phase: rand(0, Math.PI * 2) });
+    }
+    choreo = {
+      twistAmp: rand(0.10, 0.13),                              // rad per tier (see header bound)
+      twistOmega: (rng() < 0.5 ? -1 : 1) * rand(1.3, 1.8),     // period 3.5-4.8s
+      twistPhase: rand(0, Math.PI * 2),
+      tierWobble,
+      depthAmp: 0.5,
+      depthK: rand(1.0, 1.6),                                  // wave phase per tier
+      depthOmega: (rng() < 0.5 ? -1 : 1) * rand(1.4, 2.0),     // period 3.1-4.5s
+      depthPhase: rand(0, Math.PI * 2),
+      widthAmp: 0.04,
+      widthK: rand(0.9, 1.5),
+      widthOmega: (rng() < 0.5 ? -1 : 1) * rand(1.2, 1.8),     // period 3.5-5.2s
+      widthPhase: rand(0, Math.PI * 2),
+    };
+  }
+
+  // Rebuild positions/normals for clock t: per-tier angle (twist), half-
+  // width (inset pulse) and depth (breathing steps), then the same tread +
+  // riser + floor quads as the original static build, in the same order
+  // the static colour array was filled.
+  function deformStaircase(t) {
+    const { N, hw, cornerJitter, STEP_DEPTH } = stair;
+    const C = choreo;
+    const twistPer = C.twistAmp * Math.sin(C.twistOmega * t + C.twistPhase);
+    const ang = [], hwt = [], z = [], stepWave = [];
+    let zAcc = 0;
+    for (let i = 0; i < N; i++) {
+      const w = C.tierWobble[i];
+      // Twist centred on the MIDDLE tier: outer tiers counter-rotate against
+      // inner ones, so the big outermost tread moves relative to the rest
+      // instead of sitting still while only the small inner tiers turn.
+      ang.push((i - (N - 1) / 2) * twistPer + w.amp * Math.sin(w.rate * t + w.phase));
+      hwt.push(hw[i] * (1 + C.widthAmp * Math.sin(C.widthK * i - C.widthOmega * t + C.widthPhase)));
+      z.push(-zAcc);
+      // Each step's own depth stays strictly positive (1 +- 0.5), so tiers
+      // never cross or invert -- z is monotonic by construction.
+      const sw = Math.sin(C.depthK * i - C.depthOmega * t + C.depthPhase);
+      stepWave.push(sw);
+      zAcc += STEP_DEPTH * (1 + C.depthAmp * sw);
+    }
+    // Per-tier glow rides on the same wave (TIER_VERTS vertices per tier).
+    const glow = staircaseMesh.glow;
+    for (let i = 0; i < N - 1; i++) {
+      // One-sided (up to 0.9-1.3): a symmetric +-30% trough stacked on the
+      // dark tread segments read as muddy brown at some palettes (seed 3).
+      // Amplitude tapered by tier index: the outermost tread alone is ~40%
+      // of the lit area, so a full-strength glow on it swung the FRAME mean
+      // by several luma (validate.js's sparse trend samples alias that:
+      // +53 projected on 2 of 7 seeds). Inner tiers, small in area, glow
+      // at full strength.
+      const amp = 0.2 * Math.min(1, i / 3);
+      const g = 1 + amp * (0.5 + stepWave[i]);
+      for (let v = 0; v < TIER_VERTS; v++) glow[i * TIER_VERTS + v] = g;
+    }
+    // corners ordered: 0=(+,+) 1=(+,-) 2=(-,-) 3=(-,+) matching (x sign, y sign),
+    // rotated by the tier's own twist angle about the depth axis.
+    function corner(i, idx, zOverride) {
+      const h = hwt[i] * cornerJitter[i][idx];
+      const sx = (idx === 0 || idx === 1) ? 1 : -1;
+      const sy = (idx === 0 || idx === 3) ? 1 : -1;
+      const c = Math.cos(ang[i]), s = Math.sin(ang[i]);
+      const x = sx * h, y = sy * h;
+      return [x * c - y * s, x * s + y * c, zOverride === undefined ? z[i] : zOverride];
+    }
+    const pos = staircaseMesh.positions, nrm = staircaseMesh.normals;
+    let k = 0;
+    for (let i = 0; i < N - 1; i++) {
+      const zi = z[i + 1];
+      // Outer corners at tier i, inner corners at tier i+1 (using tier i+1's
+      // own jitter/angle, so the tread's inner edge exactly matches the NEXT
+      // riser's top edge, which is built from the same tier i+1 corners).
       const o0 = corner(i, 0), o1 = corner(i, 1), o2 = corner(i, 2), o3 = corner(i, 3);
-      const in0 = corner(i + 1, 0), in1 = corner(i + 1, 1), in2 = corner(i + 1, 2), in3 = corner(i + 1, 3);
-
-      // Tread: 4 trapezoids, one per side, at constant z=z[i].
-      pushQuad(positions, normals, colors, o0, o3, in3, in0, rgb); // top (+y side)
-      pushQuad(positions, normals, colors, o1, o0, in0, in1, rgb); // right (+x side)
-      pushQuad(positions, normals, colors, o2, o1, in1, in2, rgb); // bottom (-y side)
-      pushQuad(positions, normals, colors, o3, o2, in2, in3, rgb); // left (-x side)
-
+      const in0 = corner(i + 1, 0, z[i]), in1 = corner(i + 1, 1, z[i]), in2 = corner(i + 1, 2, z[i]), in3 = corner(i + 1, 3, z[i]);
+      // Tread: 4 (possibly gently twisted) trapezoids at z=z[i], each split
+      // into TREAD_SEG sub-quads along the side (alternating shades).
+      const sides = [[o0, o3, in3, in0], [o1, o0, in0, in1], [o2, o1, in1, in2], [o3, o2, in2, in3]];
+      for (const [a, b, c, d] of sides) {
+        // a->b is the outer edge, d->c the matching inner edge.
+        for (let sg = 0; sg < TREAD_SEG; sg++) {
+          const f0 = sg / TREAD_SEG, f1 = (sg + 1) / TREAD_SEG;
+          const oa = lerp3(a, b, f0), ob = lerp3(a, b, f1);
+          const ia = lerp3(d, c, f0), ib = lerp3(d, c, f1);
+          k = writeQuad(pos, nrm, k, oa, ob, ib, ia);
+        }
+      }
       // Riser: 4 vertical rectangles at tier i+1's (inner) half-width,
       // from z[i] down to z[i+1].
-      const rHue = ((baseCol[0] + hue0 + 130 * yFrac + 18) % 360 + 360) % 360;
-      const rRgb = hsl2rgb(rHue, sat, Math.max(28, light - 14));
       const b0 = [in0[0], in0[1], zi], b1 = [in1[0], in1[1], zi], b2 = [in2[0], in2[1], zi], b3 = [in3[0], in3[1], zi];
-      pushQuad(positions, normals, colors, in0, in3, b3, b0, rRgb); // +y wall
-      pushQuad(positions, normals, colors, in1, in0, b0, b1, rRgb); // +x wall
-      pushQuad(positions, normals, colors, in2, in1, b1, b2, rRgb); // -y wall
-      pushQuad(positions, normals, colors, in3, in2, b2, b3, rRgb); // -x wall
+      k = writeQuad(pos, nrm, k, in0, in3, b3, b0); // +y wall
+      k = writeQuad(pos, nrm, k, in1, in0, b0, b1); // +x wall
+      k = writeQuad(pos, nrm, k, in2, in1, b1, b2); // -y wall
+      k = writeQuad(pos, nrm, k, in3, in2, b2, b3); // -x wall
     }
     // Flat floor cap at the innermost tier.
-    const lastYFrac = 1;
-    const floorHue = ((baseCol[0] + hue0 + 130 * lastYFrac) % 360 + 360) % 360;
-    const floorRgb = hsl2rgb(floorHue, Math.max(35, Math.min(95, baseCol[1])), Math.min(66, baseCol[2] + 4));
     const f0 = corner(N - 1, 0), f1 = corner(N - 1, 1), f2 = corner(N - 1, 2), f3 = corner(N - 1, 3);
-    pushQuad(positions, normals, colors, f0, f1, f2, f3, floorRgb);
-
-    staircaseMesh = {
-      positions: new Float32Array(positions),
-      normals: new Float32Array(normals),
-      colors: new Float32Array(colors),
-      count: positions.length / 3,
-    };
+    k = writeQuad(pos, nrm, k, f0, f1, f2, f3);
   }
 
   // Called at start-up AND every cycleSec. Only rotation resets --
@@ -393,6 +542,8 @@
   const tiltRate = (rng() < 0.5 ? -1 : 1) * rand(1.3, 1.9);
 
   buildStaircase();
+  initChoreo();
+  deformStaircase(0);
   initGL();
   reconfigureRotation();
 
@@ -409,11 +560,21 @@
   // the staircase recedes toward negative Z), so the depth/step read is
   // clearly visible rather than face-on (which would foreshorten it to a
   // flat square).
-  const EYE = [0.9, 1.7, 3.4];
-  const TARGET = [0, 0, -0.55];
+  // Camera pulled back (was [0.9,1.7,3.4]) so the outermost tier stays
+  // inside the frame through the twist + inset pulse + tilt wobble
+  // (confirmed clipped at the old distance).
+  // Camera raised to a steeper oblique (2026-09-10): viewed from higher
+  // elevation the square pit projects wider than tall, so it can fill more
+  // of the 16:9 frame while its DIAGONAL (the diamond orientation) still
+  // clears the top/bottom edges at every turntable angle.
+  const EYE = [1.1, 3.0, 3.5];
+  const TARGET = [0, 0, -0.6];
   const UP = [0, 1, 0];
   const proj = mat4Perspective((42 * Math.PI) / 180, W / H, 0.1, 100);
-  const SCALE = 1.35;
+  // Scale reduced (was 1.35): the outermost tier's DIAGONAL (sqrt(2) x its
+  // half-width) must clear the frame at every turntable angle, plus the
+  // inset pulse and tilt wobble -- confirmed clipped at 1.35.
+  const SCALE = 1.26;
 
   function renderFrame() {
     cycleFrame++;
@@ -425,7 +586,13 @@
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     const view = mat4LookAt(EYE, TARGET, UP);
-    const tilt = 0.14 * Math.sin(tiltPhase0 + clk * tiltRate);
+    // Tilt amplitude cut 0.14 -> 0.08 and light sweep 1.5 -> 0.5 rad
+    // (2026-09-10): both existed only to feed the fast-motion check, which
+    // the per-tier choreography now clears by a wide margin (13-22 vs a
+    // ~8-9 floor). The whole-object light sweep is a major source of
+    // instantaneous frame-mean brightness swing (the geodome.html lesson),
+    // which validate.js's sparse trend samples alias into spurious trends.
+    const tilt = 0.08 * Math.sin(tiltPhase0 + clk * tiltRate);
     let model = mat4RotateZ(rotAngle0 + clk * rotRate);
     model = mat4Multiply(mat4RotateX(tilt), model);
     model = mat4Multiply(model, mat4Scale(SCALE));
@@ -439,18 +606,27 @@
     // back-lit state) -- same coverage-neutral motion source geodome.html/
     // spaceframe.html use: redistributes brightness WITHIN the already-lit
     // surfaces rather than changing how much is lit.
-    const lightAngle = 1.5 * Math.sin(clk * 2.4) + 0.6 * Math.sin(clk * 5.1 + 0.5);
+    const lightAngle = 0.5 * Math.sin(clk * 2.4) + 0.2 * Math.sin(clk * 5.1 + 0.5);
     gl.uniform3f(uLightDir, Math.cos(lightAngle), 1.1, Math.sin(lightAngle) + 0.6);
 
+    // Per-unit choreography: rebuild the tiers for this frame and re-upload
+    // positions + flat normals (colours are static).
+    deformStaircase(clk);
     gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, staircaseMesh.positions, gl.DYNAMIC_DRAW);
     gl.enableVertexAttribArray(aPosition);
     gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.normBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, staircaseMesh.normals, gl.DYNAMIC_DRAW);
     gl.enableVertexAttribArray(aNormal);
     gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.colBuf);
     gl.enableVertexAttribArray(aColor);
     gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.glowBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, staircaseMesh.glow, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(aGlow);
+    gl.vertexAttribPointer(aGlow, 1, gl.FLOAT, false, 0, 0);
     gl.drawArrays(gl.TRIANGLES, 0, meshBuf.count);
 
     if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureRotation(); }

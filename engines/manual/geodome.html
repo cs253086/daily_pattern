@@ -37,6 +37,37 @@
 // handle the same startup-only webglcontextlost/restored dance. gl.clear()
 // to opaque black every frame -- structurally whiteout-proof, same as every
 // other real-WebGL engine here.
+//
+// UNIT CHOREOGRAPHY (2026-09-10, "dynamic movements with the basic pattern
+// units", not just a rigid spin). The dome's basic units -- its triangular
+// facets -- now move relative to each other every frame, on top of the
+// whole-dome turntable + tilt wobble that was the only motion before:
+//   1. BREATHING RIPPLE: every vertex is pushed in/out along its own radius
+//      by a travelling wave keyed to latitude AND longitude
+//      (phase = k1*lat + k2*lon - omega*t), amplitude ~8-11% of the dome
+//      radius, period ~3.5-6s. Shared vertices get identical displacement,
+//      so the surface stays continuous; several wave lobes are always
+//      present at once, so the net expansion averages ~0 at every instant
+//      (coverage-neutral, no brightness trend).
+//   2. LIFTING SCALES: each facet independently tilts about its own
+//      centroid (around a tangent axis) in a second, faster travelling
+//      wave -- like fish scales or louvres opening and closing -- which
+//      both lifts facet edges off the surface and re-angles each facet's
+//      flat normal so the lighting flickers per unit, not per dome.
+//   3. PORES: each facet also shrinks toward its own centroid (to ~80%
+//      at the trough of a third travelling wave), so the black seams
+//      between neighbouring facets pulse open and closed across the dome.
+//   4. A per-facet brightness pulse (aGlow, +-16%) rides on the lifting-
+//      scales wave, so a facet visibly catches light as it lifts -- the
+//      per-unit shading change reads at a glance even at low resolution.
+// Positions and flat normals are recomputed on the CPU every frame (a few
+// hundred to a few thousand vertices -- trivial) and re-uploaded with
+// DYNAMIC_DRAW; colours stay fixed per vertex (hue by latitude -- see
+// buildDome() for why longitude-keyed hue was a real bug). All wave rates
+// are drawn ONCE per video with a guaranteed minimum magnitude and random
+// sign, driven by the shared monotonic clock, and are NOT reset per cycle
+// (see the tilt-wobble comment below for why per-cycle phase resets were
+// themselves a real validator bug).
 (() => {
   const params = new URLSearchParams(location.search);
   const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
@@ -214,6 +245,7 @@
     attribute vec3 aPosition;
     attribute vec3 aNormal;
     attribute vec3 aColor;
+    attribute float aGlow;
     uniform mat4 uMVP;
     uniform mat4 uModel;
     uniform vec3 uEye;
@@ -224,7 +256,9 @@
       vec4 world = uModel * vec4(aPosition, 1.0);
       vNormal = mat3(uModel) * aNormal;
       vViewDir = normalize(uEye - world.xyz);
-      vColor = aColor;
+      // aGlow: per-facet brightness pulse (0.84-1.16) tied to the
+      // lifting-scales wave -- a facet catches more light as it lifts.
+      vColor = aColor * aGlow;
       gl_Position = uMVP * vec4(aPosition, 1.0);
     }
   `;
@@ -248,7 +282,10 @@
       // (projected +215 luma). A high ambient floor keeps even the
       // back-lit state comfortably visible, damping that swing at the
       // source rather than fighting the sampling aliasing after the fact.
-      vec3 base = vColor * (0.58 + 0.42 * diff);
+      // Diffuse weight nudged up slightly (0.42 -> 0.48) so the per-facet
+      // tilt choreography reads as visible per-unit shading change; the
+      // light sweep is still bounded (never back-lit), so the floor is safe.
+      vec3 base = vColor * (0.50 + 0.50 * diff);
       vec3 rim = vColor * fresnel * 0.45;
       // Soft clamp, same fix solids3d.html established: keeps a bright
       // rim/highlight readable without lit faces washing out to near-white.
@@ -263,7 +300,7 @@
     return sh;
   }
 
-  let prog, aPosition, aNormal, aColor, uMVP, uModel, uLightDir, uEye, domeBuf;
+  let prog, aPosition, aNormal, aColor, aGlow, uMVP, uModel, uLightDir, uEye, domeBuf;
   function initGL() {
     prog = gl.createProgram();
     gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, VERT_SRC));
@@ -275,18 +312,23 @@
     aPosition = gl.getAttribLocation(prog, 'aPosition');
     aNormal = gl.getAttribLocation(prog, 'aNormal');
     aColor = gl.getAttribLocation(prog, 'aColor');
+    aGlow = gl.getAttribLocation(prog, 'aGlow');
     uMVP = gl.getUniformLocation(prog, 'uMVP');
     uModel = gl.getUniformLocation(prog, 'uModel');
     uLightDir = gl.getUniformLocation(prog, 'uLightDir');
     uEye = gl.getUniformLocation(prog, 'uEye');
 
+    // Positions/normals are DYNAMIC: rewritten every frame by deformDome()
+    // (the per-unit breathing ripple + lifting-scales choreography).
     const posBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, domeMesh.positions, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, dynPositions, gl.DYNAMIC_DRAW);
     const normBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, domeMesh.normals, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, dynNormals, gl.DYNAMIC_DRAW);
     const colBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, domeMesh.colors, gl.STATIC_DRAW);
-    domeBuf = { posBuf, normBuf, colBuf, count: domeMesh.count };
+    const glowBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, glowBuf); gl.bufferData(gl.ARRAY_BUFFER, dynGlow, gl.DYNAMIC_DRAW);
+    domeBuf = { posBuf, normBuf, colBuf, glowBuf, count: domeMesh.count };
 
     gl.enable(gl.DEPTH_TEST);
     gl.viewport(0, 0, W, H);
@@ -378,6 +420,25 @@
       const sat = Math.max(30, Math.min(95, baseCol[1] + 24 * Math.sin(3 * theta)));
       const [r, g, bch] = hsl2rgb(hue, sat, light);
       for (const p of [a, b, c]) { positions.push(...p); normals.push(nx, ny, nz); colors.push(r, g, bch); }
+      // Per-facet data for the lifting-scales wave: centroid (tilt pivot),
+      // an "east" tangent axis to tilt about, and the facet's own lat/lon
+      // for the wave phase. Per-VERTEX lat/lon for the breathing ripple
+      // is derived from the vertex itself in deformDome() (identical for
+      // shared vertices, so the ripple can't open seams).
+      const cxp = (a[0] + b[0] + c[0]) / 3, cyp = (a[1] + b[1] + c[1]) / 3, czp = (a[2] + b[2] + c[2]) / 3;
+      const cl = Math.hypot(cxp, cyp, czp) || 1;
+      const rx = cxp / cl, ry = cyp / cl, rz = czp / cl;
+      // east = up x radial, normalised. A facet centroid sitting exactly
+      // on the +Y pole would make this degenerate, so fall back to +X
+      // when the cross product is ~0 (apex facets straddle the pole).
+      let ex = -rz, ey = 0, ez = rx;
+      const el = Math.hypot(ex, ey, ez);
+      if (el < 1e-4) { ex = 1; ey = 0; ez = 0; } else { ex /= el; ez /= el; }
+      facetData.push({
+        cx: cxp, cy: cyp, cz: czp, ex, ey, ez,
+        lat: Math.acos(Math.max(-1, Math.min(1, ry))),
+        lon: Math.atan2(rz, rx),
+      });
     }
     domeMesh = {
       positions: new Float32Array(positions),
@@ -385,6 +446,97 @@
       colors: new Float32Array(colors),
       count: tris.length * 3,
     };
+    basePositions = Float32Array.from(positions);
+    dynPositions = new Float32Array(positions.length);
+    dynNormals = new Float32Array(positions.length);
+    dynGlow = new Float32Array(positions.length / 3).fill(1);
+  }
+  let basePositions, dynPositions, dynNormals, dynGlow;
+  const facetData = [];
+
+  // ---- Per-unit choreography parameters: drawn ONCE per video (never
+  // re-rolled per cycle -- see the tilt-wobble comment further down for
+  // why per-cycle phase resets are a real validator hazard), guaranteed
+  // minimum magnitude, random sign. Periods land in the "lively pace"
+  // 3-8s band.
+  let waveParams;
+  function initWaves() {
+    waveParams = {
+      // Breathing ripple: radial displacement fraction and its travelling
+      // wave (k1 lobes across latitude, k2 lobes around longitude).
+      breathAmp: rand(0.08, 0.11),
+      breathK1: rand(4.5, 6.0),
+      breathK2: 5 + Math.floor(rng() * 2),          // 5 or 6 lobes around
+      breathOmega: (rng() < 0.5 ? -1 : 1) * rand(1.5, 2.1), // period 3-4.2s
+      breathPhase: rand(0, Math.PI * 2),
+      // Lifting scales: per-facet tilt about its centroid's east tangent.
+      scaleAmp: rand(0.18, 0.24),                    // rad, ~10-14 degrees (0.3+ read as shattered debris, not scales)
+      scaleK1: rand(4.0, 6.0),
+      scaleK2: 5 + Math.floor(rng() * 3),            // 5..7 lobes around
+      scaleOmega: (rng() < 0.5 ? -1 : 1) * rand(1.6, 2.1), // period 3-3.9s
+      scalePhase: rand(0, Math.PI * 2),
+      // Pores: each facet shrinks toward its centroid (down to ~80%) in a
+      // third travelling wave, so the black seams between neighbouring
+      // facets pulse open and closed -- high-contrast edges that move
+      // relative to each other, the signature of per-unit motion.
+      poreAmp: rand(0.08, 0.11),                     // shrink = 1 - poreAmp*(1+sin)
+      poreK1: rand(4.0, 6.0),
+      poreK2: 5 + Math.floor(rng() * 3),             // 5..7 lobes around
+      poreOmega: (rng() < 0.5 ? -1 : 1) * rand(1.6, 2.1), // period 3-3.9s
+      porePhase: rand(0, Math.PI * 2),
+    };
+  }
+
+  // Rewrite dynPositions/dynNormals from basePositions for the current
+  // clock: breathing ripple per vertex, then lifting-scales tilt per facet
+  // (Rodrigues rotation about the facet's own east tangent through its
+  // displaced centroid), then a fresh flat normal per facet.
+  function deformDome(t) {
+    const P = waveParams;
+    const bp = basePositions, dp = dynPositions, dn = dynNormals, dg = dynGlow;
+    const nTri = facetData.length;
+    for (let f = 0; f < nTri; f++) {
+      const fd = facetData[f];
+      const o = f * 9;
+      // 1. breathing ripple, per vertex, along its own radius.
+      for (let v = 0; v < 3; v++) {
+        const i = o + v * 3;
+        const x = bp[i], y = bp[i + 1], z = bp[i + 2];
+        const lat = Math.acos(Math.max(-1, Math.min(1, y)));
+        const lon = Math.atan2(z, x);
+        const s = 1 + P.breathAmp * Math.sin(P.breathK1 * lat + P.breathK2 * lon - P.breathOmega * t + P.breathPhase);
+        dp[i] = x * s; dp[i + 1] = y * s; dp[i + 2] = z * s;
+      }
+      // 2. lifting scale: tilt the (displaced) facet about its centroid,
+      //    and 3. pore: shrink it toward the centroid.
+      const scaleWave = Math.sin(P.scaleK1 * fd.lat + P.scaleK2 * fd.lon - P.scaleOmega * t + P.scalePhase);
+      const ang = P.scaleAmp * scaleWave;
+      const glow = 1 + 0.16 * scaleWave;
+      dg[f * 3] = glow; dg[f * 3 + 1] = glow; dg[f * 3 + 2] = glow;
+      const shrink = 1 - P.poreAmp * (1 + Math.sin(P.poreK1 * fd.lat + P.poreK2 * fd.lon - P.poreOmega * t + P.porePhase));
+      const c = Math.cos(ang), s = Math.sin(ang), omc = 1 - c;
+      const kx = fd.ex, ky = fd.ey, kz = fd.ez;
+      const cx = (dp[o] + dp[o + 3] + dp[o + 6]) / 3;
+      const cy = (dp[o + 1] + dp[o + 4] + dp[o + 7]) / 3;
+      const cz = (dp[o + 2] + dp[o + 5] + dp[o + 8]) / 3;
+      for (let v = 0; v < 3; v++) {
+        const i = o + v * 3;
+        const px = (dp[i] - cx) * shrink, py = (dp[i + 1] - cy) * shrink, pz = (dp[i + 2] - cz) * shrink;
+        const kd = kx * px + ky * py + kz * pz;
+        const crx = ky * pz - kz * py, cry = kz * px - kx * pz, crz = kx * py - ky * px;
+        dp[i] = cx + px * c + crx * s + kx * kd * omc;
+        dp[i + 1] = cy + py * c + cry * s + ky * kd * omc;
+        dp[i + 2] = cz + pz * c + crz * s + kz * kd * omc;
+      }
+      // 4. flat normal from the final triangle (winding is outward-
+      // consistent, verified offline -- see buildDome()).
+      const ux = dp[o + 3] - dp[o], uy = dp[o + 4] - dp[o + 1], uz = dp[o + 5] - dp[o + 2];
+      const vx = dp[o + 6] - dp[o], vy = dp[o + 7] - dp[o + 1], vz = dp[o + 8] - dp[o + 2];
+      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const nl = Math.hypot(nx, ny, nz) || 1;
+      nx /= nl; ny /= nl; nz /= nl;
+      for (let v = 0; v < 3; v++) { const i = o + v * 3; dn[i] = nx; dn[i + 1] = ny; dn[i + 2] = nz; }
+    }
   }
 
   // Called at start-up AND every cycleSec. Only rotation resets --
@@ -432,6 +584,8 @@
   const tiltRate = (rng() < 0.5 ? -1 : 1) * rand(1.4, 2.0);
 
   buildDome();
+  initWaves();
+  deformDome(0);
   initGL();
   reconfigureRotation();
 
@@ -444,11 +598,14 @@
   window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
   window.currentFrame = 0;
 
-  const EYE = [0, 1.1, 4.4];
-  const TARGET = [0, -0.1, 0];
+  // Camera pulled back / re-aimed (was [0,1.1,4.4] -> [0,-0.1,0]) so the
+  // breathing ripple and lifted scales never push the apex past the top
+  // edge of the frame (confirmed clipped at the old distance).
+  const EYE = [0, 1.2, 4.35];
+  const TARGET = [0, 0.3, 0];
   const UP = [0, 1, 0];
   const proj = mat4Perspective((42 * Math.PI) / 180, W / H, 0.1, 100);
-  const DOME_SCALE = 1.7;
+  const DOME_SCALE = 1.62; // was 1.7 -- headroom for the breathing ripple (+13%) and lifted scales
 
   function renderFrame() {
     cycleFrame++;
@@ -464,7 +621,15 @@
     // rotates into view, layered under the main Y-axis spin -- see
     // reconfigureRotation()'s comment for why this independent wobble is
     // needed at all.
-    const tilt = 0.15 * Math.sin(tiltPhase0 + clk * tiltRate);
+    // Tilt amplitude cut 0.15 -> 0.07 and light sweep 1.6 -> 0.4 rad
+    // (2026-09-10): both existed only to feed the fast-motion check, which
+    // the per-facet choreography now clears by a wide margin (15-27 vs a
+    // ~8 floor). Measured directly (frame-mean luma sampled every 0.25s
+    // for 60s), the whole-dome light sweep was the dominant source of
+    // instantaneous brightness swing (std ~5 luma in the ORIGINAL engine,
+    // which validate.js's 8 sparse samples alias into spurious trends),
+    // so taming it is what buys headroom for the unit motion.
+    const tilt = 0.07 * Math.sin(tiltPhase0 + clk * tiltRate);
     let model = mat4RotateY(rotAngle0 + clk * rotRate);
     model = mat4Multiply(model, mat4RotateX(tilt));
     model = mat4Multiply(model, mat4Scale(DOME_SCALE));
@@ -486,18 +651,27 @@
     // change), a lighting sweep only redistributes brightness WITHIN the
     // already-lit dome area, so it can move fast without risking the same
     // coverage-driven brightness-trend failure.
-    const lightAngle = 1.6 * Math.sin(clk * 2.6) + 0.6 * Math.sin(clk * 5.3 + 0.7);
+    const lightAngle = 0.4 * Math.sin(clk * 2.6) + 0.15 * Math.sin(clk * 5.3 + 0.7);
     gl.uniform3f(uLightDir, Math.cos(lightAngle), 0.65, Math.sin(lightAngle) + 1.2);
 
+    // Per-unit choreography: deform the facets for this frame and re-upload
+    // positions + flat normals (colours are static).
+    deformDome(clk);
     gl.bindBuffer(gl.ARRAY_BUFFER, domeBuf.posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, dynPositions, gl.DYNAMIC_DRAW);
     gl.enableVertexAttribArray(aPosition);
     gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, domeBuf.normBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, dynNormals, gl.DYNAMIC_DRAW);
     gl.enableVertexAttribArray(aNormal);
     gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, domeBuf.colBuf);
     gl.enableVertexAttribArray(aColor);
     gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, domeBuf.glowBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, dynGlow, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(aGlow);
+    gl.vertexAttribPointer(aGlow, 1, gl.FLOAT, false, 0, 0);
     gl.drawArrays(gl.TRIANGLES, 0, domeBuf.count);
 
     if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureRotation(); }

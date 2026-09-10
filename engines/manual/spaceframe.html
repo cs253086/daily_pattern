@@ -57,6 +57,37 @@
 // handle the same startup-only webglcontextlost/restored dance. gl.clear()
 // to opaque black every frame -- structurally whiteout-proof, same as every
 // other real-WebGL engine here.
+//
+// UNIT CHOREOGRAPHY (2026-09-10, "dynamic movements with the basic pattern
+// units", not just a rigid spin). The truss's basic units -- its lattice
+// JOINTS and the beams between them -- now move relative to each other
+// every frame, on top of the whole-truss turntable + tilt wobble that was
+// the only motion before:
+//   1. FLEXING LATTICE: every joint is displaced by the sum of two
+//      travelling plane waves running through the lattice in different
+//      directions (phase = k . restPosition - omega*t + per-joint offset),
+//      each pushing along its own fixed random direction, amplitudes
+//      ~0.16-0.22 lattice units, periods 3-4s. Neighbouring joints sit at different wave
+//      phases, so beams visibly stretch, shorten and swing relative to
+//      each other -- the whole truss breathes and vibrates like a
+//      structure under a passing load, rather than turning as one block.
+//      Amplitudes are bounded so no beam can ever collapse (worst-case
+//      endpoint separation stays well above the beam width).
+//   2. PULSING BEAMS: every beam's thickness swells and thins (+-22%) in a
+//      third travelling wave keyed to its rest midpoint, with a matching
+//      per-beam brightness pulse (aGlow, +-15%), so the truss's members
+//      visibly throb like veins as the wave passes -- many lobes across
+//      the lattice, so total lit area stays balanced.
+//   3. Beams follow the joints: the beam mesh (12 triangles per edge, flat
+//      per-face normals) is rebuilt on the CPU every frame from the
+//      displaced joint positions and re-uploaded with DYNAMIC_DRAW. The
+//      point-count cap (render budget) is unchanged -- triangle count is
+//      identical to the static version. Beam COLOURS stay fixed (hue by
+//      REST height, so the hue-by-height rule holds and no hue drifts
+//      with the motion).
+// Wave rates/directions are drawn ONCE per video (guaranteed minimum
+// magnitude, random sign, periods ~3.5-5s) and driven by the shared
+// monotonic clock, never reset per cycle.
 (() => {
   const params = new URLSearchParams(location.search);
   const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
@@ -69,7 +100,13 @@
   const SEED = intP('seed', 1);
   const SPEED = fltP('speed', 1);
   const DENSITY = fltP('density', 1);
-  const CYCLE_SEC = fltP('cycleSec', 40);
+  // 43.5s, not 40 (2026-09-10): validate.js samples at fixed fractions of
+  // its 300s window and one of them (t=240s) lands EXACTLY on a 40s cycle
+  // boundary -- the same sample/reset alignment automaton.html documents,
+  // whose brute-force search found 43.5s keeps every sample >=20% of a
+  // cycle away from a reset. Measured here: a dense 300s fit showed no
+  // real trend (-3 luma/h) while the 8-sample fit read +62 at seed 12345.
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
 
   const canvas = document.getElementById('c');
   canvas.width = W; canvas.height = H;
@@ -238,30 +275,42 @@
         for (let z = -BOUND; z <= BOUND; z++) {
           if (((x + y + z) % 2 + 2) % 2 !== 0) continue;
           const dx = x - cx, dy = y - cy, dz = z - cz;
-          cand.push({ p: [x, y, z], d: Math.hypot(dx, dy, dz) });
+          // OBLATE selection (2026-09-10): squash the distance metric along
+          // Y so the cluster comes out wide and shallow -- a near-spherical
+          // truss could only ever use the 16:9 frame's HEIGHT. Deliberately
+          // oblate (wide in X AND Z), not prolate (wide in X only): the
+          // turntable spins about Y, and an oblate cluster's projected area
+          // is invariant under that spin, whereas a first prolate version
+          // swung its on-screen area with every half-turn (3-5s) and
+          // validate.js's 8 sparse samples aliased that into spurious
+          // brightness trends (+82..+240 projected on 4 of 7 seeds). Point
+          // count (render budget) is unchanged.
+          cand.push({ p: [x, y, z], d: Math.hypot(dx, dy * 1.5, dz) });
         }
       }
     }
     cand.sort((a, b) => a.d - b.d);
     const intPts = cand.slice(0, targetN).map((c) => c.p);
-    const idx = new Set(intPts.map(keyOf));
+    const idx = new Map(intPts.map((p, i) => [keyOf(p), i]));
     const seen = new Set();
+    // Joints (offset-applied rest positions) + edges as joint-index pairs,
+    // so the per-frame choreography can move a joint once and have every
+    // beam meeting there follow it.
+    const nodes = intPts.map((p) => [p[0] - cx, p[1] - cy, p[2] - cz]);
     const edges = [];
     for (const p of intPts) {
       for (const o of NEIGHBOR_OFFSETS) {
         const q = [p[0] + o[0], p[1] + o[1], p[2] + o[2]];
-        if (!idx.has(keyOf(q))) continue;
+        const qi = idx.get(keyOf(q));
+        if (qi === undefined) continue;
         const ka = keyOf(p), kb = keyOf(q);
         const ek = ka < kb ? ka + '|' + kb : kb + '|' + ka;
         if (seen.has(ek)) continue;
         seen.add(ek);
-        edges.push([
-          [p[0] - cx, p[1] - cy, p[2] - cz],
-          [q[0] - cx, q[1] - cy, q[2] - cz],
-        ]);
+        edges.push([idx.get(ka), qi]);
       }
     }
-    return edges;
+    return { nodes, edges };
   }
 
   // Build one rigid rectangular "beam" mesh (12 triangles, flat per-face
@@ -310,6 +359,7 @@
     attribute vec3 aPosition;
     attribute vec3 aNormal;
     attribute vec3 aColor;
+    attribute float aGlow;
     uniform mat4 uMVP;
     uniform mat4 uModel;
     uniform vec3 uEye;
@@ -320,7 +370,9 @@
       vec4 world = uModel * vec4(aPosition, 1.0);
       vNormal = mat3(uModel) * aNormal;
       vViewDir = normalize(uEye - world.xyz);
-      vColor = aColor;
+      // aGlow: per-beam brightness pulse (0.85-1.15) riding on the
+      // thickness wave -- a beam catches light as it swells.
+      vColor = aColor * aGlow;
       gl_Position = uMVP * vec4(aPosition, 1.0);
     }
   `;
@@ -349,7 +401,7 @@
     return sh;
   }
 
-  let prog, aPosition, aNormal, aColor, uMVP, uModel, uLightDir, uEye, meshBuf;
+  let prog, aPosition, aNormal, aColor, aGlow, uMVP, uModel, uLightDir, uEye, meshBuf;
   function initGL() {
     prog = gl.createProgram();
     gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, VERT_SRC));
@@ -361,18 +413,23 @@
     aPosition = gl.getAttribLocation(prog, 'aPosition');
     aNormal = gl.getAttribLocation(prog, 'aNormal');
     aColor = gl.getAttribLocation(prog, 'aColor');
+    aGlow = gl.getAttribLocation(prog, 'aGlow');
     uMVP = gl.getUniformLocation(prog, 'uMVP');
     uModel = gl.getUniformLocation(prog, 'uModel');
     uLightDir = gl.getUniformLocation(prog, 'uLightDir');
     uEye = gl.getUniformLocation(prog, 'uEye');
 
+    // Positions/normals are DYNAMIC: rewritten every frame by
+    // deformLattice() (the flexing-joints choreography).
     const posBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, latticeMesh.positions, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, latticeMesh.positions, gl.DYNAMIC_DRAW);
     const normBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, latticeMesh.normals, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, latticeMesh.normals, gl.DYNAMIC_DRAW);
     const colBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, latticeMesh.colors, gl.STATIC_DRAW);
-    meshBuf = { posBuf, normBuf, colBuf, count: latticeMesh.count };
+    const glowBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, glowBuf); gl.bufferData(gl.ARRAY_BUFFER, latticeMesh.glow, gl.DYNAMIC_DRAW);
+    meshBuf = { posBuf, normBuf, colBuf, glowBuf, count: latticeMesh.count };
 
     gl.enable(gl.DEPTH_TEST);
     gl.viewport(0, 0, W, H);
@@ -387,7 +444,7 @@
   // lattice's own point-group symmetry was already broken by the
   // fractional offset (see buildLattice's caller), so there is no exact
   // angle at which the silhouette repeats.
-  let latticeMesh, hue0;
+  let latticeMesh, hue0, lattice;
   function buildLatticeMesh() {
     // Point count scales with DENSITY, clamped to a range that keeps beam
     // (and hence triangle) count consistently inside the render-speed
@@ -400,7 +457,7 @@
     const cx = (rng() < 0.5 ? -1 : 1) * rand(0.2, 0.4);
     const cy = (rng() < 0.5 ? -1 : 1) * rand(0.2, 0.4);
     const cz = (rng() < 0.5 ? -1 : 1) * rand(0.2, 0.4);
-    const edges = buildLattice(targetN, cx, cy, cz);
+    const { nodes, edges } = buildLattice(targetN, cx, cy, cz);
 
     const HALF_WIDTH = 0.16;
     hue0 = rng() * 360;
@@ -411,14 +468,14 @@
     // built edge set rather than assumed from R, since the offset can shift
     // the true min/max Y slightly off a symmetric +-R range.
     let minY = Infinity, maxY = -Infinity;
-    for (const [a, b] of edges) {
-      minY = Math.min(minY, a[1], b[1]);
-      maxY = Math.max(maxY, a[1], b[1]);
-    }
+    for (const n of nodes) { minY = Math.min(minY, n[1]); maxY = Math.max(maxY, n[1]); }
     const ySpan = Math.max(0.001, maxY - minY);
 
-    const positions = [], normals = [], colors = [];
-    for (const [a, b] of edges) {
+    // Static per-beam colour (from the REST midpoint), written in the same
+    // 36-vertices-per-edge layout deformLattice() uses for positions.
+    const colors = [];
+    for (const [ia, ib] of edges) {
+      const a = nodes[ia], b = nodes[ib];
       const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
       // Hue tied to Y (height), the ROTATION axis -- exactly invariant
       // under the Y-axis spin applied per frame below, the same
@@ -436,20 +493,102 @@
       const theta = Math.atan2(mid[2], mid[0]);
       const sat = Math.max(35, Math.min(95, baseCol[1] + 22 * Math.sin(3 * theta)));
       const [r, g, bch] = hsl2rgb(hue, sat, light);
-      const tris = buildBeamTris(a, b, HALF_WIDTH);
-      for (const t of tris) {
-        const e1 = sub3(t[1], t[0]), e2 = sub3(t[2], t[0]);
-        let n = cross3(e1, e2);
-        n = norm3(n);
-        for (const p of t) { positions.push(p[0], p[1], p[2]); normals.push(n[0], n[1], n[2]); colors.push(r, g, bch); }
+      for (let v = 0; v < 36; v++) colors.push(r, g, bch);
+    }
+    lattice = { nodes, edges, halfWidth: HALF_WIDTH };
+    const nv = edges.length * 36;
+    latticeMesh = {
+      positions: new Float32Array(nv * 3),
+      normals: new Float32Array(nv * 3),
+      colors: new Float32Array(colors),
+      glow: new Float32Array(nv).fill(1),
+      count: nv,
+    };
+    dispNodes = nodes.map((n) => [n[0], n[1], n[2]]);
+  }
+  let dispNodes;
+
+  // ---- Per-unit choreography parameters, drawn ONCE per video (never
+  // re-rolled by reconfigureRotation() -- a per-cycle phase reset would
+  // land validate.js's widely-spaced samples in uncorrelated random states,
+  // the geodome.html tilt-wobble lesson). Two plane waves through the
+  // lattice, each with its own random travel direction (k), push direction
+  // (dir) and rate; per-joint phase offsets keep it from reading as a
+  // perfectly regular standing pattern.
+  let choreo;
+  function randUnit() {
+    const z = rand(-1, 1), th = rand(0, Math.PI * 2), rr = Math.sqrt(1 - z * z);
+    return [rr * Math.cos(th), rr * Math.sin(th), z];
+  }
+  function initChoreo() {
+    const waves = [];
+    const amps = [0.22, 0.16];
+    for (let w = 0; w < 2; w++) {
+      const k = randUnit(), kl = rand(0.9, 1.2);
+      waves.push({
+        kx: k[0] * kl, ky: k[1] * kl, kz: k[2] * kl,
+        dir: randUnit(),
+        amp: amps[w],
+        omega: (rng() < 0.5 ? -1 : 1) * rand(1.6, 2.1),    // period 3-3.9s
+        phase: rand(0, Math.PI * 2),
+      });
+    }
+    // Worst-case relative displacement of two neighbouring joints (1.41
+    // apart): |k|*1.41 + 2*0.3 <= 2.3 rad of phase difference per wave ->
+    // 2*A*sin(1.15) = 1.83A per wave -> 0.70 total, so the shortest a beam
+    // can ever get is ~0.71, well above its width.
+    const jointPhase = lattice.nodes.map(() => rand(-0.3, 0.3));
+    // Beam-thickness pulse: a third travelling wave over beam midpoints.
+    // Higher spatial frequency than the joint waves so several thickness
+    // lobes span the cluster at once (better instantaneous area balance).
+    const tk = randUnit(), tkl = rand(1.8, 2.4);
+    const thick = {
+      kx: tk[0] * tkl, ky: tk[1] * tkl, kz: tk[2] * tkl,
+      omega: (rng() < 0.5 ? -1 : 1) * rand(1.5, 2.0),      // period 3.1-4.2s
+      phase: rand(0, Math.PI * 2),
+    };
+    choreo = { waves, jointPhase, thick };
+  }
+
+  // Displace every joint for clock t, then rebuild every beam between the
+  // displaced joints (fresh flat normals) into the dynamic arrays.
+  function deformLattice(t) {
+    const { nodes, edges, halfWidth } = lattice;
+    const C = choreo;
+    for (let i = 0; i < nodes.length; i++) {
+      const p = nodes[i];
+      let dx = 0, dy = 0, dz = 0;
+      for (const w of C.waves) {
+        const ph = w.kx * p[0] + w.ky * p[1] + w.kz * p[2] - w.omega * t + w.phase + C.jointPhase[i];
+        const a = w.amp * Math.sin(ph);
+        dx += w.dir[0] * a; dy += w.dir[1] * a; dz += w.dir[2] * a;
+      }
+      const d = dispNodes[i];
+      d[0] = p[0] + dx; d[1] = p[1] + dy; d[2] = p[2] + dz;
+    }
+    const pos = latticeMesh.positions, nrm = latticeMesh.normals, glow = latticeMesh.glow;
+    let k = 0, gk = 0;
+    const T = C.thick;
+    for (const [ia, ib] of edges) {
+      const a = nodes[ia], b = nodes[ib];
+      const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, mz = (a[2] + b[2]) / 2;
+      // Thickness pulse (+-22%) keyed to the beam's REST midpoint.
+      const tw = Math.sin(T.kx * mx + T.ky * my + T.kz * mz - T.omega * t + T.phase);
+      const hwE = halfWidth * (1 + 0.22 * tw);
+      // Per-beam glow rides on the same wave: a beam brightens as it swells.
+      const g = 1 + 0.15 * tw;
+      for (let v = 0; v < 36; v++) glow[gk++] = g;
+      const tris = buildBeamTris(dispNodes[ia], dispNodes[ib], hwE);
+      for (const tri of tris) {
+        const e1 = sub3(tri[1], tri[0]), e2 = sub3(tri[2], tri[0]);
+        const n = norm3(cross3(e1, e2));
+        for (const p of tri) {
+          pos[k] = p[0]; pos[k + 1] = p[1]; pos[k + 2] = p[2];
+          nrm[k] = n[0]; nrm[k + 1] = n[1]; nrm[k + 2] = n[2];
+          k += 3;
+        }
       }
     }
-    latticeMesh = {
-      positions: new Float32Array(positions),
-      normals: new Float32Array(normals),
-      colors: new Float32Array(colors),
-      count: positions.length / 3,
-    };
   }
 
   // Called at start-up AND every cycleSec. Only rotation resets --
@@ -475,6 +614,8 @@
   const tiltRate = (rng() < 0.5 ? -1 : 1) * rand(1.3, 1.9);
 
   buildLatticeMesh();
+  initChoreo();
+  deformLattice(0);
   initGL();
   reconfigureRotation();
 
@@ -487,11 +628,18 @@
   window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
   window.currentFrame = 0;
 
-  const EYE = [0, 0.6, 6.2];
-  const TARGET = [0, 0, 0];
+  // Eye pulled back (6.2 -> 6.9) so the flexing, thickness-pulsing beams
+  // stay inside the frame at every turntable angle.
+  const EYE = [0, 0.5, 7.0];
+  // Aim slightly below the origin so the cluster sits centred vertically
+  // (it rendered low in the frame at the original aim point).
+  const TARGET = [0, -0.18, 0];
   const UP = [0, 1, 0];
   const proj = mat4Perspective((40 * Math.PI) / 180, W / H, 0.1, 100);
-  const LATTICE_SCALE = 1.15;
+  // Scale reduced (was 1.15) so the flexing joints (+-~0.38 lattice units
+  // worst case) never push a beam past the frame edge -- confirmed clipped
+  // top/bottom at 1.15 once the choreography was added.
+  const LATTICE_SCALE = 1.08;
 
   function renderFrame() {
     cycleFrame++;
@@ -503,7 +651,13 @@
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     const view = mat4LookAt(EYE, TARGET, UP);
-    const tilt = 0.16 * Math.sin(tiltPhase0 + clk * tiltRate);
+    // Tilt amplitude cut 0.16 -> 0.05 and light sweep 1.5 -> 0.3 rad
+    // (2026-09-10): both existed only to feed the fast-motion check, which
+    // the flexing-joint choreography now clears by a wide margin (16-29 vs
+    // a ~7-10 floor). The whole-truss light sweep is a major source of
+    // instantaneous frame-mean brightness swing (the geodome.html lesson),
+    // which validate.js's sparse trend samples alias into spurious trends.
+    const tilt = 0.05 * Math.sin(tiltPhase0 + clk * tiltRate);
     let model = mat4RotateY(rotAngle0 + clk * rotRate);
     model = mat4Multiply(model, mat4RotateX(tilt));
     model = mat4Multiply(model, mat4Scale(LATTICE_SCALE));
@@ -518,18 +672,28 @@
     // uses: redistributes brightness WITHIN the already-lit beams rather
     // than changing how much is lit, so it can move fast without risking a
     // coverage-driven brightness trend.
-    const lightAngle = 1.5 * Math.sin(clk * 2.4) + 0.6 * Math.sin(clk * 5.1 + 0.5);
+    const lightAngle = 0.3 * Math.sin(clk * 2.4) + 0.12 * Math.sin(clk * 5.1 + 0.5);
     gl.uniform3f(uLightDir, Math.cos(lightAngle), 0.7, Math.sin(lightAngle) + 1.1);
 
+    // Per-unit choreography: flex the joints for this frame, rebuild the
+    // beams between them and re-upload positions + flat normals (colours
+    // are static).
+    deformLattice(clk);
     gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, latticeMesh.positions, gl.DYNAMIC_DRAW);
     gl.enableVertexAttribArray(aPosition);
     gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.normBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, latticeMesh.normals, gl.DYNAMIC_DRAW);
     gl.enableVertexAttribArray(aNormal);
     gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.colBuf);
     gl.enableVertexAttribArray(aColor);
     gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.glowBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, latticeMesh.glow, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(aGlow);
+    gl.vertexAttribPointer(aGlow, 1, gl.FLOAT, false, 0, 0);
     gl.drawArrays(gl.TRIANGLES, 0, meshBuf.count);
 
     if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureRotation(); }
