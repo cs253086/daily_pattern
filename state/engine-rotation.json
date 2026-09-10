@@ -1,14 +1,15 @@
 {
-  "last3D": "hoppercrystal",
+  "last3D": "spaceframe",
   "last2D": "arcrings",
-  "last3DArchetype": "hoppercrystal",
+  "last3DArchetype": "spaceframe",
   "last2DArchetype": "arcrings",
   "last3DByArchetype": {
     "geodome": "geodome",
-    "hoppercrystal": "hoppercrystal"
+    "hoppercrystal": "hoppercrystal",
+    "spaceframe": "spaceframe"
   },
   "last2DByArchetype": {
     "arcrings": "arcrings"
   },
-  "updatedAt": "2026-09-09T13:43:15.589Z"
+  "updatedAt": "2026-09-10T13:31:40.052Z"
 }
