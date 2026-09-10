@@ -406,6 +406,74 @@ them:
        cannot do (curated engines never run `validate.js` in production).
        See "Unit choreography pass" below for what each engine got and the
        before/after numbers.
+   - **Unit choreography pass, wave 1 (2026-09-10, 17 engines, four
+     parallel agents grouped by technique; every engine re-validated on
+     seeds 1-8 + 12345, audited, and its 4-frame 0.25 s strip LOOKED at at
+     full size before commit).** Audit numbers are residual luma /
+     non-rigid share at seed 12345, before → after:
+
+     | engine | before | after | what moves now |
+     |---|---|---|---|
+     | quasicrystal | 5.8 / 22% | 14.8 / 57% | triangles pulse, drift, micro-rotate on a 5-fold angular wave |
+     | voderberg | 1.8 / 33% | 13.9 / 58% | pulse wave along each arm; arms breathe in antiphase |
+     | primespiral | 5.0 / 18% | 18.3 / 67% | diagonal wave on the Ulam axis; per-cell spin; ring torsion |
+     | ziggurat | 2.9 / 13% | 9.7 / 48% | tier heights/widths breathe, stacks lean, contiguous by construction |
+     | voronoimosaic | 2.4 / 16% | 8.8 / 92% | seed points orbit, cells recomputed every frame; luma-matched rim pulse |
+     | widmanstatten | 20.6 / 33% | 27.9 / 71% | families scroll independently; paired width see-saws; accordion wave |
+     | stripweave | 1.0 / 13% | 18.9 / 94% | per-strip direction/rate; motif pulse; seams sway |
+     | automaton | 6.4 / 34% | 13.7 / 77% | mirror-symmetric cell slide, row shear, cell pulse/bob |
+     | arcrings | 2.0 / 100% | 15.4 / 98% | counter-rotating rings; segments open/close; radial breathing |
+     | kaleidoscope | 4.6 / 100% | 11.0 / 100% | beads on epicyclic paths with scale pulse; cycleSec 50 → 43.5 |
+     | spirograph | 7.1 / 54% | 17.0 / 82% | curve parameters morph continuously; pen bead traces |
+     | composer | 4.0 / 74% | 12.8 / 86% | elements bob, spin, pulse in every layout |
+     | dendrite | 3.9 / 87% | 12.0 / 98% | depth-propagating wind sway; trees normalised to their cells |
+     | geodome | 6.1 / 99% | 12.6 / 97% | radial ripple, facets lift and shrink (geometry, not lighting) |
+     | torusrings3d | 2.2 / 100% | 11.1 / 89% | rings weave on Lissajous loops; tube/radius breathe; bands |
+     | hoppercrystal | 9.8 / 62% | 9.3 / 78% | tiers twist into a helix; risers breathe; outer tier un-clipped |
+     | spaceframe | 11.3 / 97% | 7.9 / 89% | joints displaced by travelling waves; beams flex and pulse |
+
+     Lessons that recurred across agents, worth applying from the first
+     draft next time:
+     - **Identity first.** Ziggurat's first draft displaced tiers
+       independently and, at full size, was a burst of floating
+       rectangles — motion, but no longer a ziggurat. Fixed by making
+       contiguity hold by construction (cumulative stacking, lean bounded
+       by measured overlap slack). Automaton's aggressive shear shredded
+       the Sierpinski triangle into confetti; composer's 35-50% bob made
+       grids illegible. Downscaled strips hide this — check a full-size
+       frame.
+     - **Coverage-neutral means the wave's phase must span whole cycles
+       across the frame.** Quasicrystal's scale wave on a radial wave
+       (phase span < 2π across the disk) aliased into a projected +88 luma
+       rise on one seed; moving every area-affecting modulation onto the
+       5-fold angular wave (exactly five cycles at every instant) fixed
+       it. Voronoimosaic's dark rim pulse projected +119 until the rim was
+       drawn at the SAME Rec.709 luma as the fill (sd 1.69 → 0.39).
+     - **On the 3D engines the original 1.5-1.6 rad light sweep was itself
+       the largest brightness swing** (σ 4-6 luma) — taming it to 0.3-0.5
+       rad is what bought the headroom for real geometry motion.
+     - **`validate.js`'s fixed sample times bite again**: kaleidoscope at
+       cycleSec 50 and spaceframe at 40 both had a sample sitting exactly
+       on a hard-reset boundary (the automaton.html lesson); both moved
+       to 43.5.
+     - **The metric under-reads luma-neutral motion by design**
+       (voronoimosaic's cell morphing is obvious in colour, residual
+       8.8) and reads on-screen area for single centred 3D objects
+       (spaceframe dropped from 11.3 to 7.9 because its original number
+       was turntable parallax on a frame-touching cluster). Use it to
+       rank and to gate rigidity (nonRigid%), not as the sole score.
+     - **Speed numbers taken under four concurrent validation batteries
+       are contaminated** (load average 10-32 on 4 cores; 2-3 s worst
+       frames appeared on the ORIGINAL files too). Re-measured the WebGL
+       four on a quiet machine: 23.6-60.1 ms/frame, 34-87 min/hour.
+
+     Pool audit after wave 1 (34 engines): nothing below the 40% gate;
+     lowest residuals are now the three Gemini-promoted engines (0.9,
+     1.4, 4.5) and cascade 5.2, lattice3d 5.6, grid 6.7, herringbone
+     7.1, geometric 7.9, tessellation 8.5, solids3d 8.6, hilbertweave
+     9.0, starburst 9.7 — wave 2. Production path re-verified after the
+     pass: `DRY_RUN=1 DURATION=30 SCENE_SEC=8 node src/index.js` → 720
+     frames, one engine (mixing off), correct title.
 7. **Video descriptions never reveal that the pipeline is automated.**
    User request 2026-08-15: no "generated automatically," "fully automated
    pipeline," "AI-and-code generated," or raw `Seed:`/`Engine:` debug
