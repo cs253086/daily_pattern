@@ -104,11 +104,18 @@ export function resolveConfig(cli = {}) {
     // for contrast. All scenes share the day's image palette (`colors`/
     // `lum`), so it stays one coherent video. Scene lengths get a
     // deterministic +-sceneJitter wobble so the rhythm isn't metronomic.
-    // sceneMix=0 (SCENE_MIX=0) keeps the headline engine for every scene.
+    //
+    // 2026-09-10: engine mixing is now OPT-IN (SCENE_MIX=1). The user saw
+    // the first mixed video and clarified: "dynamic doesn't mean completely
+    // different pattern changes. Dynamic means the video has dynamic
+    // movements with the basic pattern units." So a video stays ONE
+    // design (re-seeded scenes keep it evolving), and the dynamics come
+    // from the engines themselves -- see CLAUDE.md item 6's unit-motion
+    // write-up and scripts/audit-unit-motion.js.
     sceneSec: pick(cli, 'sceneSec', 'SCENE_SEC', 150, num),
     crossfadeSec: pick(cli, 'crossfadeSec', 'CROSSFADE_SEC', 2, num),
     sceneJitter: pick(cli, 'sceneJitter', 'SCENE_JITTER', 0.3, num),
-    sceneMix: pick(cli, 'sceneMix', 'SCENE_MIX', 1, num) !== 0,
+    sceneMix: pick(cli, 'sceneMix', 'SCENE_MIX', 0, num) !== 0,
     // [{ path, is3D, archetype }] -- only ever supplied programmatically
     // (src/index.js); a bare `node src/render.js` renders one engine.
     scenePool: Array.isArray(cli.scenePool) ? cli.scenePool : [],

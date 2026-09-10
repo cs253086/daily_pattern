@@ -102,9 +102,11 @@ jobs:
           # more dynamics"): scenes now also rotate through DIFFERENT
           # engines after the headline scene (buildPlaylist in
           # src/render.js), default 150s scenes with a +-30% length wobble.
-          # Blank = the code's defaults. SCENE_MIX=0 keeps one engine for
-          # the whole hour (re-seeded scenes only); SCENE_SEC=0 disables
-          # scenes entirely.
+          # Blank = the code's defaults. Mixing is OPT-IN since 2026-09-10
+          # (user: dynamics means the pattern's own units moving, not
+          # cutting to different patterns): SCENE_MIX=1 turns it on;
+          # default is one engine for the whole hour, re-seeded per scene.
+          # SCENE_SEC=0 disables scenes entirely.
           SCENE_SEC: ${{ vars.SCENE_SEC }}
           CROSSFADE_SEC: ${{ vars.CROSSFADE_SEC }}
           SCENE_MIX: ${{ vars.SCENE_MIX }}

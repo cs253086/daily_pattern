@@ -80,6 +80,30 @@ const DEFAULTS = {
   minFastMotionAbs: 1.0,
   minFastMotionStdFrac: 0.12,
 
+  // Unit-level motion check (2026-09-10). User, after seeing the first
+  // multi-engine "journey" video: "that's not what I meant 'dynamic'.
+  // Dynamic means here the video has dynamic movements with the basic
+  // pattern units, dynamic doesn't mean completely different pattern
+  // changes." Neither existing motion check can see this: fastMotion asks
+  // "are pixels changing" and compositionDrift asks "does the arrangement
+  // develop over minutes" -- a fixed arrangement spinning as one rigid
+  // block satisfies the first and (with a wobble or lighting sweep) can
+  // satisfy the second, while its basic units never move relative to each
+  // other, which is exactly what read as lifeless. Measured as in
+  // scripts/audit-unit-motion.js: two frames unitMotionWindowSec apart,
+  // fit ONE rigid transform (rotation about the centre + translation) of
+  // the whole frame, and look at what that fit cannot explain. Pure block
+  // spin/scroll leaves almost nothing (measured 13-34% of the raw
+  // difference across the pool's compute-once-and-rotate engines); units
+  // that pulse, sway, orbit or morph relative to each other leave most of
+  // it (74-100% on the pool's lively engines). Reject below
+  // minUnitMotionNonRigidFrac. Only evaluated when there is enough raw
+  // motion to measure (minUnitMotionRawAbs); a nearly static frame is
+  // already caught by fastMotion.
+  unitMotionWindowSec: 0.25,
+  minUnitMotionNonRigidFrac: 0.40,
+  minUnitMotionRawAbs: 1.0,
+
   // Composition-evolution check (2026-09-07). User request: make the videos
   // "more dynamic... more consistent visual changes which makes visually fun
   // to watch. dynamic doesn't necessarily means fast movement."
@@ -184,6 +208,54 @@ function frameStats(selector) {
     nearWhiteFrac: nearWhite / n,
     avgSat: satCount > 0 ? (satSum / satCount) * 100 : 0,
   };
+}
+
+// In-page: luminance of the canvas at a reduced size (for the unit-motion
+// rigid fit, which wants more resolution than frameStats' 64x36).
+function frameLuma(selector, w, h) {
+  const c = document.querySelector(selector);
+  if (!c) return null;
+  const off = document.createElement('canvas');
+  off.width = w; off.height = h;
+  const o = off.getContext('2d');
+  o.drawImage(c, 0, 0, w, h);
+  const d = o.getImageData(0, 0, w, h).data;
+  const out = new Array(w * h);
+  for (let i = 0, p = 0; i < d.length; i += 4, p++) out[p] = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+  return out;
+}
+
+// Residual of b against a warped by one rigid transform (rotation about the
+// frame centre plus a translation), nearest-neighbour. Same construction as
+// scripts/audit-unit-motion.js so the two agree on what "rigid" means.
+function rigidResidual(a, b, w, h, theta, dx, dy) {
+  const cx = (w - 1) / 2, cy = (h - 1) / 2, c = Math.cos(theta), s = Math.sin(theta);
+  let sum = 0, n = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const rx = x - cx - dx, ry = y - cy - dy;
+    const sx = Math.round(cx + rx * c + ry * s), sy = Math.round(cy - rx * s + ry * c);
+    if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue;
+    sum += Math.abs(b[y * w + x] - a[sy * w + sx]); n++;
+  }
+  return n ? sum / n : Infinity;
+}
+
+// { raw, residual, nonRigidFrac }: how much of the change between two
+// frames is NOT one rigid motion of the whole frame. Coarse search then a
+// local refinement; identity is always a candidate so residual <= raw.
+function unitMotion(a, b, w, h) {
+  if (!a || !b) return null;
+  const raw = meanAbsDiff(a, b);
+  let best = raw, arg = { deg: 0, dx: 0, dy: 0 };
+  for (let deg = -15; deg <= 15; deg += 1) for (let dx = -8; dx <= 8; dx += 2) for (let dy = -8; dy <= 8; dy += 2) {
+    const r = rigidResidual(a, b, w, h, deg * Math.PI / 180, dx, dy);
+    if (r < best) { best = r; arg = { deg, dx, dy }; }
+  }
+  for (let deg = arg.deg - 1; deg <= arg.deg + 1; deg += 0.25) for (let dx = arg.dx - 1; dx <= arg.dx + 1; dx++) for (let dy = arg.dy - 1; dy <= arg.dy + 1; dy++) {
+    const r = rigidResidual(a, b, w, h, deg * Math.PI / 180, dx, dy);
+    if (r < best) { best = r; arg = { deg, dx, dy }; }
+  }
+  return { raw, residual: best, nonRigidFrac: raw > 0 ? best / raw : 0 };
 }
 
 // How much an engine's COMPOSITION changes across the sampled timeline,
@@ -451,6 +523,27 @@ async function runVisual(enginePath, cfg) {
       );
     }
 
+    // Do the basic UNITS move relative to each other, or is all the motion
+    // one rigid block? See minUnitMotionNonRigidFrac in DEFAULTS. Sampled
+    // right after the burst above (same mid-timeline region), a short
+    // window apart so a fast whole-frame spin still fits inside the rigid
+    // search range.
+    const umW = 160, umH = 90;
+    const umFrames = Math.max(1, Math.round(cfg.visualFps * cfg.unitMotionWindowSec));
+    const umBefore = await page.evaluate(frameLuma, 'canvas', umW, umH);
+    await page.evaluate((n) => window.advanceFrames(n), umFrames);
+    const umAfter = await page.evaluate(frameLuma, 'canvas', umW, umH);
+    const um = unitMotion(umBefore, umAfter, umW, umH);
+    if (um && um.raw >= cfg.minUnitMotionRawAbs && um.nonRigidFrac < cfg.minUnitMotionNonRigidFrac) {
+      reasons.push(
+        `the pattern's units do not move relative to each other: ${((1 - um.nonRigidFrac) * 100).toFixed(0)}% of the `
+        + `frame-to-frame change over ${cfg.unitMotionWindowSec}s is explained by ONE rigid rotation/translation of the `
+        + `whole frame (need at least ${(cfg.minUnitMotionNonRigidFrac * 100).toFixed(0)}% unexplained) — a fixed `
+        + `arrangement spinning or scrolling as a block reads as lifeless; give the basic units their own motion `
+        + `(travelling waves of scale/offset/rotation across units, per-unit spin, counter-rotating rings, morphing)`,
+      );
+    }
+
     // Does the composition actually DEVELOP over the timeline, or is it one
     // fixed arrangement spinning? See minCompositionDrift in DEFAULTS for
     // the full reasoning. Reuses the fraction samples' luma grids, so this
@@ -485,6 +578,8 @@ async function runVisual(enginePath, cfg) {
         fastMotion: Number(fastMotion.toFixed(2)),
         fastMotionFloor: Number(fastMotionFloor.toFixed(2)),
         compositionDrift: drift === null ? null : Number(drift.toFixed(4)),
+        unitMotionResidual: um ? Number(um.residual.toFixed(2)) : null,
+        unitMotionNonRigidFrac: um ? Number(um.nonRigidFrac.toFixed(3)) : null,
       },
     };
   } finally {

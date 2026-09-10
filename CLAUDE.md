@@ -358,6 +358,54 @@ them:
      34 engines today, so a 24-scene hour never repeats an engine, but
      the same engines recur across days (with new seeds) until the pool
      grows further.
+   - **2026-09-10 — the user saw the mixed video and corrected the
+     definition. This is the one to keep.** Verbatim: "Today's video is
+     mix of previous videos + some new patterns. However, that's not what I
+     meant 'dynamic'. Dynamic means here the video has dynamic movements
+     with the basic pattern units, dynamic doesn't mean completely
+     different pattern changes. dynamic movement visual movement changes
+     makes fun to watch." So: NOT cutting between patterns (engine mixing),
+     NOT the arrangement developing over minutes (`compositionDrift`), NOT
+     raw pixel churn (`fastMotion`) — the BASIC UNITS of one pattern
+     (tiles, cells, bands, rings, solids, segments) must visibly move
+     RELATIVE TO EACH OTHER, second by second. Every earlier lever was
+     aimed at a different reading of the word. Consequences:
+     - **Engine mixing is now opt-in** (`SCENE_MIX=1`; default off). A
+       video stays one design, re-seeded per scene.
+     - **Measured, with the right invariance this time**:
+       `scripts/audit-unit-motion.js` fits ONE rigid transform (rotation
+       about the centre + translation) between two frames 0.25s apart and
+       reports what it cannot explain (`residual`, absolute luma, and
+       `nonRigidFrac`). Whole-pattern spin/scroll is exactly what the fit
+       removes, so this measures unit-level motion and nothing else. The
+       pool split cleanly along the user's complaint: the compute-once-
+       and-rotate engines scored 13-34% non-rigid (`stripweave` 13%,
+       `ziggurat` 13%, `voronoimosaic` 16%, `primespiral` 18%,
+       `quasicrystal` 22%, `voderberg` 33%, `widmanstatten` 33%,
+       `automaton` 34%) while engines whose units move scored 74-100%
+       (`phyllotaxis` 88%, `wireframe` 98%, `chladni` 61% but residual
+       13.9). Note the metric's honest blind spot: shading changes count
+       as non-rigid too, so `geodome` scored 99% from its light sweep
+       alone while its mesh just spins — the very engine the complaint was
+       about. Treat a high nonRigid% with a LOW residual (`geodome` 6.1,
+       `torusrings3d` 2.2, `arcrings` 2.0, `kaleidoscope` 4.6) as suspect.
+     - **Gated in `validate.js`** (`unitMotion`, same rigid-fit
+       construction, 160x90 luma, `minUnitMotionNonRigidFrac: 0.40`, only
+       when raw motion >= 1 so a static frame stays `fastMotion`'s
+       problem). Verified it FIRES: the synthetic rotate-only fixture is
+       rejected at 11% non-rigid; `phyllotaxis` passes at 85%.
+     - **Prompted in `generate.js`** ("UNIT-LEVEL DYNAMICS" section,
+       before "EVOLVE OVER THE HOUR"): states the owner's definition,
+       names the rigid-fit check, and lists the coverage-neutral
+       techniques (travelling waves across units keyed to position with
+       phases spread so total coverage stays flat; per-unit spin;
+       counter-rotating rings/tiers; continuous morphing of generating
+       parameters). Verified by calling `buildPrompt()` — section present,
+       prompt ends where expected.
+     - **Fixed at the source in the curated engines** — the part a gate
+       cannot do (curated engines never run `validate.js` in production).
+       See "Unit choreography pass" below for what each engine got and the
+       before/after numbers.
 7. **Video descriptions never reveal that the pipeline is automated.**
    User request 2026-08-15: no "generated automatically," "fully automated
    pipeline," "AI-and-code generated," or raw `Seed:`/`Engine:` debug
