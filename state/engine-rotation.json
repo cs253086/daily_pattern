@@ -1,15 +1,16 @@
 {
   "last3D": "spaceframe",
-  "last2D": "arcrings",
+  "last2D": "auto-2026-08-15-spirograph-hypotrocloid-line-art-in-clea",
   "last3DArchetype": "spaceframe",
-  "last2DArchetype": "arcrings",
+  "last2DArchetype": "auto-2026-08-15-spirograph-hypotrocloid-line-art-in-clea",
   "last3DByArchetype": {
     "geodome": "geodome",
     "hoppercrystal": "hoppercrystal",
     "spaceframe": "spaceframe"
   },
   "last2DByArchetype": {
-    "arcrings": "arcrings"
+    "arcrings": "arcrings",
+    "auto-2026-08-15-spirograph-hypotrocloid-line-art-in-clea": "auto-2026-08-15-spirograph-hypotrocloid-line-art-in-clea"
   },
-  "updatedAt": "2026-09-10T13:31:40.052Z"
+  "updatedAt": "2026-09-11T13:27:53.612Z"
 }
