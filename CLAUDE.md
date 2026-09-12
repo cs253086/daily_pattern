@@ -3760,6 +3760,115 @@ only the new engine + log + CLAUDE.md" constraint). Nearest neighbour is
 threshold and close to this pool's own median pair distance, not a
 borderline case.
 
+## Ikat weave engine (`ikatweave.html`) — 2026-09-12
+
+Daily creative-research routine. Category was "traditional textile/tiling/
+ornament tradition from a randomly chosen culture" by the firing-minute-
+mod-category-count method (used twice before: Kente cloth for
+`stripweave.html`, twill/herringbone for `herringbone.html`). An open
+WebSearch for a third, structurally different textile technique surfaced
+**ikat** -- the resist-dye weaving tradition (Central Asian, Indonesian,
+Japanese kasuri, and others) where the YARN is dyed in a planned pattern
+BEFORE weaving, unlike stripweave's separate strips or herringbone's
+uniform grid. Sources: [Craft Atlas](https://craftatlas.co/crafts/ikat),
+[Rug & Kilim](https://rugandkilim.com/blogs/ikat-textiles-and-rugs-a-profile-on-history-styles-patterns-and-weaving/),
+[awedeco](https://awedeco.com/what-is-an-ikat-pattern/).
+
+**What it is**: a repeating diamond-medallion motif (the classic Central
+Asian ikat form, cited across every source) sampled per horizontal
+weft-thread row, with each thread nudged by its own small, frozen-per-video
+horizontal misalignment offset -- directly modelling ikat's defining
+visual signature, cited across every source consulted: the finished motif
+comes out subtly serrated because each thread lands a little off from its
+neighbours during weaving, a structural consequence of dyeing yarn before
+the weave, not a drawn effect. House style forbids soft blur, so the
+misalignment is rendered with CRISP hard-edged blocks -- the jaggedness
+itself (not softness) is what reads as hand-woven imprecision. A
+genuinely different construction from this pool's other two textile
+engines: `stripweave.html` juxtaposes separate opaque strips with no
+misalignment; `herringbone.html` is one grid whose binary over/under state
+follows a deterministic modular shift rule with no per-thread randomness
+at all.
+
+**Needed several rounds of iteration, all measured, balancing two gates
+that pulled against each other -- a new instance of a lesson this pool has
+hit before (`voronoimosaic.html`'s "a fix for one gate can break the
+other"), but resolved here by finding the right ORTHOGONAL lever instead
+of just trading magnitude back and forth:**
+
+1. **First draft failed the mandatory unit-motion gate on 10/16 seeds**
+   (as low as 16% non-rigid, need >=40%): a shared vertical scroll (a pure
+   rigid translation) was absorbed almost entirely by the rigid-fit,
+   leaving too little of the frame-to-frame change for the per-thread
+   wobble -- the exact failure mode `herringbone.html`'s own write-up
+   documents and fixes the same way (slow the shared scroll, strengthen
+   the per-unit motion). Fixed by cutting `scrollRate` roughly 3x and
+   raising wobble amplitude substantially.
+2. **That amplitude increase then surfaced a genuine (not aliased)
+   whiteout bug on one seed.** Root cause, found by reasoning through the
+   actual pixel math rather than just re-tuning blindly: the per-thread
+   offset array (`OFFSET_N=24`, deliberately decoupled from
+   `THREADS_PER_CELL=5` to avoid visually locking the serration to the
+   diamond motif's own vertical period) is indexed by the same row
+   counter that shifts with the scroll. Its effective on-screen period is
+   `OFFSET_N` times "one full CELL-scroll" -- with the scroll now
+   deliberately slow, that beat landed at 300-400+s, comparable to or
+   LONGER than `validate.js`'s 300s test window. Different rows expose a
+   different net ring-colour balance as the offset sweeps (a real, not
+   accumulating, brightness effect), and with under one full beat inside
+   the sample window an unlucky seed's partial sweep read as a monotonic
+   trend to the regression fit -- the same "not enough periods inside the
+   window to average out" mechanism this pool's `automaton.html`/
+   `chladni.html` write-ups already document, just reached via a
+   scroll-coupled index period instead of a reconfigure-cycle length.
+   Fixed by setting `OFFSET_N = THREADS_PER_CELL` exactly: the offset
+   index then repeats every single CELL-scroll (11-20s), giving 15+
+   repeats inside the 300s window. The per-thread offset VALUES stayed
+   independently random, so this didn't visibly lock the serration to the
+   diamond shape.
+3. **Pushing wobble amplitude further for a safer unit-motion margin then
+   measured WORSE for novelty** (0.643 -> 0.592, a fail) -- a concrete new
+   instance of this pool's established lesson (`voderberg.html`,
+   `dragonfold.html`) that a lever can move novelty distance in the
+   opposite direction from what intuition predicts. The fix wasn't
+   splitting the difference on amplitude (tried -- still only 0.618, a
+   thin pass, with a real unit-motion failure on one seed) but recognising
+   a genuinely different lever was needed: the novelty gate fingerprints
+   STATIC frames (sensitive to wobble AMPLITUDE, which changes what a
+   single frame looks like) while the unit-motion gate measures a 0.25s
+   WINDOW (sensitive to wobble RATE -- how fast the same amplitude moves --
+   not to the amplitude itself, since rate has zero effect on any single
+   static frame). Reverting amplitude to the novelty-friendly range and
+   instead raising the wobble RATE substantially (roughly 2x) cleared both
+   gates together with comfortable margin on the same design, no further
+   trade-off needed.
+
+**Verified** (final design): `validateEngine()` **21/21** across seeds
+1-20 plus the CLI's actual default seed 12345 (see `geodome.html`'s
+write-up for why that seed matters). Margins comfortable throughout:
+`projectedRise` -77.5 to +36.9 (vs the 50 threshold), `avgSat` 76-92.7 (vs
+the 22 minimum), zero near-white pixels on every seed, `fastMotion` always
+above its per-frame floor, `compositionDrift` well above the 0.015
+minimum throughout, `unitMotionNonRigidFrac` 0.593-1.0 across all 21 seeds
+(vs the 0.40 minimum -- the mandatory 2026-09-10 unit-motion gate, no
+thin-margin seeds remaining after the rate fix). Visual spot-checks across
+2/25/50/75/95/105% of a 37s cycle at several seeds, actually rendering
+PNGs and looking at them (not just reading validator output): a vivid,
+bold, immediately-legible diamond-medallion motif with a clearly jagged,
+serrated boundary reading as hand-woven imprecision, no artifacts at the
+cycle boundary, and distinct palette/offset combinations per seed.
+
+**Novelty gate** (final design): measured against all 36 existing engines
+(the committed fingerprint cache was several commits stale, so the whole
+pool was fingerprinted fresh alongside the candidate, per this pool's
+established practice; the refreshed cache was not committed, per this
+routine's "touch only the new engine + log + CLAUDE.md" constraint).
+Nearest neighbour is `herringbone` at distance **0.652** -- clear of the
+0.60 threshold and past the thin-margin territory (0.592-0.643) the
+amplitude-only iterations landed in, though still below this pool's
+median pair distance, consistent with sharing a textile/grid archetype
+with the pool's other two weave engines.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

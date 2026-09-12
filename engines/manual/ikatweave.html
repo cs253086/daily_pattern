@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ikat Weave — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "traditional textile/tiling/ornament
+// tradition from a randomly chosen culture" -- the firing-minute-mod-
+// category-count method; already used twice for Kente cloth (stripweave.html)
+// and twill/herringbone, so an open WebSearch surfaced a THIRD, structurally
+// different textile technique): IKAT -- the resist-dye weaving tradition
+// (Central Asian, Indonesian, Japanese kasuri, and more) where the YARN
+// itself is dyed in a planned pattern BEFORE weaving, not the finished cloth
+// after. Its defining visual signature, called out across every source
+// consulted, is that the finished motif's edges come out subtly SERRATED /
+// feathered rather than perfectly crisp, because each individual thread's
+// dyed segment lands a little off from its neighbours during weaving -- a
+// structural consequence of dyeing yarn ahead of the weave, not a drawn
+// effect. Sources: https://craftatlas.co/crafts/ikat ,
+// https://rugandkilim.com/blogs/ikat-textiles-and-rugs-a-profile-on-history-styles-patterns-and-weaving/ ,
+// https://awedeco.com/what-is-an-ikat-pattern/ (search snippets; common
+// motifs cited across sources: diamonds, chevrons, stepped outlines,
+// medallions -- classic Central Asian ikat in particular is built from
+// diamond/lozenge medallions).
+//
+// A genuinely different construction PRINCIPLE from this pool's other two
+// textile engines. stripweave.html juxtaposes SEPARATE opaque strips, each
+// carrying its own uniform motif (no misalignment). herringbone.html is a
+// SINGLE grid whose binary over/under state follows a modular diagonal-shift
+// rule (no per-thread randomness at all). Ikat's defining mechanism is
+// different from both: ONE continuous 2D diamond-medallion motif is sampled
+// per horizontal "weft thread" row, but each thread's sampling is nudged by
+// its OWN small, per-thread, frozen-per-video horizontal offset -- exactly
+// modelling "this thread landed a little off from where the dye plan
+// intended." House style forbids soft blur, so the misalignment is rendered
+// with CRISP hard-edged blocks (never an anti-aliased/Gaussian blur) -- the
+// jaggedness itself, not softness, is what reads as "hand-woven imprecision."
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. Redraws each frame from a fixed diamond-
+// ring/colour lookup and fixed per-thread BASE offsets computed once at
+// start-up -- no accumulation, no whiteout risk. The motif tiles the canvas
+// completely every frame at every scroll/wobble phase (no black background
+// ever visible), so total coverage is exactly constant by construction.
+//
+// UNIT-LEVEL DYNAMICS, built in from the first draft (per CLAUDE.md's
+// 2026-09-10 standing requirement: the basic units -- here, each individual
+// weft thread row -- must visibly move RELATIVE TO EACH OTHER every second,
+// not just the whole cloth scrolling as one block):
+//   - every thread's horizontal misalignment offset WOBBLES continuously
+//     around its own frozen base value, with a phase that advances with the
+//     thread's own row index -- a travelling wave of "settling" jitter runs
+//     across the threads, so neighbouring threads are never in lockstep;
+//   - the whole cloth also scrolls slowly downward (a translating periodic
+//     pattern has identical total coverage at every phase, the same trick
+//     stripweave.html/herringbone.html already rely on for their own
+//     per-frame motion), giving a shared base motion under the per-thread
+//     wobble.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 37);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  const minDim = Math.min(W, H);
+  const dt = 1 / FPS;
+
+  // Repeat-cell geometry, the diamond-ring colour table, and every thread's
+  // BASE (frozen) misalignment offset are all fixed ONCE for the whole
+  // video, never re-rolled per cycle -- the "any coverage-affecting
+  // parameter re-randomised per cycle creates a real (not aliased)
+  // brightness swing" lesson CLAUDE.md documents for over a dozen prior
+  // engines in a row. The motif tiles the canvas completely regardless of
+  // parameters, so coverage can't swing anyway -- but ring colours are
+  // still fixed once for the same reason every other engine's palette
+  // assignment is (avoiding a per-cycle hue jump, the HSL-hue-affects-luma
+  // trap quasicrystal.html/geodome.html/voronoimosaic.html all document).
+  let CELL, BLOCKS, THREADS_PER_CELL, threadH, blockW, ringColors, ringCount;
+  let OFFSET_N, baseOffset, offsetAmp;
+  function initWeave() {
+    const d = Math.max(0.7, Math.min(1.4, DENSITY));
+    CELL = Math.max(60, Math.round(minDim / (5.2 * d)));
+    BLOCKS = 10;                 // column sub-blocks per repeat unit
+    THREADS_PER_CELL = 5;        // weft-thread rows per repeat unit
+    threadH = CELL / THREADS_PER_CELL;
+    blockW = CELL / BLOCKS;
+
+    ringCount = 4;
+    ringColors = [];
+    const baseIdx = SEED % PAL.length;
+    for (let i = 0; i < ringCount; i++) {
+      const c = PAL[(baseIdx + i) % PAL.length];
+      // Alternate light/dark within a ring family so adjacent diamond bands
+      // stay visually distinct even when two palette entries share a hue
+      // family, without ever drifting toward pastel (stays inside this
+      // pool's 70-95%-saturation / ~50-66%-lightness convention).
+      const light = i % 2 === 0 ? Math.max(46, c[2] - 8) : Math.min(70, c[2] + 6);
+      ringColors.push(`hsl(${c[0]}, ${c[1]}%, ${light}%)`);
+    }
+
+    // Per-thread base misalignment offset ("this thread landed a little off
+    // from the dye plan"), frozen per video.
+    //
+    // A real (not aliased) whiteout bug, found only by running
+    // validateEngine() across a seed battery: an earlier draft used
+    // OFFSET_N=24, decoupled from THREADS_PER_CELL specifically so the
+    // serration wouldn't lock into step with the vertical motif period.
+    // But the offset array is indexed by the SAME row counter that shifts
+    // with the scroll, so its effective on-screen period is
+    // OFFSET_N * (one full CELL-scroll period) -- with the scroll
+    // deliberately slowed (see reconfigureMotion), that beat period landed
+    // at 300-400+s, comparable to or LONGER than validate.js's 300s test
+    // window. Different rows expose different net ring-colour balance as
+    // the offset sweeps, a real (not accumulating) brightness effect, and
+    // with under one full beat inside the sample window an unlucky seed's
+    // partial sweep reads as a monotonic trend to the regression fit --
+    // the same "not enough periods inside the window to average out"
+    // mechanism this file's automaton.html/chladni.html write-ups already
+    // document, just reached via a scroll-coupled index period instead of a
+    // reconfigure-cycle length. Fixed by tying OFFSET_N to THREADS_PER_CELL
+    // exactly: the offset index then repeats every single CELL-scroll
+    // (11-20s at the current scroll rate), giving 15+ repeats inside the
+    // 300s window. The per-thread offset VALUES are still independently
+    // random (not derived from fy itself), so this doesn't visibly lock the
+    // serration to the diamond motif's own shape.
+    OFFSET_N = THREADS_PER_CELL;
+    offsetAmp = blockW * rand(1.1, 1.7);
+    baseOffset = new Float64Array(OFFSET_N);
+    for (let i = 0; i < OFFSET_N; i++) baseOffset[i] = rand(-offsetAmp, offsetAmp);
+  }
+
+  // Diamond-medallion ring lookup: fx,fy in [-0.5,0.5] are the pixel's
+  // position within its repeat cell; L1 ("diamond") distance from centre
+  // bands the cell into ringCount concentric lozenge outlines -- the
+  // classic ikat medallion motif cited across every source consulted.
+  function ringAt(fx, fy) {
+    const d = Math.abs(fx) + Math.abs(fy); // 0 at centre, 1 at cell corner
+    let idx = Math.floor(d * ringCount);
+    if (idx >= ringCount) idx = ringCount - 1;
+    return ringColors[idx];
+  }
+
+  // Called at start-up AND every cycleSec. Only the scroll rate and each
+  // thread's wobble rate/phase-key reset -- coverage-neutral by
+  // construction (a translating periodic pattern, or a bounded per-thread
+  // horizontal wobble, never changes how much of the frame is lit), same
+  // reasoning as every other curated engine's reconfigure step.
+  let scrollRate, wobbleRate, wobbleK, wobbleAmp;
+  let wobblePh = 0;
+  function reconfigureMotion() {
+    // Scroll deliberately slowed to a light shared drift (not the primary
+    // motion source): a rigid-fit removes a uniform translation almost
+    // perfectly, so a fast scroll would dominate the frame-to-frame change
+    // and starve the per-thread wobble's share of it -- the exact failure
+    // mode herringbone.html's own write-up documents fixing the same way.
+    scrollRate = CELL * rand(0.05, 0.09) * SPEED;
+    wobbleRate = sgn() * rand(2.6, 3.8) * SPEED;
+    wobbleK = rand(0.55, 0.95); // phase advance per thread row -- a travelling settling wave
+    wobbleAmp = blockW * rand(1.05, 1.5);
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  initWeave();
+  reconfigureMotion();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+    wobblePh += wobbleRate * dt;
+
+    let scrollY = clk * scrollRate;
+    scrollY = ((scrollY % CELL) + CELL) % CELL; // bounded for numerical stability over a long render
+
+    const rMin = Math.floor((0 - scrollY) / threadH) - 1;
+    const rMax = Math.ceil((H - scrollY) / threadH) + 1;
+    const cMin = -1;
+    const cMax = Math.ceil(W / blockW) + 1;
+
+    for (let r = rMin; r <= rMax; r++) {
+      const y0 = r * threadH + scrollY;
+      // fy: this thread's row position within its repeat cell, [-0.5, 0.5),
+      // sampled at the thread's vertical centre.
+      const cellRow = ((r % THREADS_PER_CELL) + THREADS_PER_CELL) % THREADS_PER_CELL;
+      const fy = (cellRow + 0.5) / THREADS_PER_CELL - 0.5;
+
+      // Per-thread misalignment: a frozen base offset plus a continuous
+      // wobble whose phase advances with the thread's own row index, so
+      // neighbouring threads are never in lockstep -- the basic units
+      // (threads) visibly move relative to each other, not just together.
+      const off = baseOffset[((r % OFFSET_N) + OFFSET_N) % OFFSET_N]
+        + wobbleAmp * Math.sin(wobblePh + r * wobbleK);
+
+      for (let c = cMin; c <= cMax; c++) {
+        const x0 = c * blockW;
+        const cx = x0 + blockW * 0.5 + off;
+        // fx: this block's horizontal position within its repeat cell,
+        // after applying the thread's own misalignment offset.
+        const cellX = ((cx % CELL) + CELL) % CELL;
+        const fx = cellX / CELL - 0.5;
+        ctx.fillStyle = ringAt(fx, fy);
+        ctx.fillRect(x0, y0, blockW + 1, threadH + 1); // +1: no antialiased hairline seams
+      }
+    }
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureMotion(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
