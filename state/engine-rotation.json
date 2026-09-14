@@ -1,17 +1,18 @@
 {
-  "last3D": "torusrings3d",
+  "last3D": "solids3d",
   "last2D": "auto-2026-08-15-spirograph-hypotrocloid-line-art-in-clea",
-  "last3DArchetype": "torusrings3d",
+  "last3DArchetype": "discrete-3d-solids",
   "last2DArchetype": "auto-2026-08-15-spirograph-hypotrocloid-line-art-in-clea",
   "last3DByArchetype": {
     "geodome": "geodome",
     "hoppercrystal": "hoppercrystal",
     "spaceframe": "spaceframe",
-    "torusrings3d": "torusrings3d"
+    "torusrings3d": "torusrings3d",
+    "discrete-3d-solids": "solids3d"
   },
   "last2DByArchetype": {
     "arcrings": "arcrings",
     "auto-2026-08-15-spirograph-hypotrocloid-line-art-in-clea": "auto-2026-08-15-spirograph-hypotrocloid-line-art-in-clea"
   },
-  "updatedAt": "2026-09-12T12:48:03.625Z"
+  "updatedAt": "2026-09-14T15:50:01.360Z"
 }
