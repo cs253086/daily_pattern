@@ -3868,6 +3868,146 @@ Nearest neighbour is `herringbone` at distance **0.652** -- clear of the
 amplitude-only iterations landed in, though still below this pool's
 median pair distance, consistent with sharing a textile/grid archetype
 with the pool's other two weave engines.
+## Research: what actually makes pattern/screensaver videos attractive — 2026-09-14
+
+User: "It doesn't feel like it generates attractive pattern videos. Can you
+research which pattern/visual/geometric graphics people like? You can study
+them in YouTube and other resources." A fair challenge to two entire prior
+sessions' worth of work: dozens of engines and a "novelty gate" optimized
+hard for *not repeating*, and a whole day's session (2026-09-10) optimized
+for *unit-level motion* — neither session ever asked whether the underlying
+look was actually appealing to a viewer. Researched via WebSearch (this
+sandbox blocks Wikipedia/most single-page fetches, so this is search-result
+synthesis, not full-article reads — flagged per source below) rather than
+assumed. Findings, then concrete implications for this project:
+
+**1. The actual competing genre for "1-hour relaxing pattern screensaver"
+runs on fluid/soft/glowing content, not flat crisp vector shapes.** The
+biggest channels in this exact niche — AA-VFX (300k+ subs, 200M+ views,
+"VJ loops... wormholes, explosions, galaxies, nebulas, fractals,
+geometries"), Abstract Relax Screensavers, and a long tail of "Lava Lamp /
+Liquid Marble 4K Screensaver" channels — are built from lava-lamp fluid
+blobs, liquid marble, nebulae, galaxies, bokeh, and soft gradient light,
+searched and watched for exactly the ambient/background/meditation use
+case this project targets. This runs directly against this file's own
+standing house-style rule 2 ("favour a GEOMETRIC look... not soft organic
+blobs/fuzzy clouds") — that rule was never validated against what the
+target audience actually watches, just asserted as a style preference.
+[Oddly Satisfying TV](https://www.youtube.com/channel/UCr_mLbLIDmQ1mUYo_ufsulg),
+[Abstract Relax Screensavers](https://www.youtube.com/@AbstractRelaxScreensavers),
+[FluxNote: Satisfying Videos Channel Guide 2026](https://fluxnote.io/blog/satisfying-videos-youtube-channel-guide-2026-start-and-monetize),
+a representative lava-lamp screensaver example:
+[Colorful Lava Lamp 4K Ambient Music Screensaver](https://www.youtube.com/watch?v=BZGDZJETb5k).
+
+**2. But geometric/symmetric content is not out-competed — it just needs a
+different RENDER TREATMENT, not a different subject.** AA-VFX's own
+description mixes "fractals, geometries" alongside nebulae and wormholes,
+and mandala/kaleidoscope/sacred-geometry content is itself a thriving,
+long-running sub-genre — "Hypnotic Mandala Animation | Sacred Geometry
+Kaleidoscope Journey," etc. The synthesis across sources: what makes the
+fluid/nebula content read as premium is soft bloom/glow, depth, and colour
+gradients, not the absence of geometric structure. This project's engines
+already have the STRUCTURE half right (crisp shapes, radial/mirror
+symmetry, bold legible elements per house-style item 1) but render with
+almost no glow — `validate.js`'s only luminous-look enforcement is
+`avgSat` (colourfulness) and a peak-brightness ceiling, nothing that
+rewards or even measures soft light spread. [Hypnotic Mandala Animation
+search results](https://www.youtube.com/watch?v=Usd2mXnAwcI).
+
+**3. Fluency/symmetry research gives a concrete, evidence-backed reason
+mandala-family content specifically works, which argues the project's own
+"archetype diversity" push (see "Archetype clustering" above) may have
+been solving the wrong problem.** Published vision-science work (Frontiers
+in Human Neuroscience; a PMC meta-analysis) finds preference for fractal
+patterns peaks at MODERATE fractal dimension (~1.3–1.5, the range found in
+natural scenes, not maximal complexity) and that mirror/radial symmetry
+drives high preference on its own at low recursion depth, with complexity
+only needed to compensate for its absence. This project spent real effort
+adding archetypes specifically to move AWAY from "another centred radial
+mandala" (`cascade.html`, `dendrite.html`, and others were built
+explicitly to not be mandalas) — defensible for the narrow goal of "don't
+literally repeat," but the research says the mandala/radial-symmetry
+archetype is not a thing to dilute, it is the single most reliably-liked
+shape family, and intellectually-novel-but-unfamiliar constructions (a
+Ulam-spiral prime sieve, a Widmanstätten crosshatch, a Hilbert-curve maze)
+optimize for "provably not a duplicate" without any evidence they read as
+attractive to a casual viewer. [The Conversation: Fractal patterns in
+nature and art are aesthetically pleasing and
+stress-reducing](https://theconversation.com/fractal-patterns-in-nature-and-art-are-aesthetically-pleasing-and-stress-reducing-73255),
+[Frontiers in Human Neuroscience: Aesthetic Responses to Exact Fractals
+Driven by Physical
+Complexity](https://www.frontiersin.org/journals/human-neuroscience/articles/10.3389/fnhum.2016.00210/full),
+[PMC: A Complex Story — Universal Preference vs Individual Differences in
+Fractal Aesthetic
+Response](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4877522/).
+
+**4. Slow, legible motion reads as MORE pleasant than busy motion, via
+"processing fluency" — which cuts directly against last week's whole
+"unit-level dynamics" push.** A peer-reviewed consumer-research study
+(Stuppy, Landwehr & McGraw, *Journal of Consumer Research* family;
+SAGE/ResearchGate) found slow motion increases positive evaluation
+specifically by making complex movement EASIER to process, and a separate
+vision-science note found lower contrast/slower apparent motion is itself
+read as calmer. 2026-09-10's session (see item 6 above) added many
+independent, simultaneously-visible small motions to every engine — tiles
+pulsing, rings counter-rotating, cells sliding, all layered together —
+which is real, measurable "unit motion" by the rigid-fit audit, but
+nothing in that work asked whether MORE simultaneous small motions reads
+as more pleasant or just busier/harder to follow. The fluency research
+suggests the opposite of "more independent moving parts": ONE or two
+large, slow, legible movements (a slow zoom, a large soft colour drift, a
+single dominant rotation) may read as calmer and more premium than a dozen
+small phase-staggered wobbles happening at once, even though the latter
+measures as "more dynamic." [SAGE: The Art of Slowness — Slow Motion
+Enhances Consumer Evaluations by Increasing Processing
+Fluency](https://journals.sagepub.com/doi/full/10.1177/00222437231179187),
+[PMC: Slow motion in films and video
+clips](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6014633/).
+
+**5. Soft bloom/glow is real, cheap, and currently entirely absent from
+this pipeline.** Bloom (blur bright regions, screen-blend back over the
+original) is the standard technique behind every "neon"/"premium" abstract
+render — well documented for both WebGL (LearnOpenGL's bloom chapter,
+separable Gaussian blur passes) and plain video post-processing (ffmpeg
+`gblur`+`blend=screen`, no shader needed). **Prototyped, not just
+described**: rendered a frame each of `geometric.html` and
+`kaleidoscope.html` at seed 20260910, then ran a real ffmpeg bloom pass
+(`curves` to isolate bright pixels above ~0.65, `gblur=sigma=9`,
+`blend=all_mode=screen:all_opacity=0.75`) and compared before/after PNGs
+side by side. Result: blacks stay black (no wash-out, no purple-tint
+regression from a first, over-aggressive attempt at sigma=14/opacity=0.65
++ a saturation boost, which DID visibly tint the background and was
+discarded), while the bright neon lines pick up a soft halo — a small but
+real, tasteful step toward the "premium abstract" look, achievable as a
+render-pipeline post-process with zero changes to any of the 34 engine
+files. `kaleidoscope.html` (already an accumulating/blurred engine)
+barely changed, confirming the effect is additive to whatever glow an
+engine already has, not a replacement for engine-level design. [LearnOpenGL
+— Bloom](https://learnopengl.com/Advanced-Lighting/Bloom), [WebGL: Gaussian
+Blur](https://www.songho.ca/webgl/webgl_blur.html).
+
+**6. Depth-of-field / film-grain / chromatic-aberration-style cues are
+what separates "casual digital" from "cinema-grade" in creator-facing
+guidance**, independent of the underlying content — texture and softened
+edges read as more intentional/organic than a perfectly flat digital
+render. Lower priority than bloom (heavier to compute per-frame at 1-hour
+scale, and film grain in particular fights this project's own "vivid,
+bold, legible" requirement if overdone), but worth knowing as a second
+lever if bloom alone isn't enough. [MasterClass: Film Grain
+Effect Guide](https://www.masterclass.com/articles/film-grain-effect-guide).
+
+**What this does NOT settle, and is a call only the channel owner can
+make**: how far to lean into this evidence. Recommendations range from
+low-risk (ship the bloom post-process on every video, tune it further,
+keep every existing engine and archetype exactly as-is) to a genuine
+pivot (relax house-style rule 2 to allow soft/fluid/organic content
+alongside geometric, since the actual market leaders in this niche mix
+both; and/or dial BACK the just-shipped unit-motion busyness toward
+fewer, slower, more legible movements per video). Both directions
+directly reverse standing, deliberately-written rules in this same file,
+so this research is being handed back to the user with a concrete,
+scoped menu rather than unilaterally rewritten — see the conversation for
+which option was chosen and what shipped as a result.
 
 ## Known constraints / gotchas
 
