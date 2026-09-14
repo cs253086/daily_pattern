@@ -4009,6 +4009,134 @@ so this research is being handed back to the user with a concrete,
 scoped menu rather than unilaterally rewritten — see the conversation for
 which option was chosen and what shipped as a result.
 
+### Follow-up, same day: applying the research — a render-pipeline bloom attempt that had to be reverted, and what shipped instead
+
+User: "Once research is done, apply what you learned to improve ours." Went
+straight for finding 5 above (bloom as a render-pipeline post-process,
+zero engine changes, applies to all 34 engines and every future Gemini
+engine uniformly) as the highest-leverage, lowest-risk item — safe because
+reversible via one flag, and it does not touch the house-style question
+left open above.
+
+**Built it, then found a real, severe, reproducible ffmpeg bug and reverted
+before shipping — recorded here in full so a future attempt does not
+repeat this exploration from scratch.** Implementation: `cfg.bloom` in
+`src/render.js`'s `resolveConfig()` (default on, `BLOOM=0` escape hatch)
+and a `bloomFilterComplex()` injected into the main encode's
+`-filter_complex`: isolate pixels above a luma threshold, blur them,
+screen-blend back over the original — the standard technique cited above.
+
+- **First version thresholded per RGB channel** (the same curve applied
+  independently to R, G, and B — simplest to write). Measured, not
+  assumed, to be wrong for this house style specifically: this pool's
+  70-95%-saturation palettes routinely put ONE channel near 255 at a
+  perfectly ordinary, unremarkable LUMA — measured directly on a real
+  `kaleidoscope.html` frame, 3.3% of pixels crossed a per-channel
+  threshold that only 0.01% crossed by actual luma. Screen-blending that
+  much spurious "bright" area, blurred, visibly tinted the ENTIRE frame
+  (including corners with no nearby content) a wash of purple on
+  `kaleidoscope.html`'s broad, saturated, non-black accumulated
+  background — an accumulating engine's fade trail is exactly the kind of
+  "moderate-luma, high-saturation, covers a lot of the frame" content a
+  per-channel gate is wrong for.
+- **Fixed the luma-vs-per-channel bug correctly** (compute luma on a
+  separate `format=gray` branch, threshold that, convert the binary mask
+  back to RGB, multiply onto the unmodified colour image before blurring)
+  — verified correct in isolation: extracting the mask alone, multiplying
+  alone, and blurring alone each independently produced exactly the
+  expected near-black corners on a single still frame.
+- **Then found a second, unrelated, far more severe bug**: the exact same
+  filter graph, run through the REAL render pipeline (JPEG frames piped
+  into one `ffmpeg -filter_complex ... -c:v libx264` command, i.e.
+  `spawnFfmpegPipe()`'s actual production shape) reproducibly tinted a
+  supposedly-static, far-from-any-content corner of a real
+  `geometric.html` frame to RGB(30,0,38) — a real, visible purple cast,
+  not a rounding artifact. **This was NOT the per-channel bug recurring**:
+  measured directly, EVERY raw frame the filter graph produced (verified
+  by writing the filtered stream to an image2 PNG sequence instead of
+  encoding it, then reading raw pixel values from 60+ sampled frames
+  including the exact frame in question) was mathematically perfect —
+  corner luma and chroma both exactly zero, every single time. The tint
+  only appeared once that same, provably-correct frame data was encoded
+  through `libx264` in the same command.
+- **Extensive bisection (many hours, recorded so it need not be repeated)
+  ruled out**: colour-range mismatch (tested explicit `format=yuv420p`
+  before the encoder, and explicit `yuvj420p`/full-range output — both
+  still tinted, the second only marginally less so); filter-graph
+  threading (`-filter_complex_threads 1` — still tinted); B-frames
+  (`-bf 0` — still tinted); a combined-vs-separate-pass artifact (ran
+  bloom as a genuinely separate second `ffmpeg` invocation over an
+  already-encoded clean video — still tinted, identically); and simple
+  non-determinism (re-ran the one construction that DID work twice —
+  produced byte-identical, MD5-matching output both times, so whatever
+  this is, it is fully deterministic given the same filter graph, not a
+  race).
+- **The one construction that WAS clean, reproducibly, byte-for-byte**:
+  computing the luma mask via `geq` (a full custom per-pixel expression
+  filter) instead of the `format=gray`+`lut` round trip, or instead of a
+  per-channel `lutrgb` — both of which showed the SAME tint as the very
+  first per-channel version, meaning the actual bug is not specific to
+  gray-format conversion or to per-channel logic at all. Even the
+  simplest possible construction with no masking whatsoever (`split`,
+  `gblur` the WHOLE frame, `screen`-blend at low opacity — literally the
+  first prototype tried, with nothing this write-up's later fixes touch)
+  reproduced the identical tint. `geq` was the only mask-computation
+  method that never did, across a direct re-run confirmed byte-identical.
+  Root cause remains unidentified — plausibly a genuine bug in how this
+  ffmpeg build's `split`+`blend`+`gblur` combination allocates or reuses
+  frame buffers once fed into `libx264`, since `geq` is architecturally
+  the one path that never shares a buffer pool with a sibling `split`
+  branch the way `format`/`scale`/`lut` do.
+- **`geq` is real but unusably slow for this pipeline.** Measured directly
+  on 300 real 1080p frames: 324.8ms/frame just for the `geq` step —
+  extrapolated to a full 86,400-frame hour, ~468 minutes (7.8 hours) on
+  top of the existing render, which alone blows both the documented CI
+  render budget and the workflow's own 330-minute hard job timeout many
+  times over. The standard fix (downscale before the expensive per-pixel
+  step, blur small, scale back up) was tried at several factors — and
+  reintroduced the EXACT SAME corner tint the moment a `scale` filter
+  entered the graph, even downstream of the now-known-clean `geq` mask.
+  There is no verified-safe way to make this fast enough within the time
+  spent investigating.
+- **Reverted `src/render.js` to its pre-bloom state entirely** (not left
+  behind as a default-off flag) rather than ship dead or dangerous code:
+  a `bloom: true`-by-default feature that is actually broken is worse
+  than no feature, and the specific failure mode (a visible colour tint
+  across every published video) is exactly the opposite of what this
+  research was trying to fix. `git diff` against this commit shows zero
+  changes to `src/render.js`.
+
+**What shipped instead, safely, from the same research** (both verified,
+no ffmpeg pipeline involved so none of the above risk applies):
+1. **`src/generate.js`'s prompt now has an explicit, mandatory "GLOW IS
+   MANDATORY, NOT OPTIONAL FLOURISH" section** (previously this existed
+   only as one clause inside a whiteout-avoidance paragraph, framed as an
+   optional trick rather than a requirement) — every future Gemini-
+   generated engine (and every one promoted from it into the curated
+   pool) is now told, as a hard requirement, to draw every bright shape
+   twice (wide low-alpha glow stroke underneath, thin bright core on top,
+   or a real `ctx.shadowBlur`), citing the research finding directly.
+   Verified the same way this file's own template-literal gotcha demands:
+   called `buildPrompt()`/`buildRepairPrompt()` directly (not just `node
+   --check`), confirmed the new section is present in both, confirmed
+   `buildRepairPrompt()` (which wraps `buildPrompt()`) inherits it
+   automatically, confirmed both prompts still end exactly where expected.
+2. **A real finding, not assumed**: before touching any engine file,
+   checked whether "engines render completely flat with no glow at all"
+   (this research's own initial framing) was actually true. It was not,
+   uniformly — `geometric.html` already draws every ring twice (a bright
+   thin core stroke plus a soft wide low-alpha stroke, `globalCompositeOperation
+   = 'lighter'`) specifically for this reason, and most other Canvas2D
+   curated engines checked (`kaleidoscope`, `grid`, `starburst`, `cascade`)
+   already use some additive/double-stroke glow technique too — the
+   accurate finding is that existing glow intensity is INCONSISTENT across
+   the pool (present and reasonably strong in several engines,
+   `tessellation`'s filled-polygon design barely uses it, WebGL engines
+   use real per-fragment lighting instead so the technique doesn't apply
+   the same way), not that it is absent. A full retrofit pass across the
+   pool (auditing all 34 for glow strength and strengthening the weak
+   ones) is real, scoped follow-up work, not done in this session.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
