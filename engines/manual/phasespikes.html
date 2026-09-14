@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Phase Spikes — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "a random featured image" -- open
+// search for a striking macro-photography subject surfaced pollen grain
+// surface sculpture, and following that led to the underlying physics
+// paper): POLLEN WALL PATTERN FORMATION. A published biophysics model
+// ("Pollen Patterns Form from Modulated Phases", bioRxiv/arXiv) describes
+// the pollen exine's surface sculpture -- polygonal spikes, polygonal
+// holes, and mixtures with stripes -- as a MODULATED PHASE: a periodic
+// order-parameter field that self-organises into a hexagonal lattice of
+// raised points (or, past a threshold, their photographic-negative --
+// holes) depending on parameters, the same pattern-selection physics
+// behind Turing reaction-diffusion spots and block-copolymer microphase
+// separation, not a literal picture of a pollen grain.
+// Source: https://www.biorxiv.org/content/10.1101/279851v1.full.pdf
+// ("Pollen Patterns Form from Modulated Phases").
+//
+// A genuinely different construction PRINCIPLE from every other
+// wave-based engine in the pool: chladni.html superposes exactly TWO
+// square-plate eigenmodes and traces the ZERO-CROSSING (nodal lines,
+// rendered as thin connected curves); this engine sums THREE plane waves
+// at a fixed 120-degree spacing (the standard minimal model for
+// hexagonal pattern selection -- three waves at 120 degrees is the
+// simplest sum whose CONSTRUCTIVE-INTERFERENCE MAXIMA fall on a
+// triangular lattice) and renders the field's own local MAXIMA as
+// discrete bold hexagon "spikes" on a hex lattice, not a traced curve --
+// closer in spirit to primespiral.html's "evaluate a field at fixed
+// lattice points, draw the ones that qualify as bold filled cells" than
+// to chladni's implicit-curve tracing, but from a physical modulated-
+// phase field instead of an arithmetic sieve.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. Redraws each frame from a fresh field
+// evaluation -- no accumulation, no whiteout risk.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 36);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  const cx = W / 2, cy = H / 2;
+  const minDim = Math.min(W, H);
+  const R = minDim * 0.47;
+  const dt = 1 / FPS;
+
+  // Three plane-wave directions at a FIXED 120-degree spacing -- the
+  // minimal model for hexagonal pattern selection (three waves at 120
+  // degrees is the simplest sum whose constructive-interference maxima
+  // fall on a triangular lattice). Not randomised: the angular spacing is
+  // what MAKES it a hex pattern, so it's a structural constant, not a
+  // per-video parameter.
+  const WAVE_DIRS = [0, (2 * Math.PI) / 3, (4 * Math.PI) / 3].map((a) => [Math.cos(a), Math.sin(a)]);
+
+  // Lattice pitch (spacing between spike-candidate points) and matching
+  // wavenumber are fixed ONCE per video, a function of DENSITY only --
+  // the same "coverage-affecting parameter must not vary per cycle"
+  // lesson CLAUDE.md documents for well over a dozen prior engines: a
+  // finer lattice or a different wavelength would change how many
+  // candidate points exist, and this engine's coverage stability instead
+  // comes entirely from ranking a FIXED lattice (see TARGET_FRAC below),
+  // so the lattice itself must stay fixed for the whole video.
+  // Half-diagonal of the canvas: the lattice must reach at least this far
+  // from centre so a full rigid rotation never reveals an empty corner --
+  // the same "size the field to the canvas's own half-diagonal" technique
+  // widmanstatten.html already established for a rotating full-frame
+  // composition.
+  const halfDiag = Math.sqrt((W / 2) ** 2 + (H / 2) ** 2);
+
+  let pitch, k, points, hue0;
+  function initLattice() {
+    // A first draft clipped the lattice to a centred DISK (radius R) --
+    // measured (the mandatory novelty gate, not a visual judgement call)
+    // as too close to cascade.html (distance 0.429, below the 0.60
+    // minimum): a colour-blind, composition-based descriptor reads "many
+    // similar-sized small blobs scattered with no strong radial symmetry"
+    // as close regardless of the disk-vs-full-frame silhouette difference
+    // a person would notice first. Fixed with a genuine compositional
+    // change, not a parameter nudge: the lattice now fills the full
+    // rectangular frame (out to the half-diagonal, so rotation never
+    // reveals an empty corner) instead of a centred disk, AND the pitch
+    // was substantially enlarged for fewer, bolder spikes per the house
+    // style's own "bigger, fewer, clearer" rule -- both change the
+    // descriptor's coverage/edge-density/blob-size features, not just the
+    // colours or motion.
+    pitch = Math.max(26, Math.round((minDim / 15) * Math.max(0.75, Math.min(1.4, DENSITY))));
+    // A first draft set k = 2*pi/pitch (treating pitch as a single wave's
+    // wavelength) and rendered as a large, sharply-bounded MOIRE blob
+    // rather than an even hex-dot scatter across the whole disk -- found
+    // only by rendering and looking, not by reasoning about the formula.
+    // Root cause, confirmed numerically before trusting the fix (the same
+    // discipline this pool's quasicrystal.html/geodome.html/spaceframe.html
+    // already established for a construction that could still "look
+    // plausible" even if subtly wrong): the true nearest-neighbour spacing
+    // of a 3-wave-at-120-degrees sum's maxima is a = 4*pi/(sqrt(3)*k), NOT
+    // 2*pi/k -- my hand-picked sampling lattice pitch didn't match the
+    // field's own real period, so which sample points landed near a peak
+    // vs a trough drifted slowly across the canvas, exactly the classic
+    // Moire beat-envelope shape. Fixed by inverting the verified formula
+    // so the sampling lattice pitch and the field's true period coincide.
+    k = (4 * Math.PI) / (Math.sqrt(3) * pitch);
+    hue0 = rng() * 360;
+
+    // Standard triangular (hex) lattice: rows spaced pitch*sqrt(3)/2
+    // apart, alternate rows offset by half a pitch. Filled out to
+    // halfDiag (not R) so it covers the full rectangular frame, corners
+    // included, at every rotation angle.
+    points = [];
+    const rowH = pitch * Math.sqrt(3) / 2;
+    const reach = halfDiag + pitch;
+    const nRows = Math.ceil((2 * reach) / rowH) + 2;
+    const nCols = Math.ceil((2 * reach) / pitch) + 2;
+    for (let ry = -nRows; ry <= nRows; ry++) {
+      const y = ry * rowH;
+      if (Math.abs(y) > reach) continue;
+      const xOffset = (ry & 1) ? pitch / 2 : 0;
+      for (let rx = -nCols; rx <= nCols; rx++) {
+        const x = rx * pitch + xOffset;
+        if (x * x + y * y > reach * reach) continue;
+        points.push({ x, y });
+      }
+    }
+  }
+
+  // Called at start-up AND every cycleSec. Only the three waves'
+  // independent phase RATES and the rigid-rotation rate reset --
+  // coverage-neutral by construction, same reasoning as chladni.html's
+  // reconfigureMorph(): the phase field sweeps through the same bounded
+  // family of hex-spike arrangements regardless of its current rate, and
+  // TARGET_FRAC (below) keeps lit area constant regardless of how "mixed"
+  // the field currently looks.
+  let phase0, phaseRate, rotAngle0, rotRate;
+  function reconfigureMotion() {
+    phase0 = [rand(0, Math.PI * 2), rand(0, Math.PI * 2), rand(0, Math.PI * 2)];
+    // A first design gave each of the three waves its OWN independently-
+    // rated phase. Measured (rendering frames and looking, not just
+    // reasoning about the formula) as a real bug: independently drifting
+    // phases change the RELATIVE weighting between the three wave
+    // directions, and away from perfect 3-way balance the sum stops
+    // looking like a hex-spike field at all -- at some instants one wave
+    // visibly dominates and the render shows plain diagonal STRIPES, at
+    // others the percentile threshold picks out one large connected blob
+    // region instead of an even scatter of discrete spikes. Fixed by
+    // giving the field a single shared DRIFT instead: a per-cycle
+    // velocity vector v, with each wave's phase advancing at exactly the
+    // rate implied by that one shared translation
+    // (phase_i(t) = phase_i0 - k*(dir_i . v)*t, i.e. substituting r -> r -
+    // v*t into every wave identically). This is mathematically the whole
+    // periodic tiling sliding rigidly underneath the FIXED sampling
+    // lattice -- the three waves' relative balance never changes, so the
+    // field is a proper hex-spike pattern at every instant, while the
+    // specific lattice points crossing the rank threshold still
+    // continuously change as the tiling drifts through them (exactly the
+    // "modulated-phase pattern reorganising" look the pollen research
+    // describes, without ever degenerating into stripes or a blob).
+    const driftAngle = rand(0, Math.PI * 2);
+    const driftSpeed = sgn() * rand(0.35, 0.65) * pitch * SPEED;
+    const vx = Math.cos(driftAngle) * driftSpeed, vy = Math.sin(driftAngle) * driftSpeed;
+    phaseRate = WAVE_DIRS.map((d) => -k * (d[0] * vx + d[1] * vy));
+    // A genuine rigid rotation of the whole rendered lattice, the same
+    // proven second motion source chladni.html/quasicrystal.html rely on
+    // when a single motion mechanism alone leaves too little frame-to-
+    // frame churn for validate.js's fast-motion check.
+    rotAngle0 = rand(0, Math.PI * 2);
+    // Slower than chladni.html's/quasicrystal.html's own rotation range:
+    // measured (validateEngine()'s unitMotionNonRigidFrac, not a visual
+    // guess) that at the full-frame lattice's larger scale (after the
+    // novelty-gate redesign above), a rotation this fast alone explained
+    // 60%+ of the 0.25s frame-to-frame change via a single rigid fit,
+    // starving the phase field's own genuine non-rigid spike-toggling
+    // signal below the mandatory 40% floor on 3 of 16 seeds. fastMotion
+    // has generous headroom (18-36 vs a 5.8-7.3 floor) even at this
+    // slower rate, so cutting rotation rate costs nothing there while
+    // freeing up more of the frame-to-frame change for the toggling.
+    rotRate = sgn() * rand(0.2, 0.35) * SPEED;
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  initLattice();
+  reconfigureMotion();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function hexPath(px, py, r, angle) {
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = angle + i * Math.PI / 3;
+      const vx = px + r * Math.cos(a), vy = py + r * Math.sin(a);
+      if (i === 0) ctx.moveTo(vx, vy); else ctx.lineTo(vx, vy);
+    }
+    ctx.closePath();
+  }
+
+  // Target fraction of lattice points rendered as a "spike" each frame,
+  // held CONSTANT via an adaptive per-frame threshold (the exact
+  // TARGET_FRAC technique chladni.html's own writeup documents fixing a
+  // real brightness-swing bug with): a fixed field-value cutoff would let
+  // real coverage swing with how constructively-aligned the three waves
+  // currently are, so instead every frame ranks ALL lattice points by
+  // field value and lights up exactly the top TARGET_FRAC of them --
+  // total lit area never varies, only WHICH points currently qualify as
+  // spikes (i.e. the modulated-phase pattern's shape) does.
+  const TARGET_FRAC = 0.15;
+  const hexR = pitch * 0.46;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    const ph = [
+      phase0[0] + clk * phaseRate[0],
+      phase0[1] + clk * phaseRate[1],
+      phase0[2] + clk * phaseRate[2],
+    ];
+
+    const vals = new Array(points.length);
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      let f = 0;
+      for (let w = 0; w < 3; w++) {
+        f += Math.cos(k * (WAVE_DIRS[w][0] * p.x + WAVE_DIRS[w][1] * p.y) + ph[w]);
+      }
+      vals[i] = f;
+    }
+    const sorted = vals.slice().sort((a, b) => a - b);
+    const cutIdx = Math.max(0, Math.min(sorted.length - 1, Math.floor(sorted.length * (1 - TARGET_FRAC))));
+    const thresh = sorted[cutIdx];
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(rotAngle0 + clk * rotRate);
+
+    for (let i = 0; i < points.length; i++) {
+      if (vals[i] < thresh) continue;
+      const p = points[i];
+      // Spatial (not time-based) hue ripple keyed to position -- adds
+      // colour richness without ever creating a temporal luma trend, the
+      // same reasoning as chladni.html's/quasicrystal.html's spatial hue
+      // fixes.
+      const ang = Math.atan2(p.y, p.x);
+      const rad = Math.sqrt(p.x * p.x + p.y * p.y) / (R || 1);
+      const base = PAL[Math.abs(Math.round(p.x / pitch) + Math.round(p.y / pitch)) % PAL.length];
+      const hue = ((base[0] + hue0 + 26 * Math.sin(3 * ang + rad * 4)) % 360 + 360) % 360;
+      ctx.fillStyle = `hsl(${hue}, ${base[1]}%, ${Math.min(78, base[2] + 10)}%)`;
+      hexPath(p.x, p.y, hexR, hue0 * 0.01);
+      ctx.fill();
+    }
+
+    ctx.restore();
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureMotion(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

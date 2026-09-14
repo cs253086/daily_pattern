@@ -4137,6 +4137,119 @@ no ffmpeg pipeline involved so none of the above risk applies):
    pool (auditing all 34 for glow strength and strengthening the weak
    ones) is real, scoped follow-up work, not done in this session.
 
+## Modulated-phase spike-lattice engine (`phasespikes.html`) — 2026-09-14
+
+Daily creative-research routine. Category was "a random featured image" by
+the firing-minute-mod-category-count method (never successfully used
+before -- previous attempts under this category were redirected to other
+categories since Wikimedia Commons is blocked in this sandbox). An open
+WebSearch for a striking macro-photography subject surfaced pollen grain
+surface sculpture (SEM imagery), which led to the underlying physics
+paper: "Pollen Patterns Form from Modulated Phases" (bioRxiv/arXiv),
+describing the pollen exine's polygonal-spike / polygonal-hole /
+chiral-stripe surface sculpture as a MODULATED PHASE -- a periodic
+order-parameter field that self-organises into a hexagonal lattice of
+raised points (or their photographic-negative, holes) depending on
+parameters, the same pattern-selection physics behind Turing
+reaction-diffusion spots and block-copolymer microphase separation, not a
+literal picture of a pollen grain. Source:
+https://www.biorxiv.org/content/10.1101/279851v1.full.pdf.
+
+**What it is**: three plane waves at a FIXED 120-degree spacing (the
+minimal model whose constructive-interference maxima fall on a triangular
+lattice -- a structural constant, not a per-video parameter) summed into
+one field, sampled at a matching hex lattice, with a per-frame percentile
+rank-select (chladni.html's own TARGET_FRAC technique) rendering exactly
+the top fraction of lattice points as bold filled hexagon "spikes". A
+genuinely different construction principle from chladni.html despite both
+being wave-interference fields: chladni superposes two square-plate
+eigenmodes and traces the ZERO-CROSSING as connected nodal lines; this
+engine renders the field's local MAXIMA as discrete lattice spikes, closer
+in spirit to primespiral.html's "evaluate a field at fixed lattice points,
+draw the ones that qualify" than to chladni's curve-tracing.
+
+**Reused two independently-proven mechanisms from chladni.html from the
+first draft** (percentile rank-select for coverage-neutral evolution;
+canvas-level rigid rotation as a second motion source) specifically to
+minimise the iteration risk documented at length for the previous two
+firings' engines (dragonfold.html/ikatweave.html each needed many rounds;
+2026-09-13's phantom-crystal attempt needed nine rounds and was ultimately
+skipped). This paid off: `validateEngine()` passed on a near-first
+attempt, and only composition-level (not quality-gate) iteration was
+needed.
+
+**Two real bugs found only by rendering and looking, not by reasoning
+about the formula:**
+1. Giving each of the three waves its own independently-rated phase let
+   their relative weighting drift over time: away from perfect 3-way
+   balance the sum stops looking like a hex-spike field at all -- at some
+   instants one wave visibly dominated and the render showed plain
+   diagonal stripes, at others the percentile threshold picked out one
+   large connected blob region instead of an even scatter. Fixed by
+   replacing independent phase rates with a single shared DRIFT velocity
+   vector (phase_i(t) = phase_i0 - k*(dir_i . v)*t for one shared v, i.e.
+   substituting r -> r - v*t into every wave identically) -- mathematically
+   the whole periodic tiling sliding rigidly under the fixed sampling
+   lattice, so the three waves' relative balance never changes and the
+   field is a proper hex-spike pattern at every instant, while the
+   specific lattice points crossing the rank threshold still continuously
+   change as the tiling drifts through them.
+2. A first version set the wavenumber k = 2*pi/pitch (treating pitch as a
+   single wave's wavelength), which rendered as a large, sharply-bounded
+   MOIRE blob rather than an even hex-dot scatter. Root cause, **confirmed
+   numerically before trusting the fix** (the same discipline this pool's
+   quasicrystal.html/geodome.html/spaceframe.html already established for
+   a construction that could still "look plausible" even if subtly
+   wrong): the true nearest-neighbour spacing of a 3-wave-at-120-degree
+   sum's maxima is a = 4*pi/(sqrt(3)*k), NOT 2*pi/k -- verified with a
+   standalone script that numerically located the nearest local maximum
+   and matched the formula to 4 significant figures. The hand-picked
+   sampling lattice pitch didn't match the field's own real period, so
+   which sample points landed near a peak vs a trough drifted slowly
+   across the canvas -- the classic Moire beat-envelope shape. Fixed by
+   inverting the verified formula so the sampling lattice pitch and the
+   field's true period coincide.
+
+**Novelty gate failed on the first composition** (disk-clipped field,
+many small hex dots): distance **0.429** vs `cascade` -- below the 0.60
+minimum. A colour-blind, composition-based descriptor read "many
+similar-sized small blobs scattered with no strong radial symmetry" as
+close to `cascade`'s falling-block field, despite the very different
+silhouettes (a disk of scattered dots vs. a full-frame directional block
+cascade) a person would notice first -- the same lesson `phyllotaxis.html`
+already documents: construction-principle novelty doesn't automatically
+translate into composition-level novelty. Fixed with a genuine
+compositional change, not a parameter nudge: switched from a centred disk
+clip to a FULL-RECTANGULAR-FRAME field (sized to the canvas's
+half-diagonal, the same technique `widmanstatten.html` already
+established so a full rotation never reveals an empty corner) with
+substantially larger pitch for fewer, bolder spikes per the house style's
+own "bigger, fewer, clearer" rule. Re-measured at **0.823** vs `cascade`
+-- a comfortable pass, and its own singleton cluster in the pool.
+
+That redesign then pushed `unitMotionNonRigidFrac` just under the
+mandatory 0.40 floor on 3 of 16 seeds: at the larger full-frame scale, the
+rigid rotation alone explained 60%+ of the 0.25s frame-to-frame change via
+a single rigid fit, starving the phase field's own genuine non-rigid
+spike-toggling signal. Fixed by cutting the rotation rate substantially
+(0.5-0.9 -> 0.2-0.35 rad/s) -- free, since `fastMotion` had generous
+existing headroom (18-36 vs a 5.8-7.3 floor) even at the slower rate,
+while the reduction freed up more of the frame-to-frame change for the
+toggling signal.
+
+**Verified** (final design): `validateEngine()` **16/16** across seeds
+1-15 plus the CLI's actual default seed 12345 (see `geodome.html`'s
+write-up for why that seed matters). Margins comfortable throughout:
+`avgSat` 70-79.5 (vs the 22 minimum), zero near-white pixels on every
+seed, `projectedRise` -32 to +32 (vs the 50 threshold), `compositionDrift`
+0.055-0.176 (vs the 0.015 minimum), `unitMotionNonRigidFrac` 0.50-0.84
+(vs the 0.40 minimum), `projectedHourRenderMin` 4.1-6.9min (well inside
+the CI budget). Visual spot-checks across 2/25/50/75/95/105% of a 36s
+cycle at 3 seeds, actually rendering PNGs and looking at them, not just
+reading validator output: a vivid, bold, immediately-legible full-frame
+scatter of colourful hexagon spikes with no clipping/gap artifacts at any
+rotation angle and no jarring cycle-boundary reset.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
