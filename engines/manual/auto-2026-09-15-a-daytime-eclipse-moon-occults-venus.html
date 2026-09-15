@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generative Art Screensaver</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: black; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        // --- PRNG (Mulberry32) ---
+        let seed = 0;
+        let prngState = 0;
+        function mulberry32(a) {
+            return function() {
+                let t = a += 0x6D2B79F5;
+                t = Math.imul(t ^ t >>> 15, t | 1);
+                t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+                return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            }
+        }
+        let rand;
+
+        // --- URL Param Parsing ---
+        const urlParams = new URLSearchParams(window.location.search);
+        const getParam = (name, defaultValue, type = 'float') => {
+            const value = urlParams.get(name);
+            if (value === null) return defaultValue;
+            if (type === 'int') return parseInt(value);
+            if (type === 'float') return parseFloat(value);
+            return value;
+        };
+
+        seed = getParam('seed', 20260915, 'int');
+        rand = mulberry32(seed);
+
+        const width = getParam('width', 1920, 'int');
+        const height = getParam('height', 1080, 'int');
+        const fps = getParam('fps', 24, 'int');
+        const duration = getParam('duration', 3600, 'float');
+        const speed = getParam('speed', 1.0, 'float');
+        const density = getParam('density', 1.0, 'float');
+        const cycleSec = getParam('cycleSec', 90, 'float');
+
+        // --- Global Animation State ---
+        window.READY = false;
+        window.TOTAL_FRAMES = Math.round(duration * fps);
+        window.currentFrame = 0;
+        let dt = 1 / fps;
+        let time = 0;
+
+        // --- Canvas Setup ---
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = width;
+        canvas.height = height;
+
+        ctx.globalCompositeOperation = 'lighter'; // Additive blending
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, width, height);
+
+        // --- Color Palette Generation (Blue Tones, from seed) ---
+        let palette = [];
+        const baseHueOffset = rand() * 360; // Random starting point for hue cycle
+        const hueShiftSpeed = (rand() * 0.05 + 0.05) * speed; // Speed of hue modulation
+        const saturationBase = rand() * 0.1 + 0.75; // Ensure high saturation: 75-85%
+        const lightnessBase = rand() * 0.1 + 0.45; // Ensure moderate lightness: 45-55%
+
+        const numColors = Math.floor(rand() * 2) + 3; // 3 to 4 colors
+        const hueSeparation = (rand() * 20 + 40); // 40-60 degrees separation
+
+        for (let i = 0; i < numColors; i++) {
+            // Keep hues within a blueish range, but allow spread
+            let hue = (180 + (rand() * 90) + (i * hueSeparation)) % 360; // Ensure blue/purple range (180-270)
+            // If the hue falls outside the desired blue-purple range, clamp it or re-roll
+            // A more robust way: generate a base hue in the blue range, then spread
+            let effectiveHue = (200 + (rand() * 50 - 25) + (i * hueSeparation)) % 360; // Base around 200-250 (blue/violet)
+            if (effectiveHue < 180) effectiveHue += 180; // Ensure it's not too yellow/red
+            if (effectiveHue > 270) effectiveHue -= 90; // Ensure it's not too green
+
+            palette.push({
+                hue: effectiveHue,
+                saturation: saturationBase + rand() * 0.05, // Slight variation
+                lightness: lightnessBase + rand() * 0.05 // Slight variation
+            });
+        }
+
+
+        // --- Geometry and Animation Parameters ---
+        const centerX = width / 2;
+        const centerY = height / 2;
+        const minDim = Math.min(width, height);
+
+        const numParticles = Math.floor((rand() * 100 + 150) * density); // 150-250 particles
+        const particles = [];
+
+        const outerRingRadius = minDim * (rand() * 0.05 + 0.35); // 35-40% of minDim
+        const innerRingRadius = minDim * (rand() * 0.05 + 0.15); // 15-20% of minDim
+        const particleBaseSpeed = (rand() * 0.5 + 1.0) * speed; // Base speed for particles
+        const particleBaseSize = minDim * (rand() * 0.003 + 0.005); // Particle size relative to canvas, slightly larger
+
+        const waveFrequency = (rand() * 0.5 + 1.0) * speed; // Per-unit wave modulation for scale
+        const waveMagnitude = (rand() * 0.05 + 0.1) * particleBaseSize; // Magnitude of wave effect on size
+        const baseRotationSpeed = (rand() * 0.4 + 0.6) * speed * (rand() < 0.5 ? 1 : -1); // Base rotation speed of layers, 0.4-1.0 rad/s
+        const counterRotationSpeed = (rand() * 0.3 + 0.5) * speed * (rand() < 0.5 ? 1 : -1); // Counter rotation for some particles
+
+        let totalResetFrames = Math.round(cycleSec * fps);
+        let resetCounter = 0;
+
+        // --- Particle structure ---
+        class Particle {
+            constructor(id) {
+                this.id = id;
+                this.reset(true); // Initial reset
+            }
+
+            reset(initial = false) {
+                if (initial) {
+                    this.angle = rand() * Math.PI * 2;
+                    this.orbitRadius = innerRingRadius + rand() * (outerRingRadius - innerRingRadius);
+                    this.speed = particleBaseSpeed * (rand() * 0.5 + 0.75) * (rand() < 0.5 ? 1 : -1);
+                    this.size = particleBaseSize * (rand() * 0.5 + 0.75);
+                }
+
+                // Set new targets for continuous morphing
+                this.targetAngle = rand() * Math.PI * 2;
+                this.targetOrbitRadius = innerRingRadius + rand() * (outerRingRadius - innerRingRadius);
+                this.targetSpeed = particleBaseSpeed * (rand() * 0.5 + 0.75) * (rand() < 0.5 ? 1 : -1);
+                this.targetSize = particleBaseSize * (rand() * 0.5 + 0.75);
+
+                this.morphProgress = 0;
+                this.morphDuration = Math.round((rand() * 3 + 5) * fps); // Morph over 5-8 seconds
+
+                this.colorIndex = Math.floor(rand() * palette.length);
+                this.waveOffsetPhase = rand() * Math.PI * 2; // Unique wave phase for each particle
+                this.isCounterRotating = rand() < 0.5; // Some particles counter-rotate
+            }
+
+            update(dt, globalTime) {
+                // Continuous morphing towards new targets
+                this.morphProgress++;
+                const progress = Math.min(1, this.morphProgress / this.morphDuration);
+                const easeProgress = 0.5 - 0.5 * Math.cos(Math.PI * progress); // Smoother ease-in-out
+
+                this.angle = this.angle * (1 - easeProgress) + this.targetAngle * easeProgress;
+                this.orbitRadius = this.orbitRadius * (1 - easeProgress) + this.targetOrbitRadius * easeProgress;
+                this.speed = this.speed * (1 - easeProgress) + this.targetSpeed * easeProgress;
+                this.size = this.size * (1 - easeProgress) + this.targetSize * easeProgress;
+
+                if (this.morphProgress >= this.morphDuration) {
+                    this.reset(); // Set new targets
+                }
+
+                // Per-unit spin / counter-rotation
+                let currentRotationSpeed = this.speed;
+                if (this.isCounterRotating) {
+                    currentRotationSpeed += counterRotationSpeed; // Add counter-rotation effect
+                }
+                this.angle += currentRotationSpeed * dt;
+
+
+                // Travelling wave modulation for scale
+                const waveScale = 1 + Math.sin(globalTime * waveFrequency * (this.id % 7 + 1) * 0.1 + this.waveOffsetPhase) * 0.15;
+                const currentSize = this.size * waveScale;
+
+                // Overall pattern rotation
+                const globalAngleOffset = baseRotationSpeed * globalTime;
+
+                this.x = centerX + Math.cos(this.angle + globalAngleOffset) * this.orbitRadius;
+                this.y = centerY + Math.sin(this.angle + globalAngleOffset) * this.orbitRadius;
+
+                this.draw(ctx, currentSize, globalTime);
+            }
+
+            draw(ctx, currentSize, globalTime) {
+                // Modulate color lightness and saturation over time for gentle shift
+                const color = palette[this.colorIndex];
+                const hueOffset = Math.sin(globalTime * hueShiftSpeed + this.id * 0.1) * 10; // Shift hue a bit
+                const lightnessMod = 0.5 + 0.5 * Math.sin(globalTime * 0.1 + this.id * 0.05);
+                const saturationMod = 0.8 + 0.2 * Math.sin(globalTime * 0.05 + this.id * 0.02);
+
+                const h = (color.hue + hueOffset + 360) % 360;
+                // Increased saturation for vividness
+                const s = Math.min(95, Math.max(70, color.saturation * saturationMod * 100)); // Clamp saturation 70-95%
+                const l = Math.min(70, Math.max(30, color.lightness * lightnessMod * 100)); // Clamp lightness 30-70%
+
+                const glowAlpha = 0.08; // Higher alpha for glow
+                const coreAlpha = 0.6; // Higher alpha for core
+
+                // Draw glow (wide, low-alpha stroke)
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, currentSize * 1.5, 0, Math.PI * 2);
+                ctx.strokeStyle = `hsla(${h}, ${s}%, ${l}%, ${glowAlpha})`;
+                ctx.lineWidth = currentSize * 1.0; // Wider glow
+                ctx.stroke();
+
+                // Draw core (thinner, higher-alpha stroke)
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, currentSize * 0.8, 0, Math.PI * 2); // Slightly smaller core
+                ctx.strokeStyle = `hsla(${h}, ${s}%, ${l}%, ${coreAlpha})`;
+                ctx.lineWidth = currentSize * 0.3; // Thicker core
+                ctx.stroke();
+            }
+        }
+
+        function initParticles() {
+            for (let i = 0; i < numParticles; i++) {
+                particles.push(new Particle(i));
+            }
+        }
+
+        initParticles();
+
+        // --- Core Animation Loop Functions ---
+        window.advanceFrame = function() {
+            if (window.currentFrame >= window.TOTAL_FRAMES) return;
+
+            time += dt;
+
+            // Mandatory HARD RESET: clear to black periodically
+            resetCounter++;
+            if (resetCounter >= totalResetFrames) {
+                ctx.globalCompositeOperation = 'source-over'; // Temporarily disable additive blending for full clear
+                ctx.fillStyle = 'black';
+                ctx.fillRect(0, 0, width, height);
+                ctx.globalCompositeOperation = 'lighter'; // Re-enable additive blending
+                resetCounter = 0;
+            } else {
+                 // Subtle fade if not a hard reset frame
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.02)'; // Gentle fade to black
+                ctx.fillRect(0, 0, width, height);
+                ctx.globalCompositeOperation = 'lighter';
+            }
+
+
+            // Update and draw particles
+            for (let i = 0; i < numParticles; i++) {
+                particles[i].update(dt, time);
+            }
+
+            window.currentFrame++;
+        };
+
+        window.advanceFrames = function(n) {
+            for (let i = 0; i < n; i++) {
+                window.advanceFrame();
+            }
+        };
+
+        // --- Initialization Complete ---
+        window.READY = true;
+    </script>
+</body>
+</html>
