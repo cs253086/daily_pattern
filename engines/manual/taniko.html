@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Taniko Border Bands — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "a traditional textile/tiling/
+// ornament tradition from a randomly chosen culture" -- an open WebSearch
+// for a not-yet-covered weaving technique surfaced TANIKO, the Maori
+// finger weft-twining technique used to weave patterned borders on kakahu
+// (cloaks)). Structural fact, not just a name: Maori weavers built taniko
+// patterns by combining FULL and HALF twists in the twining to bring one
+// or another coloured thread to the front at each stitch, and -- because
+// the twining technique cannot render a curve -- every design is built
+// only from a small vocabulary of primitives: triangles, diamonds,
+// diagonal bars and stepped/staircase shapes, stacked as repeating
+// horizontal BORDER BANDS (taniko was used specifically for hems/borders,
+// not whole garments -- the weave is too stiff for that).
+// Sources: https://collections.tepapa.govt.nz/topic/3644 (Te Papa Tongarewa,
+// search snippets -- Wikipedia/most single-page fetches are blocked in
+// this sandbox), https://teara.govt.nz/en/maori-weaving-and-tukutuku-te-raranga-me-te-whatu/page-3
+// (Te Ara Encyclopedia of New Zealand, search snippets).
+//
+// A genuinely different construction PRINCIPLE from every other textile
+// engine in the pool: stripweave.html juxtaposes independent VERTICAL
+// strips each carrying one motif; herringbone.html is a SINGLE grid whose
+// binary over/under state follows one continuous modular-shift formula
+// (an emergent diagonal, never drawn directly); ikatweave.html perturbs a
+// single repeating diamond motif with continuous per-thread misalignment
+// noise. This engine instead stacks several independent HORIZONTAL bands,
+// each one explicitly rendering ONE DISCRETE shape primitive from taniko's
+// own restricted vocabulary (triangle / diamond / staircase, defined
+// directly on a small per-repeat-unit raster grid, not derived from a
+// single global arithmetic rule or from noise) -- closer in spirit to
+// counted-thread pattern charting than to either prior weave engine.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. Redraws each frame from a fixed
+// per-band motif/colour scheme computed once at start-up -- no
+// accumulation, no whiteout risk. Bands tile the full canvas (no black
+// background ever visible) and every band's motif repeats seamlessly
+// along its own width, so horizontal scrolling is exactly coverage-neutral
+// at every phase, the same "translating periodic pattern" trick
+// stripweave.html/herringbone.html already established as safe.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 35);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  function hsl2rgb(h, s, l) {
+    s /= 100; l /= 100;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = l - c / 2;
+    let r, g, b;
+    if (h < 60) { r = c; g = x; b = 0; }
+    else if (h < 120) { r = x; g = c; b = 0; }
+    else if (h < 180) { r = 0; g = c; b = x; }
+    else if (h < 240) { r = 0; g = x; b = c; }
+    else if (h < 300) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+    return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+  }
+  function luma(col) {
+    const [r, g, b] = hsl2rgb(col.hue, col.sat, col.light);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+
+  const dt = 1 / FPS;
+
+  // Taniko's own restricted shape vocabulary -- "weavers could not use
+  // curved designs, so their decorations consisted of triangles, diamonds,
+  // diagonal bars and stepped patterns" (source above). Diagonal bars are
+  // deliberately left out: herringbone.html's single global modular-shift
+  // rule already produces an emergent diagonal, and re-using that same
+  // construction here would blur the two engines' otherwise genuinely
+  // different principles. Each function returns true/false for grid cell
+  // (r, c) within ONE repeat unit (r in 0..R-1, c in 0..C-1) -- small-
+  // integer comparisons only, matching the source's own "no curves" rule.
+  function motifTriangle(r, c, R, C) {
+    const cx = (C - 1) / 2;
+    const halfW = (r / Math.max(1, R - 1)) * cx;
+    return Math.abs(c - cx) <= halfW;
+  }
+  function motifDiamond(r, c, R, C) {
+    const cx = (C - 1) / 2, cy = (R - 1) / 2;
+    const radius = Math.min(cx, cy);
+    return Math.abs(c - cx) + Math.abs(r - cy) <= radius;
+  }
+  function motifStep(r, c, R, C) {
+    const steps = 3;
+    const stepH = R / steps;
+    const stepIdx = Math.min(steps - 1, Math.floor(r / stepH));
+    const threshold = ((stepIdx + 1) / steps) * C;
+    return c < threshold;
+  }
+  const MOTIFS = [motifTriangle, motifDiamond, motifStep];
+
+  // Band layout, per-band motif assignment, colour schemes and grid
+  // geometry are all fixed ONCE for the whole video, never re-rolled per
+  // cycle -- the "any coverage-affecting parameter re-randomised per
+  // cycle creates a real brightness swing" lesson CLAUDE.md documents for
+  // well over a dozen prior engines in a row. Here every band tiles its
+  // own strip of the canvas completely regardless of parameters, so
+  // coverage can't swing anyway, but colour scheme still needs to be
+  // fixed for the same "avoid a per-cycle hue jump" reason every other
+  // engine's palette assignment is.
+  const R = 7;           // grid rows per repeat unit (odd, clean centre)
+  const C = 2 * R - 1;   // grid columns per repeat unit
+  let bands;
+  function initBands() {
+    const d = Math.max(0.7, Math.min(1.4, DENSITY));
+    const NUM_BANDS = Math.max(4, Math.round(6 * d));
+    const bandH = H / NUM_BANDS;
+    const cellSize = bandH / R;
+    const unitPx = C * cellSize;
+
+    // Cyclic assignment through a per-video-shuffled motif order:
+    // consecutive indices mod 3 are always different, so no two adjacent
+    // bands ever share the same primitive shape.
+    const order = [0, 1, 2];
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+
+    bands = [];
+    for (let i = 0; i < NUM_BANDS; i++) {
+      const motif = MOTIFS[order[i % 3]];
+      const iA = (SEED + i * 2) % PAL.length;
+      const iB = (SEED + i * 2 + randInt(2, PAL.length - 1)) % PAL.length;
+      const a = PAL[iA], b = PAL[iB];
+      const ground = { hue: a[0], sat: a[1], light: Math.max(40, a[2] - 6) };
+      const accent = { hue: b[0], sat: b[1], light: Math.min(76, b[2] + 6) };
+      // Same guaranteed-minimum-luma-gap fix herringbone.html's write-up
+      // documents: two colours can look boldly distinct to a person while
+      // reading as near-flat to validate.js's luma-based spatial-structure
+      // check.
+      const MIN_LUMA_GAP = 55;
+      for (let k = 0; k < 40 && Math.abs(luma(ground) - luma(accent)) < MIN_LUMA_GAP; k++) {
+        if (luma(ground) >= luma(accent)) {
+          ground.light = Math.min(78, ground.light + 2);
+          accent.light = Math.max(30, accent.light - 2);
+        } else {
+          accent.light = Math.min(78, accent.light + 2);
+          ground.light = Math.max(30, ground.light - 2);
+        }
+      }
+      bands.push({
+        top: i * bandH, bandH, cellSize, unitPx, motif,
+        ground, accent,
+        // Bob amplitude is a fraction of a single grid CELL, not of the
+        // whole band -- the same magnitude herringbone.html's own proven-
+        // safe band bob uses (18-28% of a cell). A first version scaled
+        // this to 16-26% of the whole band instead, which could open a
+        // combined gap of up to ~50% of a band's height between two
+        // independently-bobbing neighbours (worked through the geometry:
+        // when adjacent bands bob toward each other they overlap safely,
+        // but when they bob apart their facing edges separate by the SUM
+        // of both amplitudes) -- large enough to read as a distracting
+        // black bar rather than a subtle nod.
+        scrollRate: 0, bobRate: 0, bobPhase0: rand(0, Math.PI * 2), bobAmp: rand(0.18, 0.28) * cellSize,
+      });
+    }
+  }
+
+  // Called at start-up AND every cycleSec. Only per-band scroll/bob RATES
+  // reset -- coverage-neutral by construction (a translating periodic
+  // pattern has identical total coverage at every phase; a vertical bob
+  // is a pure translation of an already-fully-opaque band, so it can
+  // never open a gap or change total coverage either).
+  function reconfigureMotion() {
+    for (const band of bands) {
+      band.scrollRate = sgn() * rand(0.22, 0.42) * band.cellSize * SPEED;
+      band.bobRate = sgn() * rand(0.6, 1.1) * SPEED;
+    }
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  initBands();
+  reconfigureMotion();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    // A real, previously undetected accumulation bug, found by
+    // validateEngine() across a seed battery, not by reasoning about the
+    // code: without an explicit full-canvas clear, independently-bobbing
+    // bands can open a brief gap between them (band i's bottom edge
+    // rising while band i+1's top edge doesn't fall to match), revealing
+    // whatever the PREVIOUS frame drew there instead of a fresh pixel --
+    // genuine cross-frame accumulation, not just an aliasing artifact,
+    // exactly the "near-zero motion, no full reset" bug class CLAUDE.md
+    // documents at length. Fixed the same way every other engine in this
+    // pool avoids it: a full opaque clear before anything else is drawn.
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    for (const band of bands) {
+      const groundFill = `hsl(${band.ground.hue}, ${band.ground.sat}%, ${band.ground.light}%)`;
+      const accentFill = `hsl(${band.accent.hue}, ${band.accent.sat}%, ${band.accent.light}%)`;
+      const bob = band.bobAmp * Math.sin(band.bobPhase0 + clk * band.bobRate);
+      const y0 = band.top + bob;
+
+      ctx.fillStyle = groundFill;
+      ctx.fillRect(0, y0, W, band.bandH);
+
+      let scrollX = clk * band.scrollRate;
+      scrollX = ((scrollX % band.unitPx) + band.unitPx) % band.unitPx;
+
+      const cMin = Math.floor(-scrollX / band.cellSize) - 1;
+      const cMax = Math.ceil((W + scrollX) / band.cellSize) + 1;
+
+      ctx.fillStyle = accentFill;
+      for (let gr = 0; gr < R; gr++) {
+        const cellY = y0 + gr * band.cellSize;
+        for (let gc = cMin; gc <= cMax; gc++) {
+          const localC = ((gc % C) + C) % C;
+          if (!band.motif(gr, localC, R, C)) continue;
+          const cellX = gc * band.cellSize - scrollX;
+          ctx.fillRect(cellX, cellY, band.cellSize + 0.5, band.cellSize + 0.5);
+        }
+      }
+    }
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureMotion(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

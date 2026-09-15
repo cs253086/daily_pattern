@@ -4250,6 +4250,121 @@ reading validator output: a vivid, bold, immediately-legible full-frame
 scatter of colourful hexagon spikes with no clipping/gap artifacts at any
 rotation angle and no jarring cycle-boundary reset.
 
+## Taniko border-band engine (`taniko.html`) — 2026-09-15
+
+Daily creative-research routine. Category was "traditional textile/tiling/
+ornament tradition from a randomly chosen culture" by the firing-minute-
+mod-category-count method (used three times before: Kente cloth for
+`stripweave.html`, twill/herringbone for `herringbone.html`, ikat for
+`ikatweave.html`). An open WebSearch for a fourth, structurally different
+weaving technique surfaced **taniko** -- the Maori finger weft-twining
+technique used to weave patterned borders on kakahu (cloaks). Sources:
+[Te Papa Tongarewa](https://collections.tepapa.govt.nz/topic/3644) (search
+snippets -- Wikipedia/most single-page fetches are blocked in this
+sandbox), [Te Ara Encyclopedia of New
+Zealand](https://teara.govt.nz/en/maori-weaving-and-tukutuku-te-raranga-me-te-whatu/page-3)
+(search snippets).
+
+**Extracting a structural principle, not the obvious one.** Maori weavers
+built taniko patterns by combining FULL and HALF twists in the twining to
+bring one or another coloured thread to the front at each stitch -- and,
+critically, because twining cannot render a curve, every design is built
+only from a small vocabulary of primitives: triangles, diamonds, diagonal
+bars and stepped/staircase shapes, stacked as repeating horizontal BORDER
+BANDS (taniko was used specifically for hems/borders, not whole garments
+-- the weave is too stiff for that). That is the principle worth
+rendering: several independent horizontal bands, each one explicitly
+drawing ONE discrete shape primitive from that restricted vocabulary on a
+small per-repeat-unit raster grid -- a genuinely different construction
+from every other textile engine in the pool: `stripweave.html` juxtaposes
+independent VERTICAL strips; `herringbone.html` is a single grid whose
+binary state follows one continuous modular-shift formula (an emergent
+diagonal, never drawn directly); `ikatweave.html` perturbs a single
+repeating motif with continuous per-thread misalignment noise. This
+engine instead charts discrete shapes directly on a grid, closer in
+spirit to counted-thread pattern charting than to any prior weave engine.
+
+**The three shape-primitive functions (triangle, diamond, staircase) were
+verified OFFLINE as ASCII art before writing any rendering code**, the
+same discipline this pool's `quasicrystal.html`/`geodome.html`/
+`herringbone.html` already established for a construction that could
+still "look plausible" even if subtly wrong: a standalone script printed
+each motif's boolean grid as `#`/`.` characters and confirmed a clean
+symmetric triangle, diamond, and ascending staircase with no visual
+artifacts, before either shape touched the rendering code.
+
+Bands are cyclically assigned one of the three motifs via a per-video-
+shuffled order (`[0,1,2]` permuted once, then indexed by `i % 3`) --
+consecutive indices mod 3 are always different, so no two adjacent bands
+ever share the same primitive, without needing any explicit adjacency
+check. Each band also gets its own two-colour scheme with the same
+guaranteed-minimum-luma-gap fix `herringbone.html`'s write-up documents
+(two hue-distinct colours can still read as near-flat to `validate.js`'s
+luma-based structure check).
+
+**One real bug found only by `validateEngine()` across a seed battery, not
+by reasoning about the code**: the engine never issued a full-canvas
+clear at the top of `renderFrame()` -- each band just painted its own
+strip directly. Since every band bobs vertically by an independent
+amount (see "unit choreography" below), two adjacent bands bobbing AWAY
+from each other could open a gap between their facing edges, revealing
+whatever the PREVIOUS frame drew there instead of a fresh pixel -- genuine
+cross-frame accumulation, not an aliasing artifact, and exactly the "near-
+zero motion, no full reset" bug class CLAUDE.md documents at length for
+several prior engines, just reached via independent per-band translation
+rather than a weak fade. 2 of 16 seeds failed with real (not aliased)
+brightness-trend projections of +59.6 and +83.2 luma. Fixed with a full
+opaque clear before anything else is drawn each frame, the same
+convention every other engine in this pool already follows.
+
+**A second, related issue found by working through the geometry, not just
+patched reactively**: the fix above stops accumulation, but the FIRST
+version had also scaled each band's bob amplitude to 16-26% of the whole
+band's height. Working through two adjacent bands bobbing in opposite
+directions: their facing edges can separate by up to the SUM of both
+amplitudes (roughly half a band's height in the worst case) -- large
+enough, once the clear-to-black fix was in place, to read as a
+distracting black bar sweeping between bands rather than a subtle nod.
+Fixed by rescaling bob amplitude to a fraction of a single grid CELL
+instead (18-28%, the exact magnitude `herringbone.html`'s own proven-safe
+band bob already uses) -- re-rendered the two previously-failing seeds
+and confirmed by looking at the PNGs that the seam is now a thin,
+intentional-looking divider between bands, not a visible gap.
+
+**Unit-level dynamics came essentially for free from the composition
+itself**: independent per-band horizontal scroll (rate/phase reset per
+`cycleSec`, coverage-neutral since every band's motif repeats seamlessly
+along its own width) plus independent per-band vertical bob together gave
+`unitMotionNonRigidFrac` of exactly **1.0 on every single tested seed**
+from the first working draft -- no further choreography needed, unlike
+several prior textile engines (`herringbone.html`/`ikatweave.html`) that
+needed dedicated iteration rounds to clear the mandatory 0.40 floor.
+Several independently-moving bands, each already a full-width opaque
+strip, is apparently a strong unit-motion composition by construction.
+
+**Verified**: `validateEngine()` **16/16** across seeds 1-15 plus the
+CLI's actual default seed 12345 (see `geodome.html`'s write-up for why
+that seed matters). Margins comfortable throughout: `avgSat` 76.2-92.4
+(vs the 22 minimum), zero near-white pixels on every seed, `projectedRise`
+-21.2 to +21 (vs the 50 threshold), `compositionDrift` 0.029-0.074 (vs
+the 0.015 minimum), `unitMotionNonRigidFrac` 1.0 on every seed (vs the
+0.40 minimum), `projectedHourRenderMin` 6.7-18min (well inside the CI
+budget). Visual spot-checks across 2/25/50/75/95/105% of a 35s cycle at 3
+seeds, actually rendering PNGs and looking at them: vivid, bold,
+immediately-legible border bands with clean triangle/diamond/staircase
+motifs, no two adjacent bands sharing a motif, distinct two-colour
+schemes per band, and no jarring cycle-boundary reset.
+
+**Novelty gate**: measured against all 38 existing engines (the committed
+fingerprint cache was several commits stale, so the whole pool was
+fingerprinted fresh alongside the candidate, per this pool's established
+practice; the refreshed cache was not committed, per this routine's
+"touch only the new engine + log + CLAUDE.md" constraint). Nearest
+neighbour is `herringbone` at distance **0.974** -- comfortably clear of
+the 0.60 threshold and close to this pool's own median pair distance, a
+clean first-attempt pass, not a borderline case, despite sharing a
+textile/grid archetype with the pool's other three weave engines.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
