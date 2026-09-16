@@ -4365,6 +4365,101 @@ the 0.60 threshold and close to this pool's own median pair distance, a
 clean first-attempt pass, not a borderline case, despite sharing a
 textile/grid archetype with the pool's other three weave engines.
 
+## Truchet-tile flow engine (`truchet.html`) — 2026-09-16
+
+Daily creative-research routine. Category was "random Wikipedia article" by
+the firing-minute-mod-category-count method. Since Wikipedia is blocked in
+this sandbox, used the established fallback for this category: an open
+WebSearch for an unusual/lesser-known geometric tiling construction, which
+surfaced **Truchet tiles** -- Father Sebastien Truchet's 1704 investigation
+into the tilings producible from a single asymmetric square tile placed in
+random orientations. Built here via Cyril Stanley Smith's 1987 variant: each
+tile carries two mirrored quarter-circle arcs, each connecting two adjacent
+edge midpoints through a corner; every tile independently picks one of the
+two possible orientations at random, with no relation to its neighbours at
+all. Sources:
+[Wikipedia: Truchet tile](https://en.wikipedia.org/wiki/Truchet_tile)
+(search snippets only -- Wikipedia is blocked in this sandbox),
+[Questions in Dataviz](https://questionsindataviz.com/2021/03/03/what-are-truchet-tiles/),
+[Dr. Math Art](http://drmathart.com/Resources/Truchet/).
+
+**What it is**: a genuinely different construction principle from every
+other engine in the pool: not a substitution/subdivision system
+(`quasicrystal.html`/`voderberg.html`), not several overlaid band families
+(`widmanstatten.html`), not a proximity partition (`voronoimosaic.html`),
+not a single recursively-defined path (`hilbertweave.html`/
+`dragonfold.html`), not a modular binary-state grid (`herringbone.html`) --
+an EMERGENT connectivity structure that falls purely out of independent,
+LOCAL per-cell random choices with no global rule at all. This works
+because both possible tile orientations use all 4 edge midpoints as arc
+endpoints exactly once -- **verified OFFLINE before writing any rendering
+code**, the same discipline this pool's `quasicrystal.html`/`geodome.html`/
+`hilbertweave.html` already established for a construction that could still
+"look plausible" even if subtly wrong -- so every tile connects seamlessly
+to any neighbour regardless of that neighbour's own independent choice, and
+the field reads as one continuous flowing maze rather than a grid of
+disconnected fragments.
+
+**Per-tile motion via a "bulge" mechanism**: each tile's quadratic-Bezier
+control point is its own corner scaled by a `bulge` factor about the tile's
+centre. Verified offline that for ANY bulge value the curve's two endpoints
+(fixed at the edge midpoints) never move -- so oscillating bulge
+continuously and independently per tile can only reshape the arc, never
+break connectivity or open a gap, making it safe as the engine's primary
+per-frame motion source.
+
+**A real, clean unit-motion-gate failure, found only by running
+`validateEngine()` across the full seed battery, not by reasoning about the
+code.** The first design paired the per-tile bulge morph with a continuous
+whole-field rigid rotation (the field sized to the canvas half-diagonal,
+the `widmanstatten.html`/`phasespikes.html` technique, so a full rotation
+never reveals an empty corner) as a second, seemingly-free motion source --
+following the pattern several prior engines established of adding a whole-
+field rotation as a second lever. This failed the mandatory unit-motion
+gate (`unitMotionNonRigidFrac >= 0.40`) on **all 16 tested seeds**, every
+single one with the identical failure shape: 78-85% of the frame-to-frame
+change over 0.25s was explained by ONE rigid rotation of the whole frame.
+Critically, `fastMotion` was NEVER the failing gate on any seed -- meaning
+the rotation wasn't actually needed for raw motion at all, it was added
+reflexively rather than because the engine needed it. Root-caused and fixed
+by removing the whole-field rotation's continuous animation entirely (a
+single fixed `viewAngle` set once at init instead of a per-cycle-reassigned
+or continuously-rotating angle), and compensating by raising the bulge
+oscillation's rate and amplitude so the per-tile morph alone carries all of
+the engine's per-frame motion. This fully resolved the failure: re-validated
+16/16, `unitMotionNonRigidFrac` exactly **1.0 on every single seed**.
+**Lesson, worth generalising to future engines**: don't add a whole-field
+rotation reflexively as a second motion source just because several prior
+engines did it -- check whether it's actually needed for `fastMotion`
+first. If it isn't, a rigid rotation can only HURT `unitMotion`, since it
+dominates the rigid-fit and starves the local per-unit signal the gate is
+built to require.
+
+**Verified**: `validateEngine()` **16/16** across seeds 1-15 plus the CLI's
+actual default seed 12345 (see `geodome.html`'s write-up for why that seed
+matters). Margins comfortable throughout: `avgSat` 68.9-79.6 (vs the 22
+minimum), zero near-white pixels on every seed, `projectedRise` -11.2 to
++10.7 (vs the 50 threshold), `compositionDrift` 0.0183-0.0413 (vs the
+0.015 minimum), `unitMotionNonRigidFrac` 1.0 on every seed (vs the 0.40
+minimum), `fastMotion` always 3-4x its per-frame floor,
+`projectedHourRenderMin` 29.3-35.1min (well inside the CI budget). Visual
+spot-checks across 2/25/50/75/95/105% of a 37s cycle at 3 seeds, actually
+rendering PNGs and looking at them, not just reading validator output: a
+vivid, bold, immediately-legible connected flowing maze pattern with
+visible independent per-tile morphing, no gaps or clipping at any rotation
+angle or cycle-boundary reset, and distinct vivid palettes per seed.
+
+**Novelty gate**: measured against all 41 existing engines (the committed
+fingerprint cache was several commits stale, so the whole pool was
+fingerprinted fresh alongside the candidate, per this pool's established
+practice; the refreshed cache was not committed, per this routine's "touch
+only the new engine + log + CLAUDE.md" constraint). Nearest neighbour is
+`phyllotaxis` at distance **0.820** -- comfortably clear of the 0.60
+threshold, a clean pass, not a borderline case. `truchet` also forms its
+own singleton archetype group at the pool's perceptual-grouping threshold
+(0.55), confirming this is a genuinely distinct composition rather than a
+near-clone of an existing engine.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
