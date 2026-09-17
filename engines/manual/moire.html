@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Moire Grating Bloom — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "obscure mathematical object / crystal
+// system / physical phenomenon" -- deliberately picked as the pool's most
+// under-used category alongside quasicrystal.html, per the herringbone.html
+// precedent of varying categories rather than defaulting to a heavily-used
+// one): an open WebSearch surfaced MOIRE INTERFERENCE -- the large-scale
+// beat pattern that emerges when two identical periodic gratings overlap at
+// a small relative angle theta. The real physical relationship (fringe
+// spacing = d / (2*sin(theta/2)) for two gratings of spacing d) means the
+// SAME two static gratings look completely different from moment to moment
+// -- widely-spaced fringes near theta=0, tightly-packed fringes as theta
+// grows -- purely as a function of their relative rotation, with no change
+// to either grating's own geometry. Sources:
+// https://www.nature.com/articles/s41598-020-70427-x (Scientific Reports,
+// "Static moire patterns in moving grids"),
+// https://lumitree.art/blog/moire-pattern,
+// https://www.quantamagazine.org/when-magic-is-seen-in-twisted-graphene-thats-a-moire-20190620/
+// (twisted-graphene "magic angle" moire -- background confirming the
+// phenomenon is real, still actively studied physics, not folklore).
+//
+// A genuinely different construction PRINCIPLE from every other interference
+// or lattice engine in the pool: chladni.html traces the ZERO-CROSSING of
+// one COMPUTED wave-superposition field as a continuous nodal curve;
+// phasespikes.html rank-selects the local MAXIMA of one COMPUTED three-wave
+// field as discrete lattice spikes; quasicrystal.html is a recursive
+// substitution/subdivision system repartitioning a fixed area. This engine
+// computes no field at all -- it directly RASTERIZES two literal,
+// independently-rotating opaque dot lattices of the SAME spacing, one drawn
+// over the other, and lets the large-scale beat pattern emerge purely from
+// which dots visually occlude which as their relative angle sweeps -- the
+// actual physical overlay mechanism, not a sampled interference formula.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. Both lattices are fully opaque and the
+// canvas is cleared to solid black every frame -- structurally whiteout-proof
+// by construction, no accumulation possible. Rendering is clipped to a
+// centred disk sized so a full square-lattice field (reach >= disk radius,
+// the same "size the field so a rotation never reveals an empty patch"
+// technique widmanstatten.html/phasespikes.html/truchet.html established,
+// specialised here to a disk instead of the whole rectangular frame) keeps
+// total VISIBLE area exactly constant at every rotation angle by
+// construction -- only the overlap PATTERN between the two lattices changes,
+// never the clipped viewport's own area.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 34);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  // hsl2rgb + Rec.709 luma, used only to guarantee the two lattice colours
+  // never land at near-identical luma -- validate.js's spatial-structure
+  // check reads luma, and two hue-distinct colours can still read as
+  // near-flat to it (a real bug herringbone.html's write-up documents: a
+  // 190-degree cyan and a 330-degree magenta landing at very similar
+  // Rec.709 luma despite being visually vivid and clearly distinct in
+  // hue/saturation to a person).
+  function hsl2rgb(h, s, l) {
+    h = ((h % 360) + 360) % 360; s /= 100; l /= 100;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = l - c / 2;
+    let r, g, b;
+    if (h < 60) { r = c; g = x; b = 0; }
+    else if (h < 120) { r = x; g = c; b = 0; }
+    else if (h < 180) { r = 0; g = c; b = x; }
+    else if (h < 240) { r = 0; g = x; b = c; }
+    else if (h < 300) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+    return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+  }
+  function luma(h, s, l) {
+    const [r, g, b] = hsl2rgb(h, s, l);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+
+  const dt = 1 / FPS;
+  const cx = W / 2, cy = H / 2;
+
+  // Disk radius, lattice spacing/radius/colours, the fixed random starting
+  // phases, and the field's own half-width are all computed ONCE per video
+  // (never re-randomised per cycle) -- the "any coverage-affecting
+  // parameter re-randomised per cycle creates a real brightness swing"
+  // lesson this pool has established across well over a dozen engines.
+  // Only each lattice's own rotation RATE resets per cycleSec, below --
+  // coverage-neutral by construction, since a rotation transform never
+  // changes how much ink either lattice lays down; only the CONTINUOUS
+  // relative-angle sweep (which never stops, cycle boundary or not) changes
+  // how much of lattice A peeks out from under lattice B at any instant.
+  // That overlap swing repeats every quarter-turn of relative angle (the
+  // square lattice's own symmetry period) -- at the guaranteed relative
+  // rate below (0.8-1.4 rad/s combined), that is roughly 1.1-2.0s per
+  // repeat, giving on the order of 150-270 repeats inside validate.js's
+  // 300s test window, comfortably enough for a linear-regression whiteout
+  // fit to average the swing to near-zero slope, the same "many periods
+  // inside the window" reasoning already verified for automaton.html/
+  // chladni.html/quasicrystal.html's own legitimate per-cycle coverage
+  // variance.
+  let R, spacing, radiusA, radiusB, colorA, colorB, cols, rows, fieldHalf, phaseA0, phaseB0, rateA, rateB;
+  function initLattices() {
+    R = (Math.min(W, H) / 2) * 0.96;
+    const n = Math.round(36 * Math.max(0.7, Math.min(1.5, DENSITY)));
+    spacing = (2 * R) / n;
+    radiusA = spacing * 0.38;
+    radiusB = spacing * 0.38;
+
+    cols = Math.ceil((2 * R) / spacing) + 4;
+    rows = cols;
+    fieldHalf = (cols * spacing) / 2;
+
+    const baseA = PAL[0];
+    const baseB = PAL[Math.floor(PAL.length / 2)];
+    let lA = baseA[2], lB = baseB[2];
+    for (let i = 0; i < 20 && Math.abs(luma(baseA[0], baseA[1], lA) - luma(baseB[0], baseB[1], lB)) < 55; i++) {
+      if (luma(baseA[0], baseA[1], lA) <= luma(baseB[0], baseB[1], lB)) {
+        lA = Math.max(30, lA - 4); lB = Math.min(80, lB + 4);
+      } else {
+        lA = Math.min(80, lA + 4); lB = Math.max(30, lB - 4);
+      }
+    }
+    colorA = `hsl(${baseA[0]}, ${baseA[1]}%, ${lA}%)`;
+    colorB = `hsl(${baseB[0]}, ${baseB[1]}%, ${lB}%)`;
+
+    phaseA0 = rand(0, Math.PI * 2);
+    phaseB0 = rand(0, Math.PI * 2);
+  }
+
+  // Guaranteed-minimum-magnitude, opposite-sign rates: never both a plain
+  // symmetric rand(-x,x) (CLAUDE.md's "near-zero motion is the classic root
+  // cause" rule), and forcing opposite signs guarantees BOTH |rateA| and
+  // |rateB| individually clear the floor AND their difference (the relative
+  // sweep speed the whole moire effect depends on) is always substantial --
+  // deriving rateB as rateA plus a signed delta was tried first and rejected
+  // once it was clear the two terms could partially cancel toward a
+  // near-stalled rateB, exactly the bug this guarantee exists to prevent.
+  function reconfigureRates() {
+    rateA = sgn() * rand(0.4, 0.7) * SPEED;
+    rateB = -Math.sign(rateA || 1) * rand(0.4, 0.7) * SPEED;
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  initLattices();
+  reconfigureRates();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function drawLattice(angle, radius, color) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    ctx.fillStyle = color;
+    for (let r = 0; r < rows; r++) {
+      const y = r * spacing - fieldHalf;
+      for (let c = 0; c < cols; c++) {
+        const x = c * spacing - fieldHalf;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.clip();
+
+    const angleA = phaseA0 + clk * rateA;
+    const angleB = phaseB0 + clk * rateB;
+    drawLattice(angleA, radiusA, colorA);
+    drawLattice(angleB, radiusB, colorB);
+
+    ctx.restore();
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureRates(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

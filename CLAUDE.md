@@ -4460,6 +4460,114 @@ own singleton archetype group at the pool's perceptual-grouping threshold
 (0.55), confirming this is a genuinely distinct composition rather than a
 near-clone of an existing engine.
 
+## Moire interference engine (`moire.html`) — 2026-09-17
+
+Daily creative-research routine. Category was deliberately picked rather
+than following the minute-mod-category-count default: that method landed on
+"random natural structure," already used four times (`chladni.html` via
+fallback, `dendrite.html`, `widmanstatten.html`, `hoppercrystal.html`, plus
+a skipped `phantomcrystal.html`), so per the `herringbone.html` precedent of
+varying categories rather than defaulting to a heavily-used one, picked the
+pool's most under-used category instead: "obscure mathematical object /
+crystal system / physical phenomenon" (only `quasicrystal.html` shipped,
+`apollonian.html` skipped). An open WebSearch within it surfaced **moire
+interference** -- the large-scale beat pattern that emerges when two
+identical periodic gratings overlap at a small relative angle theta, with
+fringe spacing = d / (2*sin(theta/2)) for two gratings of spacing d. The
+same two static gratings look completely different from moment to moment
+-- widely-spaced fringes near theta=0, tightly-packed fringes as theta
+grows -- purely as a function of their relative rotation, not any change to
+either grating's own geometry. Sources:
+[Scientific Reports: Static moire patterns in moving grids](https://www.nature.com/articles/s41598-020-70427-x),
+[Lumitree: Moire Patterns](https://lumitree.art/blog/moire-pattern),
+[Quanta Magazine: twisted-graphene "magic angle" moire](https://www.quantamagazine.org/when-magic-is-seen-in-twisted-graphene-thats-a-moire-20190620/)
+(background confirming the phenomenon is real, still actively studied
+physics, not folklore).
+
+**What it is**: a genuinely different construction PRINCIPLE from every
+other interference/lattice engine in the pool: `chladni.html` traces the
+ZERO-CROSSING of one COMPUTED wave-superposition field as a continuous
+nodal curve; `phasespikes.html` rank-selects the local MAXIMA of one
+COMPUTED three-wave field as discrete lattice spikes; `quasicrystal.html`
+is a recursive substitution/subdivision system repartitioning a fixed
+area. This engine computes no field at all -- it directly RASTERIZES two
+literal, independently-rotating opaque dot lattices of the SAME spacing,
+one drawn over the other, and lets the large-scale beat pattern emerge
+purely from which dots visually occlude which as their relative angle
+sweeps -- the actual physical overlay mechanism, not a sampled formula.
+Rendering is clipped to a centred disk (radius 0.96 * min(W,H)/2), with
+the underlying square-lattice field sized so its own inscribed circle
+(half the field's side length) always fully covers that disk regardless
+of rotation angle -- the same "size the field so a rotation never reveals
+an empty patch" technique `widmanstatten.html`/`phasespikes.html`/
+`truchet.html` established, specialised here to a disk instead of the
+whole rectangular frame so total VISIBLE area is exactly constant at
+every instant by construction, isolating the remaining (real, expected)
+brightness variation to the overlap PATTERN between the two lattices
+rather than the viewport itself.
+
+**Applied two hard-won lessons from the first draft, instead of
+rediscovering them the slow way**:
+1. **Guaranteed-minimum-magnitude, opposite-sign rotation rates.** The
+   two lattices' rates were first considered as `rateB = rateA + signed
+   delta` -- rejected before writing any code once it was clear the two
+   terms could partially cancel toward a near-stalled `rateB`, exactly
+   the near-zero-motion bug class this file documents at length. Fixed
+   by forcing opposite signs instead (`rateA = sgn()*rand(0.4,0.7)*SPEED`,
+   `rateB = -sign(rateA)*rand(0.4,0.7)*SPEED`), which guarantees both
+   individual rates AND their difference (the relative sweep speed the
+   whole moire effect depends on) are always substantial.
+2. **`herringbone.html`'s guaranteed-minimum-luma-gap fix**, applied from
+   the first draft: the two lattice colours' lightness is iteratively
+   nudged apart until their Rec.709 luma differs by at least 55, avoiding
+   `validate.js`'s luma-based spatial-structure check reading two
+   hue-distinct but similar-luma colours as near-flat (the real bug
+   `herringbone.html`'s own write-up documents hitting on a real seed).
+
+**No bugs found -- `validateEngine()` passed 16/16 on the FIRST attempt**
+across seeds 1-15 plus the CLI's actual default seed 12345 (see
+`geodome.html`'s write-up for why that seed matters), joining
+`primespiral.html`/`stripweave.html`/`widmanstatten.html`/
+`hoppercrystal.html`/`moire.html` as engines that passed cleanly on the
+first attempt by applying this pool's established coverage-stability,
+symmetry-breaking, and motion-rate lessons from the start rather than
+discovering them empirically per engine. Notably, `unitMotionNonRigidFrac`
+landed at 0.71-0.88 on every single seed -- far above the 0.40 minimum,
+with no thin-margin seeds at all -- because counter-rotating the two
+lattices at guaranteed-different rates gives a single global rigid-fit
+nothing consistent to explain across both layers simultaneously, by
+construction, without needing any additional per-element choreography
+lever the way several prior engines required.
+
+**Verified**: `validateEngine()` **16/16** across seeds 1-15 plus 12345.
+Margins comfortable throughout: `avgSat` 60.8-73.8 (vs the 22 minimum),
+zero near-white pixels on every seed, `projectedRise` -38.6 to +19.9 (vs
+the 50 threshold), `compositionDrift` 0.034-0.085 (vs the 0.015 minimum),
+`unitMotionNonRigidFrac` 0.71-0.88 on every seed (vs the 0.40 minimum),
+`fastMotion` always comfortably above its per-frame floor,
+`projectedHourRenderMin` 56.1-60.0min (well inside the CI budget). Visual
+spot-checks across 2/25/50/75/95/105% of a 34s cycle at 3 seeds, actually
+rendering PNGs and looking at them, not just reading validator output: a
+vivid, bold, immediately-recognisable moire interference pattern --
+swirling beat rosettes, wavy interference bands, or a fine interlocking
+weave depending on the sampled relative angle -- full disk coverage with
+no gaps at the boundary at any tested fraction including past the
+cycle-boundary reset, and three visually distinct palette/pattern
+combinations across the three spot-checked seeds.
+
+**Novelty gate**: measured against all 42 existing engines (the committed
+fingerprint cache was several commits stale, so the whole pool was
+fingerprinted fresh alongside the candidate, per this pool's established
+practice; the refreshed cache was not committed, per this routine's
+"touch only the new engine + log + CLAUDE.md" constraint). Nearest
+neighbour is `auto-2026-08-29-eclipse-pair` at distance **0.692** --
+comfortably clear of the 0.60 threshold and in line with several other
+already-shipped pairs at similar distances (`herringbone`/`ikatweave`
+0.663, `voronoimosaic`/`widmanstatten` 0.687), not the kind of thin-margin
+case (0.61-0.63) that warranted extra iteration for `voderberg.html`/
+`hilbertweave.html`'s first drafts. `moire` also forms its own singleton
+archetype group at the pool's perceptual-grouping threshold (0.55).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
