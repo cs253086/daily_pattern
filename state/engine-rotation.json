@@ -1,7 +1,7 @@
 {
-  "last3D": "auto-2026-09-13-llanberis-lake-north-wales",
+  "last3D": "geodome",
   "last2D": "auto-2026-08-29-eclipse-pair",
-  "last3DArchetype": "auto-2026-09-13-llanberis-lake-north-wales",
+  "last3DArchetype": "geodome",
   "last2DArchetype": "auto-2026-08-29-eclipse-pair",
   "last3DByArchetype": {
     "geodome": "geodome",
@@ -16,5 +16,5 @@
     "auto-2026-08-15-spirograph-hypotrocloid-line-art-in-clea": "auto-2026-08-15-spirograph-hypotrocloid-line-art-in-clea",
     "auto-2026-08-29-eclipse-pair": "auto-2026-08-29-eclipse-pair"
   },
-  "updatedAt": "2026-09-17T14:14:34.541Z"
+  "updatedAt": "2026-09-18T13:32:25.306Z"
 }
