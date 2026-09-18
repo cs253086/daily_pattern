@@ -4568,6 +4568,107 @@ case (0.61-0.63) that warranted extra iteration for `voderberg.html`/
 `hilbertweave.html`'s first drafts. `moire` also forms its own singleton
 archetype group at the pool's perceptual-grouping threshold (0.55).
 
+## Orb-weaver web engine (`orbweb.html`) — 2026-09-18
+
+Daily creative-research routine. Category was deliberately picked rather
+than following the minute-mod-category-count default: that method landed on
+"traditional textile/tiling/ornament tradition," already used four times
+(Kente cloth, twill/herringbone, ikat, taniko), so per the `herringbone.html`
+precedent of varying categories rather than defaulting to a heavily-used
+one, picked the pool's most under-used category instead: "a random featured
+image" (only `phasespikes.html` shipped successfully from it once before).
+An open WebSearch for striking macro/scientific-photography subjects
+surfaced **orb-weaver spider web geometry**: 15-35 non-sticky radial
+"spoke" threads at roughly uniform angular intervals (rigid, held under
+tension so they stay straight), plus ONE continuous sticky capture spiral
+that is a genuine ARCHIMEDEAN spiral (r = a + b*theta, constant radial
+pitch per turn -- unlike a logarithmic spiral) crossing every spoke, with
+glue droplets forming at fairly regular intervals along it (a real
+Plateau-Rayleigh instability effect). Sources:
+[Aptive Pest Control: The Engineering Logic Behind Spider Web Geometry](https://aptivepestcontrol.com/pests/spiders/the-engineering-logic-behind-spider-web-geometry/),
+[Scientific Reports: The secondary frame in spider orb webs](https://www.nature.com/articles/srep31265),
+[Wikipedia: Orb-weaver spider](https://en.wikipedia.org/wiki/Orb-weaver_spider)
+(search snippets only -- Wikipedia is blocked in this sandbox).
+
+**What it is**: a genuinely different construction PRINCIPLE from every
+other radial/spiral engine in the pool: not mirrored-wedge stamps
+(`kaleidoscope.html`), not nested star outlines (`starburst.html`), not
+segmented rotating rings (`arcrings.html`), not a LOGARITHMIC spiral tile
+march (`voderberg.html`) or curve family (`spirograph.html`) -- straight
+rigid radial spokes crossed by exactly ONE continuous ARCHIMEDEAN spiral
+thread with regularly-spaced beads, a combination none of those share.
+Also not a proximity partition (`voronoimosaic.html`) or substitution
+tiling (`quasicrystal.html`/`voderberg.html`) -- there is no polygon fill
+at all here, only line/curve/point primitives on black. Spokes reach to
+the canvas's own half-diagonal so the web fills the full rectangular frame
+corner to corner without needing any rotation at all (and therefore
+without needing the "size the field for a rotating viewport" margin
+technique several prior engines relied on -- nothing here rotates as a
+whole).
+
+**A genuinely clean design win, not a lucky accident: spokes are kept
+perfectly static.** Real taut dragline silk stays straight under tension
+(unlike the more elastic capture spiral), so the engine draws every spoke
+pixel-for-pixel identical between frames -- meaning spokes contribute
+EXACTLY ZERO to frame-to-frame difference by construction, and the
+mandatory unit-motion gate ends up measuring purely the spiral wobble and
+bead pulse, whose independent, local, non-rigid signal is never diluted
+by anything rigidly co-rotating with it. This was predicted before ever
+running `validateEngine()`, then confirmed: `unitMotionNonRigidFrac`
+landed at exactly **1.0 on every single tested seed**, no iteration or
+choreography lever needed at all.
+
+**The spiral's traveling wobble is coverage-neutral by an exact
+mathematical argument, not just empirical luck.** It uses an integer
+number of full sine cycles PER TURN (3) across the exact rendered range
+(itself an exact integer number of turns, by construction), so the
+wobble completes an exact integer total cycle count at every single
+instant regardless of its time-varying phase offset -- a sine's integral
+over any whole number of full periods is exactly zero no matter the
+phase, so this can never add or remove net radial coverage, only reshape
+the curve. Bead brightness/size pulse reuses the established "fixed-size
+window, position varies" mechanic (`chladni.html`/`hilbertweave.html`/
+`dragonfold.html`): a fixed-length rank-selected window slides along the
+arc-ordered bead sequence, coverage-neutral since the window's SIZE never
+changes, only its position.
+
+**No bugs found -- `validateEngine()` passed 16/16 on the FIRST attempt**
+across seeds 1-15 plus the CLI's actual default seed 12345 (see
+`geodome.html`'s write-up for why that seed matters), joining
+`primespiral.html`/`stripweave.html`/`widmanstatten.html`/
+`hoppercrystal.html`/`moire.html`/`orbweb.html` as engines that passed
+cleanly on the first attempt by applying this pool's established
+coverage-stability and motion lessons from the start.
+
+**Verified**: `validateEngine()` **16/16** across seeds 1-15 plus 12345.
+Margins comfortable throughout: `avgSat` 56.9-64.1 (vs the 22 minimum),
+zero near-white pixels on every seed, `projectedRise` -26.3 to +17.9 (vs
+the 50 threshold), `compositionDrift` 0.019-0.037 (vs the 0.015 minimum),
+`unitMotionNonRigidFrac` exactly 1.0 on every seed (vs the 0.40 minimum),
+`fastMotion` always comfortably above its per-frame floor, `avgMsPerFrame`
+only 11.8-13.7ms giving `projectedHourRenderMin` 17.0-19.7min -- among the
+cheapest engines in the whole pool to render, well inside the CI budget,
+since the whole composition is lines/curves/dots with no polygon fills or
+WebGL. Visual spot-checks across 2/25/50/75/95/105% of a 32s cycle at 3
+seeds, actually rendering PNGs and looking at them, not just reading
+validator output: a vivid, bold, immediately-recognisable spider web
+filling the full rectangular frame corner to corner, with clearly legible
+individually-pulsing beads along a smooth Archimedean spiral crossing
+rigid radial spokes, no artifacts at the cycle boundary, and three
+visually distinct palette combinations across the three spot-checked
+seeds.
+
+**Novelty gate**: measured against all 43 existing engines (the committed
+fingerprint cache was several commits stale, so the whole pool was
+fingerprinted fresh alongside the candidate, per this pool's established
+practice; the refreshed cache was not committed, per this routine's
+"touch only the new engine + log + CLAUDE.md" constraint). Nearest
+neighbour is `starburst` at distance **0.764** -- comfortably clear of
+the 0.60 threshold, well above the thin-margin territory (0.61-0.63) that
+warranted extra iteration for other engines' first drafts. `orbweb` also
+forms its own singleton archetype group at the pool's perceptual-grouping
+threshold (0.55).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
