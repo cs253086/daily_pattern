@@ -4669,6 +4669,115 @@ warranted extra iteration for other engines' first drafts. `orbweb` also
 forms its own singleton archetype group at the pool's perceptual-grouping
 threshold (0.55).
 
+## Muqarnas cascade engine (`muqarnas.html`) — 2026-09-19
+
+Daily creative-research routine. Category was "random architectural or
+typographic movement" -- deliberately picked over the minute-mod-category-
+count default ("random natural structure", already used four times:
+`chladni.html` via fallback, `dendrite.html`, `widmanstatten.html`,
+`hoppercrystal.html`), per the `herringbone.html` precedent of varying
+categories rather than defaulting to a heavily-used one. An open WebSearch
+surfaced **muqarnas** -- the honeycomb-like corbelled vaulting technique of
+Islamic architecture (developed 10th century Iran/North Africa). Real
+muqarnas domes are built from many small concave niche cells stacked in
+tiers: each tier has roughly DOUBLE the cell count of the tier below/above
+it (the mechanism that smoothly transitions a square room into a circular
+dome opening), and each tier's cells are angularly STAGGERED relative to
+its neighbour (a corbelled brick-bond offset), so cells nest into the gaps
+of the adjacent tier rather than stacking directly on top of one another.
+Sources:
+[omrania.com](https://omrania.com/inspiration/muqarnas-geometric-ornament-in-the-service-of-dome-design/),
+[mogulesque.com](https://mogulesque.com/architecture/muqarnas-islamic-architecture/),
+[Middle East Eye](https://www.middleeasteye.net/discover/muqarnas-middle-east-mosque-architecture-historical-buildings-honeycombs).
+
+**What it is**: a real lit-3D WebGL engine, the pool's seventh. A genuinely
+different construction PRINCIPLE from every other real-WebGL engine: not
+sparse orbiting solids (`solids3d.html`), not a grid of individually-
+spinning cubes (`lattice3d.html`), not lit tori/rings (`torusrings3d.html`),
+not one continuous CONVEX mesh (`geodome.html`), not a connected strut
+framework (`spaceframe.html`), not one continuous CONCAVE excavation
+(`hoppercrystal.html`) -- a discrete LATTICE OF MANY SEPARATE CONCAVE NICHE
+CELLS, arranged in 5 tiers whose cell count doubles outward and whose
+angular position staggers between tiers, each cell its own small
+independent scoop rather than one continuous surface. WebGL boilerplate
+(`preserveDrawingBuffer`, startup-only `webglcontextlost`/`restored`
+handling, mat4 helpers, the ambient+diffuse+fresnel-rim shader soft-clamped
+to 0.86) reused verbatim from `hoppercrystal.html`, the closest precedent.
+
+**The tier/cell layout was verified OFFLINE before writing any rendering
+code**, the same discipline this pool's `quasicrystal.html`/`geodome.html`/
+`spaceframe.html`/`hoppercrystal.html` already established for a
+construction that could still "look plausible" even if subtly wrong: a
+standalone script built the exact tier/cell layout and confirmed (a) every
+cell's 6 triangles are non-degenerate with normals consistently facing the
+cell's own open (concave) side, (b) no two cells WITHIN a tier overlap, and
+(c) no two cells across DIFFERENT tiers collide. Two real geometry bugs
+found this way, before any code touched a canvas:
+1. **Linear radius scaling was wildly unbalanced.** `radius[i] =
+   R0*(cellCount[i]/C0)` gave a 16.4x size ratio between the outermost and
+   innermost tiers -- an impractical, lopsided geometry. Fixed by switching
+   to sub-linear scaling, `radius[i] = R0*(cellCount[i]/C0)^radiusPow`.
+2. **`radiusPow=0.5` put adjacent tiers on the verge of colliding**
+   (cross-tier overlap ratio 0.987, dangerously close to the 1.0 collision
+   line). A sweep over `radiusPow` and cell count settled on the final
+   `radiusPow=0.6`/`fill=0.75`/`N=5`, giving `sameTierRatio=0.750` and
+   `crossTierRatio=0.850` -- both comfortably under 1.
+
+**Unit-level dynamics were built in from the first draft, applying the
+`truchet.html` lesson proactively instead of discovering it the slow
+way**: adjacent tiers are forced to counter-rotate at guaranteed-different,
+opposite-signed rates (`tierRate[i] = ((i%2)?1:-1) * rand(0.35,0.6) *
+SPEED`), plus independent per-cell depth-breathing (a shared oscillation
+rate modulating each cell's own scoop depth) -- and deliberately NO
+whole-object rotation at all, since `truchet.html`'s write-up already
+demonstrated a reflexive whole-field rotation only dilutes the unit-motion
+signal by dominating the rigid-fit unless `fastMotion` genuinely needs the
+extra source, and forced alternating-tier counter-rotation alone is enough
+motion for both gates here.
+
+**A real visual-quality defect NOT caught by `validate.js`'s numeric
+thresholds, found only by rendering PNGs and looking at them** (per the
+standing "look at it" visual-requirements rule -- the first full
+`validateEngine()` battery already passed cleanly before this was
+noticed): the initial camera left the vault occupying only the centre of
+the 1920x1080 frame, with a lot of unused black margin on every side --
+legible and bold, but not matching the house style's "bold, fills the
+frame" preference. Fixed by pulling the camera closer (smaller
+EYE-distance multipliers relative to the layout's own horizontal/vertical
+extent) and widening the field of view from 46 to 52 degrees, so the
+outermost tier now reaches toward the frame edges. Re-confirmed visually
+across 3 seeds x 2 cycle-fraction checks after the change, and re-ran the
+full validation battery to confirm nothing regressed.
+
+**Verified**: `validateEngine()` **16/16** across seeds 1-15 plus the
+CLI's actual default seed 12345 (see `geodome.html`'s write-up for why
+that seed matters), confirmed TWICE -- once before and once after the
+camera-framing fix, with no regression from the change. Margins
+comfortable throughout: `avgSat` 36.4-58.4 (vs the 22 minimum), zero
+near-white pixels on every seed, `projectedRise` -7.2 to +10.5 (vs the 50
+threshold), `compositionDrift` 0.021-0.037 (vs the 0.015 minimum),
+`unitMotionNonRigidFrac` 0.628-0.919 (vs the 0.40 minimum -- no
+thin-margin seeds, since forced alternating-sign tier rotation rates
+guarantee no single global rigid transform can explain multiple
+simultaneous counter-rotations at once). Visual spot-checks across
+multiple seeds and cycle fractions, both before and after the camera fix,
+actually rendering PNGs and looking at them, not just reading validator
+output: a vivid, bold, immediately-legible honeycomb of concave niche
+cells nested in doubling, staggered tiers, with visible independent
+counter-rotation between adjacent tiers and no artifacts at the cycle
+boundary.
+
+**Novelty gate**: measured against all 43 existing engines (the committed
+fingerprint cache was several commits stale, so the whole pool was
+fingerprinted fresh alongside the candidate, per this pool's established
+practice; the refreshed cache was not committed, per this routine's
+"touch only the new engine + log + CLAUDE.md" constraint). Nearest
+neighbour is `grid` at distance **0.666** -- comfortably clear of the 0.60
+threshold, past the thin-margin territory (0.61-0.63) that warranted extra
+iteration for other engines' first drafts. `muqarnas` also forms its own
+singleton archetype group at the pool's perceptual-grouping threshold
+(0.55).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

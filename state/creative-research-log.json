@@ -275,5 +275,33 @@
     "seedsVerified": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 12345],
     "nearestNeighbour": "starburst",
     "nearestDistance": 0.764
+  },
+  {
+    "date": "2026-09-19",
+    "inspirationSource": "Muqarnas -- the honeycomb-like corbelled vaulting technique of Islamic architecture (10th century Iran/North Africa), category \"random architectural or typographic movement\" -- deliberately picked over the minute-mod-category-count default (\"random natural structure\", already used four times) per the herringbone.html precedent of varying categories rather than defaulting to a heavily-used one. Real muqarnas domes are built from many small concave niche cells stacked in tiers: each tier has roughly DOUBLE the cell count of the tier below/above it (the mechanism that smoothly transitions a square room into a circular dome opening), and each tier's cells are angularly STAGGERED relative to its neighbour (a corbelled brick-bond offset), so cells nest into the gaps of the adjacent tier rather than stacking directly on top of one another. Sources: https://omrania.com/inspiration/muqarnas-geometric-ornament-in-the-service-of-dome-design/, https://mogulesque.com/architecture/muqarnas-islamic-architecture/, https://www.middleeasteye.net/discover/muqarnas-middle-east-mosque-architecture-historical-buildings-honeycombs.",
+    "idea": "A discrete lattice of many separate concave niche cells arranged in 5 tiers whose cell count doubles outward (sub-linear radius scaling, radiusPow=0.6, verified offline to keep same-tier and cross-tier collision ratios comfortably under 1 at 0.750/0.850) and whose angular position staggers between tiers. A genuinely different construction principle from every other real-WebGL engine in the pool: not sparse orbiting solids (solids3d.html), not a grid of individually-spinning cubes (lattice3d.html), not lit tori/rings (torusrings3d.html), not one continuous CONVEX mesh (geodome.html), not a connected strut framework (spaceframe.html), not one continuous CONCAVE excavation (hoppercrystal.html) -- each cell is its own small independent scoop rather than one continuous surface. Unit-level dynamics built in from the first draft: adjacent tiers forced to counter-rotate at guaranteed-different, opposite-signed rates, plus independent per-cell depth-breathing, deliberately with NO whole-object rotation at all (per the truchet.html lesson that a reflexive whole-field rotation only dilutes the unit-motion signal by dominating the rigid-fit unless fastMotion genuinely needs it).",
+    "engineName": "muqarnas",
+    "outcome": "shipped",
+    "reason": "Geometry (tier/cell layout: radius scaling, cell sizing, same-tier and cross-tier collision safety) was verified OFFLINE via a standalone script before writing any rendering code, the same discipline this pool's quasicrystal.html/geodome.html/spaceframe.html/hoppercrystal.html already established -- confirmed 0 degenerate triangles, 0 bad normals, sameTierRatio=0.750, crossTierRatio=0.850 (both comfortably under the 1.0 collision line) at the final radiusPow=0.6/fill=0.75/N=5 parameters (an earlier linear radius scaling gave an unbalanced 16x size ratio between outermost and innermost tiers; radiusPow=0.5 gave a dangerous crossTierRatio=0.987). WebGL boilerplate (preserveDrawingBuffer, context-loss handling, mat4 helpers, ambient+diffuse+fresnel-rim shader soft-clamped to 0.86) reused verbatim from hoppercrystal.html, the closest precedent. validateEngine() passed 16/16 across seeds 1-15 plus the CLI's actual default seed 12345, confirmed TWICE (once before and once after a camera-framing fix): avgSat 36.4-58.4 (vs the 22 minimum), zero near-white pixels, projectedRise -7.2 to +10.5 (vs the 50 threshold), compositionDrift 0.021-0.037 (vs the 0.015 minimum), unitMotionNonRigidFrac 0.628-0.919 (vs the 0.40 minimum, no thin-margin seeds -- forced alternating-sign tier rotation rates guarantee no single global rigid transform can explain multiple simultaneous counter-rotations). A real visual-quality defect NOT caught by validate.js's numeric thresholds was found only by rendering PNGs and looking at them (per the standing 'look at it' rule): the first camera left the vault occupying only the centre of the 1920x1080 frame with a lot of unused black margin, against the house style's 'bold, fills the frame' preference. Fixed by pulling the camera closer (smaller EYE-distance multipliers) and widening the FOV from 46 to 52 degrees so the outermost tier reaches toward the frame edges -- re-verified visually across 3 seeds x 2 fraction checks, and re-ran the full 16-seed validateEngine() battery after the camera change to confirm nothing regressed.",
+    "seedsVerified": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      12345
+    ],
+    "nearestNeighbour": "grid",
+    "nearestDistance": 0.666
   }
 ]

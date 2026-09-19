@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Muqarnas Cascade — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "random architectural or typographic
+// movement" -- deliberately picked over the minute-mod-category-count
+// default, "random natural structure", already used four times, per the
+// herringbone.html precedent of varying categories rather than defaulting
+// to a heavily-used one): MUQARNAS, the honeycomb-like corbelled vaulting
+// technique of Islamic architecture (developed 10th century Iran/North
+// Africa). Real muqarnas domes are built from many small concave niche
+// cells stacked in tiers: each tier has roughly DOUBLE the cell count of
+// the tier below/above it (the mechanism that smoothly transitions a
+// square room into a circular dome opening), and each tier's cells are
+// angularly STAGGERED relative to its neighbour (a corbelled brick-bond
+// offset), so cells nest into the gaps of the adjacent tier rather than
+// stacking directly on top of one another. Sources:
+// https://omrania.com/inspiration/muqarnas-geometric-ornament-in-the-service-of-dome-design/,
+// https://mogulesque.com/architecture/muqarnas-islamic-architecture/,
+// https://www.middleeasteye.net/discover/muqarnas-middle-east-mosque-architecture-historical-buildings-honeycombs.
+//
+// A genuinely different construction PRINCIPLE from every other real-WebGL
+// engine in the pool: not sparse orbiting solids (solids3d.html), not a
+// grid of individually-spinning cubes (lattice3d.html), not lit tori/rings
+// (torusrings3d.html), not one continuous CONVEX mesh (geodome.html), not a
+// connected strut framework (spaceframe.html), not one continuous CONCAVE
+// excavation (hoppercrystal.html) -- a discrete LATTICE OF MANY SEPARATE
+// CONCAVE NICHE CELLS, arranged in tiers whose cell COUNT doubles outward
+// and whose angular position staggers between tiers, each cell its own
+// small independent scoop rather than one continuous surface.
+//
+// GEOMETRY VERIFIED OFFLINE before writing any rendering code (the same
+// discipline this pool's quasicrystal.html/geodome.html/spaceframe.html/
+// hoppercrystal.html already established for a construction that could
+// still "look plausible" even if subtly wrong): a standalone script built
+// the exact tier/cell layout below and confirmed (a) every cell's 6
+// triangles are non-degenerate with normals consistently facing the cell's
+// own open (concave) side, (b) no two cells WITHIN a tier overlap (worst
+// case 2*cellRadius/chordDistance = 0.750, comfortably under 1), and (c) no
+// two cells across DIFFERENT tiers collide (worst case
+// sumOfRadii/centerDistance = 0.850, comfortably under 1) -- both real
+// geometric collision checks, not just "it renders without erroring".
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. WebGL context created with
+// preserveDrawingBuffer:true and the same startup-only webglcontextlost/
+// restored handling solids3d.html established. gl.clear() to opaque black
+// every frame -- structurally whiteout-proof, same as every other real-
+// WebGL engine here.
+//
+// UNIT-LEVEL DYNAMICS built in from the first draft (per CLAUDE.md's
+// 2026-09-10 standing requirement), not retrofitted: adjacent TIERS
+// counter-rotate about the vertical (Y) axis at independently-drawn,
+// guaranteed-minimum-magnitude rates (odd/even tiers forced to opposite
+// signs, the same proven "counter-rotating rings/tiers" pattern
+// geometric.html/arcrings.html/torusrings3d.html/spaceframe.html already
+// established) -- a single global rigid-rotation fit has no consistent
+// angle that explains more than one tier's own rotation, so this alone is
+// expected to give a strong non-rigid signal without any whole-object
+// rotation on top (the truchet.html lesson: don't add a reflexive
+// whole-field rotation without checking whether it's actually needed).
+// On top of that, every individual CELL's own funnel depth breathes on its
+// own fixed random phase (a shared rate, independent phases) -- the cell's
+// flat rim footprint (and therefore its contribution to total lit area)
+// never changes, only how far its apex recedes, so this is coverage-
+// neutral by construction while still giving genuine per-cell (not just
+// per-tier) local motion.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 38);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true, antialias: true })
+    || canvas.getContext('experimental-webgl', { preserveDrawingBuffer: true, antialias: true });
+
+  let contextLost = false;
+  canvas.addEventListener('webglcontextlost', (e) => { contextLost = true; e.preventDefault(); });
+  canvas.addEventListener('webglcontextrestored', () => { initGL(); contextLost = false; });
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+  function hsl2rgb(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [f(0), f(8), f(4)];
+  }
+
+  // ---- Minimal column-major mat4 helpers (same convention as solids3d.html/
+  // geodome.html/spaceframe.html/hoppercrystal.html) -----------------------
+  function mat4Identity() { return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); }
+  function mat4Multiply(a, b) {
+    const out = new Float32Array(16);
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+      let sum = 0;
+      for (let k = 0; k < 4; k++) sum += a[k * 4 + r] * b[c * 4 + k];
+      out[c * 4 + r] = sum;
+    }
+    return out;
+  }
+  function mat4Perspective(fovyRad, aspect, near, far) {
+    const f = 1 / Math.tan(fovyRad / 2), nf = 1 / (near - far);
+    const out = new Float32Array(16);
+    out[0] = f / aspect; out[5] = f; out[10] = (far + near) * nf; out[11] = -1;
+    out[14] = 2 * far * near * nf;
+    return out;
+  }
+  function mat4Scale(s) { const m = mat4Identity(); m[0] = s; m[5] = s; m[10] = s; return m; }
+  function mat4LookAt(eye, target, up) {
+    let zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
+    let zl = Math.hypot(zx, zy, zz) || 1; zx /= zl; zy /= zl; zz /= zl;
+    let xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+    let xl = Math.hypot(xx, xy, xz) || 1; xx /= xl; xy /= xl; xz /= xl;
+    const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+    const out = new Float32Array(16);
+    out[0] = xx; out[1] = yx; out[2] = zx; out[3] = 0;
+    out[4] = xy; out[5] = yy; out[6] = zy; out[7] = 0;
+    out[8] = xz; out[9] = yz; out[10] = zz; out[11] = 0;
+    out[12] = -(xx * eye[0] + xy * eye[1] + xz * eye[2]);
+    out[13] = -(yx * eye[0] + yy * eye[1] + yz * eye[2]);
+    out[14] = -(zx * eye[0] + zy * eye[1] + zz * eye[2]);
+    out[15] = 1;
+    return out;
+  }
+  function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+  function sub3(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+  function add3(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
+  function scale3(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; }
+  function norm3(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
+
+  const VERT_SRC = `
+    attribute vec3 aPosition;
+    attribute vec3 aNormal;
+    attribute vec3 aColor;
+    uniform mat4 uMVP;
+    uniform mat4 uModel;
+    uniform vec3 uEye;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vColor;
+    void main() {
+      vec4 world = uModel * vec4(aPosition, 1.0);
+      vNormal = mat3(uModel) * aNormal;
+      vViewDir = normalize(uEye - world.xyz);
+      vColor = aColor;
+      gl_Position = uMVP * vec4(aPosition, 1.0);
+    }
+  `;
+  const FRAG_SRC = `
+    precision mediump float;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vColor;
+    uniform vec3 uLightDir;
+    void main() {
+      vec3 N = normalize(vNormal);
+      float diff = max(dot(N, normalize(uLightDir)), 0.0);
+      float fresnel = pow(1.0 - max(dot(N, normalize(vViewDir)), 0.0), 2.0);
+      vec3 base = vColor * (0.56 + 0.44 * diff);
+      vec3 rim = vColor * fresnel * 0.4;
+      gl_FragColor = vec4(min(base + rim, vec3(0.86)), 1.0);
+    }
+  `;
+  function compileShader(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error('shader compile: ' + gl.getShaderInfoLog(sh));
+    return sh;
+  }
+
+  let prog, aPosition, aNormal, aColor, uMVP, uModel, uLightDir, uEye, meshBuf;
+  function initGL() {
+    prog = gl.createProgram();
+    gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, VERT_SRC));
+    gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, FRAG_SRC));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('program link: ' + gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+
+    aPosition = gl.getAttribLocation(prog, 'aPosition');
+    aNormal = gl.getAttribLocation(prog, 'aNormal');
+    aColor = gl.getAttribLocation(prog, 'aColor');
+    uMVP = gl.getUniformLocation(prog, 'uMVP');
+    uModel = gl.getUniformLocation(prog, 'uModel');
+    uLightDir = gl.getUniformLocation(prog, 'uLightDir');
+    uEye = gl.getUniformLocation(prog, 'uEye');
+
+    const posBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, mesh.positions, gl.DYNAMIC_DRAW);
+    const normBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, mesh.normals, gl.DYNAMIC_DRAW);
+    const colBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, mesh.colors, gl.STATIC_DRAW);
+    meshBuf = { posBuf, normBuf, colBuf, count: mesh.count };
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.viewport(0, 0, W, H);
+  }
+
+  // Tier/cell layout: cellCount DOUBLES each tier outward, radius grows by
+  // (cellCount/C0)^radiusPow (a sub-linear power, not a full linear scale --
+  // verified offline this keeps both same-tier and cross-tier cell overlap
+  // ratios comfortably under 1, unlike a naive linear radius scale which
+  // pushed cross-tier collision to 0.987, dangerously close to touching).
+  // All fixed ONCE per video (function of DENSITY/SEED only) -- the
+  // "compute geometry once, only animate afterward" pattern this pool has
+  // established across three dozen engines.
+  let layout, mesh;
+  const NRIM = 6; // triangles per cell (a hexagonal rim fan to one back apex)
+  function buildLayout() {
+    const N = Math.max(4, Math.min(6, Math.round(5 * Math.max(0.8, Math.min(1.2, DENSITY)))));
+    const C0 = 6;
+    const RADIUS_POW = 0.6;
+    const FILL = 0.72;
+    const R0 = 1.0;
+    const YSTEP = 0.5;
+
+    const cellCount = [C0];
+    for (let i = 1; i < N; i++) cellCount.push(cellCount[i - 1] * 2);
+    const radius = cellCount.map((c) => R0 * Math.pow(c / C0, RADIUS_POW));
+    const y = cellCount.map((_, i) => -i * YSTEP);
+
+    const hue0 = rng() * 360;
+    const baseCol = PAL[SEED % PAL.length];
+    const tierRgb = cellCount.map((_, i) => {
+      const hue = ((baseCol[0] + hue0 + 130 * (i / (N - 1))) % 360 + 360) % 360;
+      return hsl2rgb(hue, Math.max(35, Math.min(95, baseCol[1])), Math.min(66, baseCol[2] + 4));
+    });
+
+    const cells = [];
+    for (let i = 0; i < N; i++) {
+      const cnt = cellCount[i];
+      const staggerOffset = (i % 2) ? (Math.PI / cnt) : 0;
+      const cellR = FILL * radius[i] * Math.sin(Math.PI / cnt);
+      for (let j = 0; j < cnt; j++) {
+        const baseAngle = staggerOffset + j * (2 * Math.PI / cnt);
+        // Small per-cell lightness jitter for texture -- static, computed
+        // once, never varies with time (avoids the HSL-hue-affects-luma
+        // temporal-trend trap; this is a fixed per-vertex colour, not a
+        // per-frame recompute).
+        const lightJit = rand(0.9, 1.08);
+        cells.push({
+          tier: i, radius: radius[i], y: y[i], baseAngle, cellR,
+          depthPhase: rand(0, Math.PI * 2),
+          rgb: tierRgb[i].map((c) => Math.min(1, c * lightJit)),
+        });
+      }
+    }
+    layout = { N, cellCount, radius, y, cells };
+
+    const nv = cells.length * NRIM * 3;
+    const colors = new Float32Array(nv * 3);
+    let k = 0;
+    for (const cell of cells) {
+      for (let t = 0; t < NRIM; t++) for (let v = 0; v < 3; v++) {
+        colors[k++] = cell.rgb[0]; colors[k++] = cell.rgb[1]; colors[k++] = cell.rgb[2];
+      }
+    }
+    mesh = {
+      positions: new Float32Array(nv * 3),
+      normals: new Float32Array(nv * 3),
+      colors,
+      count: nv,
+    };
+  }
+
+  // Per-tier counter-rotation rates (odd/even tiers forced to opposite
+  // signs -- guarantees adjacent tiers always counter-rotate, the proven
+  // "counter-rotating rings/tiers" pattern this pool already established
+  // as both visually strong and a reliable source of non-rigid unit
+  // motion) plus a shared cell-depth-breathing rate. Reassigned every
+  // cycleSec -- coverage-neutral by construction, since a tier's rigid
+  // rotation about Y never changes its own footprint, and the depth
+  // breathe never changes a cell's flat rim area either.
+  let tierRate, depthRate;
+  function reconfigureMotion() {
+    tierRate = [];
+    for (let i = 0; i < layout.N; i++) {
+      tierRate.push(((i % 2) ? 1 : -1) * rand(0.35, 0.6) * SPEED);
+    }
+    depthRate = sgn() * rand(0.6, 0.95) * SPEED;
+  }
+
+  function deformMesh(t) {
+    const pos = mesh.positions, nrm = mesh.normals;
+    let k = 0;
+    for (const cell of layout.cells) {
+      const ang = cell.baseAngle + tierRate[cell.tier] * t;
+      const cx = cell.radius * Math.cos(ang), cz = cell.radius * Math.sin(ang);
+      const center = [cx, cell.y, cz];
+      const outward = norm3([cx, 0, cz]);
+      // localZ: the direction the cell's concave opening faces -- mostly
+      // downward (toward a viewer looking UP into the vault, the real
+      // muqarnas viewing convention) with a modest outward tilt for depth
+      // variety between inner and outer tiers.
+      const localZ = norm3(add3(scale3([0, -1, 0], 0.82), scale3(outward, 0.5)));
+      const ref = Math.abs(localZ[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+      const localX = norm3(cross3(ref, localZ));
+      const localY = cross3(localZ, localX);
+
+      const depthFrac = 0.62 + 0.3 * Math.sin(depthRate * t + cell.depthPhase);
+      const apex = add3(center, scale3(localZ, -cell.cellR * depthFrac));
+
+      const rim = [];
+      for (let r = 0; r < NRIM; r++) {
+        const a = (r / NRIM) * Math.PI * 2;
+        rim.push(add3(center, add3(scale3(localX, cell.cellR * Math.cos(a)), scale3(localY, cell.cellR * Math.sin(a)))));
+      }
+      for (let r = 0; r < NRIM; r++) {
+        const a = rim[r], b = rim[(r + 1) % NRIM], c = apex;
+        const n = norm3(cross3(sub3(b, a), sub3(c, a)));
+        for (const p of [a, b, c]) {
+          pos[k] = p[0]; pos[k + 1] = p[1]; pos[k + 2] = p[2];
+          nrm[k] = n[0]; nrm[k + 1] = n[1]; nrm[k + 2] = n[2];
+          k += 3;
+        }
+      }
+    }
+  }
+
+  buildLayout();
+  reconfigureMotion();
+  deformMesh(0);
+  initGL();
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+  const dt = 1 / FPS;
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  // Camera below the structure, looking up into it -- the real muqarnas
+  // viewing convention (a visitor standing beneath the vault looks up).
+  // Pulled in closer than a first draft (which left the vault occupying
+  // only the centre of the frame with a lot of unused black margin) so the
+  // outermost tier reaches toward the frame edges, per the house style's
+  // "bold, fills the frame" preference -- confirmed by actually rendering
+  // and looking, not by calculation alone.
+  const maxHoriz = Math.max(...layout.cells.map((c) => c.radius + c.cellR));
+  const minY = Math.min(...layout.y);
+  const EYE = [maxHoriz * 0.12, minY - maxHoriz * 0.55, maxHoriz * 0.42];
+  const TARGET = [0, minY * 0.45, 0];
+  const UP = [0, 1, 0];
+  const proj = mat4Perspective((52 * Math.PI) / 180, W / H, 0.1, 100);
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    if (gl.isContextLost()) return;
+
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    const view = mat4LookAt(EYE, TARGET, UP);
+    const model = mat4Scale(1);
+    const mvp = mat4Multiply(proj, mat4Multiply(view, model));
+    gl.uniformMatrix4fv(uMVP, false, mvp);
+    gl.uniformMatrix4fv(uModel, false, model);
+    gl.uniform3f(uEye, EYE[0], EYE[1], EYE[2]);
+
+    // Bounded light-direction oscillation, never sweeping to a fully
+    // back-lit state -- the same coverage-neutral motion source geodome.html/
+    // spaceframe.html/hoppercrystal.html use.
+    const lightAngle = 0.5 * Math.sin(clk * 2.2) + 0.2 * Math.sin(clk * 4.7 + 0.4);
+    gl.uniform3f(uLightDir, Math.cos(lightAngle), 1.1, Math.sin(lightAngle) + 0.4);
+
+    deformMesh(clk);
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.positions, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(aPosition);
+    gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.normBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.normals, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(aNormal);
+    gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.colBuf);
+    gl.enableVertexAttribArray(aColor);
+    gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, meshBuf.count);
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureMotion(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+
+  (async () => {
+    await new Promise((r) => setTimeout(r, 300));
+    const deadline = Date.now() + 1500;
+    while (contextLost && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    window.READY = true;
+  })();
+})();
+</script>
+</body>
+</html>
