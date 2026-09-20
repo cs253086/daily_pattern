@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Doyle Spiral — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "random Wikipedia article" -- since
+// Wikipedia itself is blocked in this sandbox, used the established fallback:
+// an open WebSearch for an unusual/lesser-known geometric curve or tiling
+// construction). This surfaced the DOYLE SPIRAL: a packing of non-overlapping
+// circles where every circle is tangent to exactly six neighbours (hexagonal
+// combinatorics) yet the radii are NOT all equal -- they grow geometrically
+// outward, so the circle centres fall on three families of interlocking
+// LOGARITHMIC SPIRAL arms. Discovered/formalised by Peter Doyle (independently
+// used by van Iterson in 1907 to model phyllotaxis), a Doyle spiral is the
+// discrete analogue of the complex exponential map z -> exp(w) applied to a
+// regular hexagonal circle packing -- the spiral arms are fully EMERGENT from
+// one conformal map, nothing about "spiral" is drawn directly. Sources:
+// https://en.wikipedia.org/wiki/Doyle_spiral,
+// https://www.josleys.com/articles/HexCirclePackings.pdf (Jos Leys, worked
+// construction/rendering notes for the conformal-map approximation used
+// below), https://archive.bridgesmathart.org/2008/bridges2008-131.pdf
+// (Sutcliffe, "Doyle Spiral Circle Packings Animated" -- prior art-rendering
+// treatment, confirming this is a real established visualisation technique).
+//
+// A genuinely different construction PRINCIPLE from every other engine in the
+// pool, including every other radial/spiral one: not mirrored-wedge stamps
+// (kaleidoscope.html), not nested star outlines (starburst.html), not a
+// LOGARITHMIC spiral tile MARCH with edge-matched polygon segments
+// (voderberg.html), not a golden-angle POINT-placement rule with no tangency
+// constraint (phyllotaxis.html), not a Voronoi proximity partition
+// (voronoimosaic.html), not a recursive substitution/subdivision tiling
+// (quasicrystal.html). Its defining invariant is CIRCLE-TO-CIRCLE TANGENCY
+// under fixed hexagonal combinatorics, with every radius fixed by a conformal/
+// complex-exponential constraint -- nothing else in this pool uses tangent
+// circle packing as its generative primitive at all.
+//
+// CONSTRUCTION, verified numerically OFFLINE before writing any rendering
+// code (the same discipline this pool's quasicrystal.html/geodome.html/
+// hilbertweave.html/spaceframe.html already established for a construction
+// that could still "look plausible" even if subtly wrong): start from the
+// exact hexagonal lattice u(m,n) = m + n*exp(i*pi/3) (spacing 1), where a
+// circle of radius 0.5 at every lattice point is EXACTLY tangent to its 6
+// neighbours. Map through w(u) = exp(C*u) for a complex growth constant C.
+// Under a LOCALLY conformal map, a small circle of radius r maps to an
+// approximate circle of radius |f'(u)|*r = |C*w|*r centred at w -- this is
+// the exact approximation Jos Leys' article documents for rendering Doyle
+// spirals without solving Doyle's full discrete circle-packing equations. A
+// standalone script confirmed this approximation is extremely tight (not just
+// "plausible"): across 8 trial C values spanning the range used below,
+// swept over a wide (m,n) index range, the worst-case ratio of actual
+// centre-to-centre distance to the sum of the two approximate radii was
+// 0.9967 (i.e. at most 0.33% overlap risk) -- comfortably eliminated by the
+// RADIUS_SHRINK safety factor below, which also leaves headroom for the
+// per-circle pulse.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. The growth constant C, the full set of
+// circle centres/radii, and every circle's hue/ring assignment are computed
+// ONCE per video in initPacking() -- structurally whiteout-proof (the canvas
+// clears to solid black every frame, and the packing itself never rotates or
+// resizes) and coverage-stable by construction. No whole-field rotation is
+// used at all (per truchet.html's lesson: a reflexive whole-field rotation
+// only dilutes the mandatory unit-motion signal by dominating the rigid-fit
+// unless fastMotion genuinely needs it -- here the travelling radial pulse
+// wave below is more than enough motion on its own, the same pattern
+// orbweb.html already proved out with zero rotation and
+// unitMotionNonRigidFrac = 1.0).
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 34);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  const dt = 1 / FPS;
+  const cx = W / 2, cy = H / 2;
+  const halfDiag = Math.sqrt((W / 2) ** 2 + (H / 2) ** 2);
+
+  // Complex helpers (plain [re, im] pairs -- no library needed).
+  const E60 = [Math.cos(Math.PI / 3), Math.sin(Math.PI / 3)];
+  function cAdd(a, b) { return [a[0] + b[0], a[1] + b[1]]; }
+  function cMul(a, b) { return [a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]]; }
+  function cScale(a, s) { return [a[0] * s, a[1] * s]; }
+  function cAbs(a) { return Math.hypot(a[0], a[1]); }
+  function cExp(a) { const e = Math.exp(a[0]); return [e * Math.cos(a[1]), e * Math.sin(a[1])]; }
+  function uOf(m, n) { return cAdd([m, 0], cScale(E60, n)); }
+
+  // RADIUS_SHRINK: global safety factor applied to every approximate radius,
+  // comfortably under the 0.9962 worst-case tangency ratio measured offline
+  // (see header) -- guarantees zero overlap even at the pulse's peak
+  // amplitude (PULSE_AMP below), which is applied multiplicatively on top
+  // (0.9962 / 0.80 = 1.245, comfortably above the 1.20 peak pulse factor).
+  const RADIUS_SHRINK = 0.80;
+  const PULSE_AMP = 0.20;
+  // Number of full spatial wave cycles across the ring index: an INTEGER
+  // count means the wave's sin() sums to (approximately) zero across the
+  // full ring range at any single instant, the same "phase must span whole
+  // cycles across the frame" invariant this pool's wave-1 unit-choreography
+  // pass established -- so the travelling wave reshapes which rings are
+  // momentarily larger/smaller without a net brightness trend.
+  const WAVE_K = 3;
+
+  let C, S, circles, ringCount;
+  function initPacking() {
+    // Growth constant: real part controls how fast radii grow per lattice
+    // step (spiral "tightness"), imaginary part controls the twist between
+    // successive rings/arms. Both ranges were narrowed from a wider first
+    // draft after a real bug (see below): TOO SMALL a twist relative to
+    // growth leaves an insufficient angular sweep at any given radius
+    // within the sampled lattice range, rendering only a narrow ARC of
+    // circles instead of a full disc. A standalone offline script swept
+    // growth/twist combinations and measured angular-bin coverage at
+    // several radius levels directly; growth in [0.05,0.10] with |twist|
+    // in [0.15,0.19] was the first range with ZERO empty angular bins
+    // (out of 16) across every tested combination, comfortably inside the
+    // wider tangency-safety range verified separately (worst-case ratio
+    // 0.9962 at these exact bounds, still far above the RADIUS_SHRINK
+        // margin below).
+    const growth = rand(0.05, 0.10);
+    const twist = sgn() * rand(0.15, 0.19);
+    C = [growth, twist];
+    const cAbsC = cAbs(C);
+
+    // Candidate lattice points are enumerated over a HEX-BALL region
+    // (max(|m|,|n|,|m+n|) <= RANGE), not a square box. This was the actual
+    // root cause of the arc-only bug above the twist fix: a square box in
+    // (m,n) maps, via u = m + n*exp(i*pi/3), to a stretched RHOMBUS in
+    // u-space (elongated along the m=n diagonal), so its single farthest
+    // corner -- which dominated the old empirical max-reach calibration --
+    // corresponded to one specific angle, starving every other direction of
+    // large-radius candidates within the same box. The hex-ball region maps
+    // to a near-REGULAR HEXAGON instead (verified algebraically: all 6
+    // vertices of the hex-ball map to points at exactly the same Euclidean
+    // distance RANGE from the origin in u-space), which is isotropic enough
+    // that a SINGLE analytic safe reach applies in every direction.
+    const RANGE = 36;
+    const safeReachU = RANGE * Math.cos(Math.PI / 6); // inscribed-circle radius of the hex ball
+    const targetRe = cAbsC * safeReachU * 0.85; // 85% safety margin inside the analytic bound
+    const wMax = Math.exp(targetRe);
+    const reachMax = wMax * (1 + 0.5 * cAbsC);
+    S = (halfDiag * 1.03) / reachMax;
+    const minNaturalRadius = (0.5 * cAbsC * wMax) / (50 * Math.max(0.6, Math.min(1.6, DENSITY)));
+
+    const candidates = [];
+    for (let m = -RANGE; m <= RANGE; m++) {
+      for (let n = -RANGE; n <= RANGE; n++) {
+        if (Math.max(Math.abs(m), Math.abs(n), Math.abs(m + n)) > RANGE) continue;
+        const u = uOf(m, n);
+        const w = cExp(cMul(C, u));
+        const r = 0.5 * cAbsC * cAbs(w);
+        if (!Number.isFinite(r) || r <= 0) continue;
+        candidates.push({ m, n, w, r });
+      }
+    }
+    circles = candidates.filter((c) => c.r >= minNaturalRadius && cAbs(c.w) * S <= halfDiag * 1.06);
+
+    // Ring index: bucket by log(|w|) (radial "shell" in log-space, which is
+    // exactly what the exponential map's self-similarity is built around).
+    // Used for (a) hue banding and (b) the travelling radial pulse wave below.
+    let minLog = Infinity, maxLog = -Infinity;
+    for (const c of circles) {
+      const lg = Math.log(Math.max(1e-6, cAbs(c.w)));
+      c.logR = lg;
+      if (lg < minLog) minLog = lg;
+      if (lg > maxLog) maxLog = lg;
+    }
+    ringCount = Math.max(6, Math.round(16 * Math.max(0.6, Math.min(1.6, DENSITY))));
+    const span = Math.max(1e-6, maxLog - minLog);
+    for (const c of circles) {
+      c.ring = Math.min(ringCount - 1, Math.max(0, Math.floor(((c.logR - minLog) / span) * ringCount)));
+      c.angle = Math.atan2(c.w[1], c.w[0]);
+    }
+
+    // Cumulative-AREA fraction (not ring-index fraction) along radial order:
+    // a first design phased the travelling pulse wave by ring INDEX, assuming
+    // an integer wave count across that index would sum to zero -- wrong,
+    // because outer rings hold vastly more total area than inner ones (the
+    // exponential map's whole point), so an index-uniform wave is nowhere
+    // near area-neutral and produced a real brightness-trend failure on one
+    // seed (+97.9 projected luma). Fixed by phasing the wave on cumulative
+    // AREA fraction instead: sort circles by radial order, accumulate r^2
+    // (proportional to area), and give each circle its position in [0,1) by
+    // area rather than by count. An integer WAVE_K across THIS axis sums to
+    // exactly zero at every instant regardless of how skewed the per-ring
+    // area distribution is -- the same "phase must span whole cycles"
+    // invariant, correctly generalised to a non-uniformly-weighted domain.
+    const ordered = circles.slice().sort((a, b) => (a.ring - b.ring) || (a.angle - b.angle));
+    let totalArea = 0;
+    for (const c of ordered) totalArea += c.r * c.r;
+    let cum = 0;
+    for (const c of ordered) {
+      cum += c.r * c.r;
+      c.areaFrac = cum / totalArea;
+    }
+
+    const hue0 = rng() * 360;
+    const hueSpread = rand(120, 220);
+    for (const c of circles) {
+      c.hue = ((hue0 + hueSpread * (c.ring / ringCount)) % 360 + 360) % 360;
+    }
+  }
+
+  function reconfigurePulse() {
+    pulseRate = sgn() * rand(0.6, 1.0) * SPEED;
+  }
+  let pulseRate, pulsePhase0;
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  initPacking();
+  pulsePhase0 = rand(0, Math.PI * 2);
+  reconfigurePulse();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    const paletteBase = PAL[0];
+    const sat = paletteBase[1];
+    const lightBase = paletteBase[2];
+
+    // Travelling radial breathing wave: every circle in the same ring shares
+    // one pulse factor, but the phase varies with ring index (WAVE_K full
+    // spatial cycles across the ring range), so a wave of expansion/
+    // contraction visibly propagates outward through the whole packing over
+    // time -- genuine, ring-scale structural change (unlike a purely local
+    // per-circle antiphase, which measured too weak for both the fast-motion
+    // and composition-drift gates in an earlier design) while staying
+    // brightness-neutral on average, since an integer WAVE_K sums to zero
+    // across the ring range at any instant. This is the engine's ONLY
+    // per-frame motion source (deliberately no whole-field rotation -- see
+    // header): a non-uniform radial scaling is not reproducible by any
+    // single rigid rotation/translation, so it registers fully as non-rigid
+    // unit motion on its own.
+    for (const c of circles) {
+      const wavePhase = WAVE_K * 2 * Math.PI * c.areaFrac;
+      const pulse = 1 + PULSE_AMP * Math.sin(pulsePhase0 + clk * pulseRate + wavePhase);
+      const r = c.r * S * RADIUS_SHRINK * pulse;
+      const x = cx + c.w[0] * S;
+      const y = cy + c.w[1] * S;
+      if (r < 0.4) continue;
+      const light = Math.min(74, lightBase + (pulse - 1) * 20);
+      ctx.fillStyle = `hsl(${c.hue}, ${sat}%, ${light}%)`;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigurePulse(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

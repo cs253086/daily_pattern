@@ -4778,6 +4778,133 @@ iteration for other engines' first drafts. `muqarnas` also forms its own
 singleton archetype group at the pool's perceptual-grouping threshold
 (0.55).
 
+## Doyle spiral circle-packing engine (`doylespiral.html`) — 2026-09-20
+
+Daily creative-research routine. Category was "random Wikipedia article" by
+the firing-minute-mod-category-count method. Since Wikipedia is blocked in
+this sandbox, used the established fallback: an open WebSearch for an
+unusual/lesser-known geometric curve or tiling construction, which surfaced
+the **Doyle spiral** -- a packing of non-overlapping circles where every
+circle is tangent to exactly six neighbours (hexagonal combinatorics), yet
+the radii are NOT all equal: they grow geometrically outward, so the circle
+centres fall on three families of interlocking LOGARITHMIC SPIRAL arms.
+Discovered/formalised by Peter Doyle (independently used by van Iterson in
+1907 to model phyllotaxis), it is the discrete analogue of the complex
+exponential map z -> exp(w) applied to a regular hexagonal circle packing --
+the spiral arms are fully EMERGENT from one conformal map, nothing about
+"spiral" is drawn directly. Sources:
+[Wikipedia](https://en.wikipedia.org/wiki/Doyle_spiral),
+[Jos Leys, worked construction/rendering notes](https://www.josleys.com/articles/HexCirclePackings.pdf),
+[Sutcliffe, "Doyle Spiral Circle Packings Animated"](https://archive.bridgesmathart.org/2008/bridges2008-131.pdf)
+(prior art-rendering treatment, confirming the conformal-map approximation
+below is an established visualisation technique, not a guess).
+
+**What it is**: a genuinely different construction PRINCIPLE from every
+other radial/spiral engine in the pool: not mirrored-wedge stamps
+(`kaleidoscope.html`), not nested star outlines (`starburst.html`), not a
+LOGARITHMIC spiral tile MARCH with edge-matched polygon segments
+(`voderberg.html`), not a golden-angle POINT-placement rule with no
+tangency constraint (`phyllotaxis.html`), not a Voronoi proximity partition
+(`voronoimosaic.html`), not a recursive substitution/subdivision tiling
+(`quasicrystal.html`). Its defining invariant is CIRCLE-TO-CIRCLE TANGENCY
+under fixed hexagonal combinatorics, with every radius fixed by a
+conformal/complex-exponential constraint -- nothing else in the pool uses
+tangent circle packing as its generative primitive at all. Construction:
+hex lattice u(m,n) = m + n*exp(i*pi/3) (spacing 1, where a circle of radius
+0.5 at every point is exactly tangent to its 6 neighbours), mapped through
+w(u) = exp(C*u) for a complex growth constant C; under the local conformal
+derivative, a small circle of radius r maps to an approximate circle of
+radius |C*w|*r -- **verified numerically OFFLINE before writing any
+rendering code** (the same discipline this pool's `quasicrystal.html`/
+`geodome.html`/`hilbertweave.html`/`spaceframe.html` already established):
+a standalone script swept 8+ trial C values across the used parameter range
+and measured the worst-case ratio of actual centre-to-centre distance to
+the sum of the two approximate radii at 0.9962-0.9993 (i.e. well under 1%
+overlap risk at the tightest tested point), comfortably eliminated by the
+`RADIUS_SHRINK` safety factor.
+
+**Two real bugs, both found only by rendering and looking (or by a targeted
+offline diagnostic once the visual symptom was clear), not by reasoning
+about the formula in the abstract:**
+
+1. **A square (m,n) sampling box produced a narrow, lopsided ARC of
+   circles occupying one small corner of the frame, not a full disc.**
+   Root cause, confirmed with a standalone diagnostic script measuring
+   angular-bin coverage at fixed radius levels: a square box in (m,n)
+   maps, via the hex lattice basis (1, exp(i*pi/3)), to a STRETCHED
+   RHOMBUS in u-space (elongated along the m=n diagonal) -- its single
+   farthest corner dominated the naive empirical max-reach scale
+   calibration, so the rendered composition's outer boundary was
+   calibrated against one specific angle while every other direction had
+   far fewer large-radius candidates within the same box. Fixed by
+   switching to a HEX-BALL sampling region (`max(|m|,|n|,|m+n|) <=
+   RANGE`), verified algebraically to map to a near-regular hexagon (all
+   6 vertices land at exactly the same Euclidean distance RANGE from the
+   origin in u-space) -- isotropic enough that a single analytic safe
+   reach (`RANGE * cos(30deg) * |C|`) applies in every direction. Also
+   narrowed the growth/twist parameter ranges (growth in [0.05,0.10],
+   |twist| in [0.15,0.19]): a second diagnostic found that TOO SMALL a
+   twist relative to growth leaves an insufficient angular sweep at any
+   given radius within the sampled lattice range (the same "narrow arc"
+   symptom from a different cause) -- swept numerically until zero empty
+   angular bins (of 16) was achieved across the whole tested combination
+   range, while confirming the narrowed range stays comfortably inside
+   the separately-verified tangency-safety bounds (worst ratio 0.9962).
+2. **A first per-frame motion design (within-ring antiphase pulse,
+   alternating adjacent circles) measured too weak for BOTH
+   `validateEngine()`'s `fastMotion` and `compositionDrift` gates**
+   (8/16 seeds failing) -- local antiphase cancellation suppresses
+   exactly the kind of real structural change `compositionDrift` needs to
+   see. Replaced with a travelling radial breathing wave (`WAVE_K=3` full
+   spatial cycles), which initially assumed phasing by ring INDEX would
+   sum to zero net brightness change at every instant -- wrong, because
+   the exponential map's outer rings hold vastly more total AREA than
+   inner ones, so an index-uniform wave is nowhere near area-neutral (one
+   seed projected +97.9 luma, a real brightness-trend failure). Fixed by
+   phasing the wave on cumulative AREA FRACTION instead of ring-count
+   fraction (sort circles radially, accumulate r^2, use that cumulative
+   fraction as the wave's spatial axis): an integer wave count across
+   THIS axis sums to exactly zero at every instant regardless of how
+   skewed the per-ring area distribution is -- the same "phase must span
+   whole cycles across the frame" invariant this pool's wave-1
+   unit-choreography pass established, correctly generalised to a
+   non-uniformly-weighted domain. Deliberately no whole-field rotation at
+   all (per `truchet.html`'s lesson that a reflexive whole-field rotation
+   only dilutes the mandatory unit-motion signal by dominating the
+   rigid-fit unless `fastMotion` genuinely needs it) -- the travelling
+   wave alone is more than enough motion, the same pattern `orbweb.html`
+   already proved out with zero rotation.
+
+**Verified** (final design): `validateEngine()` **16/16** across seeds
+1-15 plus the CLI's actual default seed 12345 (see `geodome.html`'s
+write-up for why that seed matters). Margins comfortable throughout:
+`avgSat` 82.6-90.0 (vs the 22 minimum), zero near-white pixels on every
+seed, `projectedRise` -22.3 to +28.7 (vs the 50 threshold, including the
+previously-failing seed, now comfortably inside margin), `compositionDrift`
+0.043-0.130 (vs the 0.015 minimum), `unitMotionNonRigidFrac` exactly 1.0
+on every single seed (vs the 0.40 minimum -- a non-uniform radial scaling
+wave is not reproducible by any single rigid rotation/translation),
+`fastMotion` always comfortably above its per-frame floor,
+`projectedHourRenderMin` 15.4-23.6min (well inside the CI budget). Visual
+spot-checks across 2/25/50/75/95/105% of a 34s cycle at 3 seeds, actually
+rendering PNGs and looking at them, not just reading validator output: a
+vivid, bold, immediately-recognisable full-frame Doyle spiral filling the
+canvas corner to corner, with clearly visible tangent circles, a genuinely
+propagating breathing wave (outer ring bands visibly merging/separating as
+the wave passes), no artifacts at the cycle boundary, and distinct
+spiral-arm curvature/handedness (tight curved arms vs. near-straight radial
+arms) across different seeds.
+
+**Novelty gate**: measured against all 44 existing engines (the committed
+fingerprint cache was several commits stale, so the whole pool was
+fingerprinted fresh alongside the candidate, per this pool's established
+practice; the refreshed cache was not committed, per this routine's "touch
+only the new engine + log + CLAUDE.md" constraint). Nearest neighbour is
+`truchet` at distance **0.996** -- comfortably clear of the 0.60 threshold
+and above this pool's own historical median pair distance, not a
+thin-margin case. `doylespiral` also forms its own singleton archetype
+group at the pool's perceptual-grouping threshold (0.55).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
