@@ -4905,6 +4905,113 @@ and above this pool's own historical median pair distance, not a
 thin-margin case. `doylespiral` also forms its own singleton archetype
 group at the pool's perceptual-grouping threshold (0.55).
 
+## Liesegang ring-interference engine (`liesegang.html`) — 2026-09-21
+
+Daily creative-research routine. Category was "obscure mathematical object /
+crystal system / physical phenomenon" -- under-used recently alongside
+textile traditions, per the herringbone.html precedent of varying
+categories rather than defaulting to a heavily-used one. An open WebSearch
+surfaced the **Liesegang phenomenon** (Raphael Liesegang, 1896): when a
+diffusing "outer" electrolyte reacts with an "inner" electrolyte
+pre-dispersed in a gel, the precipitate does NOT form a uniform blob -- it
+self-organises into discrete, sharply separated concentric rings (or
+parallel bands from a line source), each ring's formation locally
+depleting the reagent so the NEXT ring nucleates further out. The spacing
+is not arbitrary: it follows the empirically- and theoretically-grounded
+Jablczynski spacing law, a GEOMETRIC PROGRESSION `x_n = a*k^n` (k roughly
+1.1-1.5 in real experiments) -- gaps between rings visibly WIDEN outward, a
+distinctive rhythm unlike a simple evenly-spaced ring set. Sources:
+[insilico.hu, a short history of the phenomenon](https://www.insilico.hu/liesegang/history/history.html),
+[Langmuir, "Pattern Formation in Precipitation Reactions: The Liesegang Phenomenon"](https://pubs.acs.org/doi/10.1021/acs.langmuir.9b03018),
+[MDPI, "Regular-Type Liesegang Pattern of AgCl in a 1D System"](https://www.mdpi.com/1996-1944/14/6/1526).
+
+**What it is**: a genuinely different construction PRINCIPLE from every
+other radial/ring engine in the pool: `ziggurat.html`/`arcrings.html`/
+`doylespiral.html` are all a FIXED deterministic geometric rule stepped
+through uniformly (equal angular steps, a conformal map) -- Liesegang's
+defining trait is a ring position that is the OUTCOME of a nucleation/
+depletion competition, rendered here via the actual empirical
+GEOMETRIC-PROGRESSION spacing law rather than any uniform or golden-angle
+increment. `chladni.html`/`phasespikes.html`/`moire.html` are continuous
+wave-interference fields (zero-crossings, ranked maxima, beat occlusion)
+-- Liesegang has no wave at all, it's a one-directional depletion-front
+process. `primespiral.html` is the pool's only other "arithmetic rule ->
+discrete marks" engine, but a sieve has no growing-gap spacing law.
+Rendered with SEVERAL independent nucleation centres (3-6, scattered with
+jitter rather than a regular grid) whose ring systems overlap and
+additively blend -- a real multi-droplet Liesegang experiment shows
+exactly this kind of ring-system interference, deliberately avoiding one
+dominant centred mandala (the "Archetype clustering" over-concentration
+this file documents) and reading compositionally distinct from every
+single-centre radial engine.
+
+**Needed a real motion-mechanism redesign, found only by running
+`validateEngine()` across a seed battery, not by reasoning about the
+formula.** The first design used a WIDTH-only pulse (an area-fraction-
+weighted travelling wave, reusing `doylespiral.html`'s just-proven-correct
+construction directly) as the sole per-frame motion source. This measured
+insufficient two separate ways:
+1. **8 of 11 seeds failed `compositionDrift` on thin margins**
+   (0.0115-0.0148 against the 0.015 floor): a width-only pulse, even one
+   that cancels out net area exactly, doesn't move enough of the
+   rotation-invariant RADIAL MASS PROFILE to register as real structural
+   change -- the same underlying gap the pulse-vs-wobble distinction below
+   fixes.
+2. **2 of 11 seeds showed a real (not aliased) brightness-trend failure**
+   (+71.9 and +59.9 projected luma): multi-system ADDITIVE (`lighter`)
+   overlap blending is not linear in ring width once pixels approach
+   saturation, which breaks the width-pulse's area-weighted zero-sum
+   assumption in a way `doylespiral.html`'s single, non-overlapping-system
+   case never exercised -- a genuinely new failure mode for this pool's
+   established "phase must span whole cycles" invariant: it assumes a
+   LINEAR relationship between the modulated quantity and observed
+   brightness, which additive blending near saturation violates.
+
+   Fixed by replacing width-pulsing with per-ring independent RADIAL
+   POSITION wobble instead: shifting a thin annulus's centre radius by a
+   small amount (bounded to 12-22% of its own local gap) leaves its own
+   area almost unchanged (area ~ r*width, with width now held fixed), so
+   it is naturally far closer to brightness-neutral than pulsing width --
+   and unlike a width pulse, a real radial shift genuinely redistributes
+   the radial mass profile `compositionDrift` measures. Also lowered
+   per-ring alpha (0.38-0.55, down from 0.5-0.72) to reduce multi-system
+   saturation risk further, independent of the motion-mechanism fix.
+   Deliberately no whole-field rotation at all (per `truchet.html`'s
+   lesson, and doubly true here: a ring is rotationally symmetric about
+   its own centre, so rotating it is invisible motion by construction, the
+   same degeneracy `torusrings3d.html`/`doylespiral.html` already had to
+   design around).
+
+**Verified** (final design): `validateEngine()` **16/16** across seeds
+1-15 plus the CLI's actual default seed 12345 (see `geodome.html`'s
+write-up for why that seed matters). Margins comfortable throughout:
+`avgSat` 54.3-66.5 (vs the 22 minimum), `peakNearWhiteFrac` max 0.0061
+(vs the 0.12 ceiling), `projectedRise` -14.0 to +26.5 (vs the 50
+threshold, including the previously-failing seeds, now comfortably inside
+margin), `compositionDrift` 0.0215-0.0515 (vs the 0.015 minimum -- no
+thin-margin seeds remaining after the wobble fix), `unitMotionNonRigidFrac`
+exactly 1.0 on every single seed (vs the 0.40 minimum -- a non-uniform
+per-ring radial shift is not reproducible by any single rigid rotation/
+translation), `fastMotion` always comfortably above its per-frame floor,
+`projectedHourRenderMin` 24.8-34.3min (well inside the CI budget). Visual
+spot-checks across 2/25/50/75/95% of a 34s cycle at 3 seeds, actually
+rendering PNGs and looking at them, not just reading validator output: a
+vivid, bold, immediately-recognisable full-frame field of overlapping
+widening-gap ring systems with clear additive colour interference where
+systems intersect, no artifacts at the cycle boundary, and genuinely
+distinct centre-count/palette combinations across seeds.
+
+**Novelty gate**: measured against all 45 existing engines (the committed
+fingerprint cache was several commits stale, so the whole pool was
+fingerprinted fresh alongside the candidate, per this pool's established
+practice; the refreshed cache was not committed, per this routine's "touch
+only the new engine + log + CLAUDE.md" constraint). Nearest neighbour is
+`widmanstatten` at distance **0.702** -- comfortably clear of the 0.60
+threshold, past the thin-margin territory (0.61-0.63) that warranted extra
+iteration for other engines' first drafts. `liesegang` also forms its own
+singleton archetype group at the pool's perceptual-grouping threshold
+(0.55).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

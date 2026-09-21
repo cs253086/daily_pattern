@@ -331,5 +331,33 @@
     ],
     "nearestNeighbour": "truchet",
     "nearestDistance": 0.996
+  },
+  {
+    "date": "2026-09-21",
+    "inspirationSource": "Liesegang phenomenon -- periodic precipitation banding (Raphael Liesegang, 1896), category \"obscure mathematical object / crystal system / physical phenomenon\" (under-used recently alongside textile traditions). When a diffusing electrolyte reacts with one pre-dispersed in a gel, the precipitate self-organises into discrete concentric rings (or parallel bands from a line source), each ring's formation locally depleting the reagent so the next ring nucleates further out; ring spacing follows the empirically- and theoretically-grounded Jablczynski spacing law, a geometric progression x_n = a*k^n. Sources: https://www.insilico.hu/liesegang/history/history.html, https://pubs.acs.org/doi/10.1021/acs.langmuir.9b03018 (Langmuir, \"Pattern Formation in Precipitation Reactions: The Liesegang Phenomenon\"), https://www.mdpi.com/1996-1944/14/6/1526 (MDPI, \"Regular-Type Liesegang Pattern of AgCl in a 1D System\").",
+    "idea": "Several independent nucleation centres (3-6, scattered with jitter rather than a regular grid) each drawing their own set of concentric rings via the geometric-progression spacing law x_n = a*k^n (k in [1.16,1.36], gaps visibly widening outward), overlapping and additively blending where systems intersect -- a real multi-droplet Liesegang experiment shows exactly this ring-system interference. A genuinely different construction principle from every other radial/ring engine in the pool: ziggurat/arcrings/doylespiral are all a fixed deterministic geometric rule stepped through uniformly; Liesegang's defining trait is a ring position that is the OUTCOME of a nucleation/depletion competition, rendered here via the actual empirical geometric-progression law rather than any uniform or golden-angle increment. chladni/phasespikes/moire are continuous wave-interference fields with no depletion-front logic at all.",
+    "engineName": "liesegang",
+    "outcome": "shipped",
+    "reason": "First design used a width-only pulse (area-fraction-weighted travelling wave, reusing doylespiral.html's just-proven-correct construction) as the sole motion source -- measured insufficient: 8/11 seeds failed compositionDrift on thin margins (0.0115-0.0148 vs the 0.015 floor, local antiphase-style width cancellation suppresses exactly the real structural change compositionDrift needs to see), and 2/11 seeds showed a real brightness-trend failure (+71.9 and +59.9 projected luma) because multi-system ADDITIVE ('lighter') overlap blending is not linear in ring width once pixels approach saturation, breaking the width-pulse's area-weighted zero-sum assumption in a way the single-system doylespiral case never exercised. Fixed by replacing width-pulsing with per-ring independent RADIAL POSITION wobble instead: shifting a thin annulus's centre radius by a small amount (bounded to 12-22% of its local gap) leaves its own area almost unchanged (area ~ r*width with width now fixed), so it is naturally far closer to brightness-neutral than pulsing width, while genuinely redistributing the rotation-invariant radial mass profile compositionDrift measures -- also lowered per-ring alpha (0.38-0.55, down from 0.5-0.72) to reduce multi-system saturation risk further. Final validateEngine() 16/16 across seeds 1-15 plus the CLI's actual default seed 12345: avgSat 54.3-66.5 (vs the 22 minimum), peakNearWhiteFrac max 0.0061 (vs the 0.12 ceiling), projectedRise -14.0 to +26.5 (vs the 50 threshold), compositionDrift 0.0215-0.0515 (vs the 0.015 minimum -- no thin-margin seeds remaining), unitMotionNonRigidFrac exactly 1.0 on every seed (vs the 0.40 minimum -- a non-uniform per-ring radial shift is not reproducible by any single rigid rotation/translation), fastMotion always comfortably above its per-frame floor, projectedHourRenderMin 24.8-34.3min (well inside the CI budget). Visual spot-checks across 2/25/50/75/95% of a 34s cycle at 3 seeds, actually rendering PNGs and looking at them: a vivid, bold, immediately-recognisable full-frame field of overlapping widening-gap ring systems with clear additive colour interference where systems intersect, no artifacts at the cycle boundary, and genuinely distinct centre-count/palette combinations across seeds.",
+    "seedsVerified": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      12345
+    ],
+    "nearestNeighbour": "widmanstatten",
+    "nearestDistance": 0.702
   }
 ]
