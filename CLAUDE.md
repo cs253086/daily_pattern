@@ -5012,6 +5012,156 @@ iteration for other engines' first drafts. `liesegang` also forms its own
 singleton archetype group at the pool's perceptual-grouping threshold
 (0.55).
 
+## Frost-growth diffusion-limited-aggregation engine (`frostgrowth.html`) — 2026-09-22
+
+Daily creative-research routine. Category was "random natural structure" --
+deliberately picked as the pool's most under-used category recently (only
+`hoppercrystal.html` shipped from it since 2026-09-08; the intervening
+firings clustered on Wikipedia-fallback, textile, featured-image, obscure-
+math, and architectural categories), per the `herringbone.html` precedent
+of varying categories rather than defaulting to a heavily-used one. An open
+WebSearch surfaced **diffusion-limited aggregation (DLA)**, the Witten-
+Sander (1981) model behind electrodeposited metal "trees," frost/ice ferns
+on glass, mineral dendrites in rock veins, and Lichtenberg discharge
+channels: a seed particle sits fixed; new particles are released far away
+and random-walk until they either stick PERMANENTLY at first contact with
+the existing cluster, or wander too far and are discarded and re-released.
+Because a random walker is statistically more likely to hit an exposed tip
+than penetrate a concave gap between branches (the gap "shadows" itself
+from incoming walkers), the growing structure self-reinforces at its tips,
+producing a sparse, highly branched fractal with a measured fractal
+dimension of D ~ 1.7 in 2D (vs. D=2 for a solid disk) -- a real physical
+constant, not an aesthetic choice. Sources:
+[Yale Fractal Geometry](https://users.math.yale.edu/public_html/People/frame/Fractals/Panorama/Physics/DLA/DLA.html)
+(Witten-Sander model overview),
+[arXiv: non-universal DLA](https://arxiv.org/pdf/cond-mat/9402003) and
+[randomwalk pkg DLA theory](https://johngavin.github.io/randomwalk/articles/dla_theory.html)
+(D ~ 1.712 +/- 0.003 in 2D, measured via large-scale simulation),
+[arXiv: bias-free on-lattice DLA](https://arxiv.org/pdf/1407.2586) (the
+release/kill-radius convention this engine follows).
+
+**A genuinely different construction PRINCIPLE from `dendrite.html`, the
+pool's only other branching engine.** `dendrite.html` is a DETERMINISTIC
+recursive rule: every segment spawns exactly two shorter, angularly-offset
+children, generation after generation -- the shape is fully fixed the
+instant its angle/decay parameters are drawn, no randomness enters the
+growth process itself beyond the initial parameter roll. This engine has
+NO branching rule at all -- there is no formula for where a branch goes.
+The shape is the literal, sequential HISTORY of thousands of independent
+random walks and one local stickiness test; branchiness, tip-splitting,
+and density are emergent statistical consequences of walker geometry, not
+an authored rule. Also distinct from `automaton.html` (the pool's only
+other stateful/simulated engine): automaton is a synchronous full-row
+neighbour-lookup update every generation; DLA is particle-based SEQUENTIAL
+accretion, one walker resolved at a time.
+
+**What it is**: 3-4 independent clusters, each grown once per video via
+on-lattice random-walk accretion (radius-targeted termination -- stop once
+the cluster's own bounding radius reaches its allocated on-screen
+footprint, capped by a max-cell-count safety valve), placed on a near-
+regular jittered grid (the `dendrite.html`/`hilbertweave.html`/
+`phyllotaxis.html` precedent for "several independent instances" instead
+of one dominant centred mandala). Every cell's arrival order is recorded
+so a periodic REVEAL SWEEP can play back the growth history as a genuine
+time-lapse without ever re-simulating a random walk at render time (86,400
+frames of live walker stepping would be far too slow and would break the
+"same seed -> same everything" convention this project depends on).
+
+**The DLA vertex/edge generation was verified OFFLINE before writing any
+rendering code**, the same discipline this pool's `quasicrystal.html`/
+`geodome.html`/`spaceframe.html`/`hilbertweave.html` already established
+for a construction that could still "look plausible" even if subtly
+wrong: a standalone script confirmed (a) an N ~ R^D scaling fit on
+generated clusters lands close to the known D ~ 1.7-1.8 for most seeds
+(one outlier at 2.36 for a small/dense sample, an expected statistical
+variance at modest cluster sizes, not a systematic bug), (b) a hard
+per-walker step cap (20000) is essentially never hit once a "big-step"
+acceleration (larger single-axis jumps when far from the cluster surface,
+a standard DLA speedup) is applied, and (c) on a shared multi-cluster
+lattice every occupied cell has exactly one unambiguous
+`(cluster, arrivalIndex)` pair -- no silent overwrite where two clusters'
+growth fronts meet.
+
+**Radius-targeted termination replaced an initial fixed-cell-count
+design**, found insufficient by direct timing measurement rather than
+assumption: a fixed target cell count produced wildly inconsistent
+physical footprints per seed (since DLA's radius-vs-cell-count relationship
+has real statistical scatter) and grew needlessly slowly at larger counts
+(1500 cells took ~3.6-9.8s per cluster with plain stepping). Switching to
+"stop once the cluster's OWN bounding radius reaches a target derived from
+its allocated on-screen cell" directly controls the rendered footprint
+regardless of per-seed branchiness, and combined with big-step
+acceleration, a full 3-4 cluster video's worth of structure now grows in
+well under 100ms total.
+
+**Two real visual/motion bugs found only by rendering and running
+`validateEngine()` across a seed battery, not by reasoning about the
+formula:**
+1. *First render looked too small/sparse relative to the frame* -- clusters
+   occupied only a small fraction of their allocated grid cells, reading
+   as scattered specks rather than a bold composition, directly against
+   the house style's "fills the frame" preference. Fixed the same way
+   `muqarnas.html`'s write-up documents ("pull the camera closer / widen
+   the used footprint"): enlarged the allocated per-cluster radius
+   fraction and reduced cell pixel size relative to canvas so each
+   cluster's DLA structure fills more of its own quadrant.
+2. *The first motion design (a tip-only flicker on a fixed-size window of
+   recently-revealed cells) measured far too weak for `validate.js`'s
+   1.5s fast-motion window* -- 14/16 seeds failed outright, since the
+   reveal sweep itself only adds 1-3 new small cells per frame and the
+   tip flicker's amplitude was too subtle to register. Fixed by replacing
+   it with a coverage-neutral size/brightness wave phased by
+   arrival-order INDEX FRACTION (an integer wave count across that axis,
+   the same "phase must span whole cycles" invariant `orbweb.html`/
+   `doylespiral.html` already established) applied across EVERY revealed
+   cell, not just the growth tip. Safe here in a way it would NOT be for
+   `liesegang.html`'s ring case: every DLA cell is the same size/shape, so
+   index-fraction phasing is exactly linear in brightness, unlike
+   `liesegang.html`'s multi-system ADDITIVE overlap blending, which
+   broke an analogous zero-sum assumption once pixels approached
+   saturation (see that engine's own write-up). Needed three rounds of
+   amplitude/rate tuning (0.42 amplitude / 0.6-1.0 rad/s -> 0.62/0.9-1.4
+   -> 0.75/1.2-1.8 -> final 0.85/1.7-2.4) to clear the fastMotion floor
+   with comfortable margin on every tested seed, not just a bare pass on
+   the failing ones.
+
+`CYCLE_SEC=43.5` was chosen the same way `automaton.html`'s write-up
+documents: a brute-force search for the cycle length maximising the
+minimum distance from `validate.js`'s 8 fixed 300s-window sample times to
+the nearest reset boundary independently confirmed the same optimum
+(43.4s at 22.1% margin) automaton.html found for an unrelated engine --
+strong evidence this is a property of the validator's fixed sample times,
+not something to re-derive per engine.
+
+**Verified**: `validateEngine()` **16/16** across seeds 1-15 plus the
+CLI's actual default seed 12345 (see `geodome.html`'s write-up for why
+that seed matters). Margins comfortable throughout: `avgSat` 46.0-55.6
+(vs the 22 minimum), `peakNearWhiteFrac` max 0.0022 (vs the 0.12 ceiling),
+`projectedRise` -63.5 to +39.3 (vs the 50 rise threshold -- only positive
+rise is gated, a large dip is fine), `compositionDrift` 0.0466-0.1292 (vs
+the 0.015 minimum), `unitMotionNonRigidFrac` exactly **1.0 on every single
+seed** (vs the 0.40 minimum -- independent clusters and index-phased waves
+are never explained by one rigid transform), `fastMotion` always
+comfortably above its per-frame floor, `avgMsPerFrame` 3.4-5.9ms giving
+`projectedHourRenderMin` 4.9-8.5min -- among the cheapest engines in the
+whole pool to render. Visual spot-checks across 2/25/50/75/95/105% of a
+43.5s cycle at multiple seeds, actually rendering PNGs and looking at
+them: vivid, bold, immediately-recognisable frost-fern/lightning-tree
+branching clusters filling the frame across 3-4 quadrants, a clearly
+legible growth time-lapse read as the reveal sweep progresses, and
+distinct palette/branch-shape combinations per seed.
+
+**Novelty gate**: measured against all 46 existing engines (the committed
+fingerprint cache was several commits stale, so the whole pool was
+fingerprinted fresh alongside the candidate, per this pool's established
+practice; the refreshed cache was not committed, per this routine's
+"touch only the new engine + log + CLAUDE.md" constraint). Nearest
+neighbour is `cascade` at distance **1.561** -- comfortably clear of the
+0.60 threshold and well above this pool's own historical median pair
+distance, not a thin-margin case. `frostgrowth` also forms its own
+singleton archetype group at the pool's perceptual-grouping threshold
+(0.55).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

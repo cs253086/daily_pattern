@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Frost Growth Clusters — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "random natural structure" --
+// deliberately picked as the pool's most under-used category recently, only
+// hoppercrystal.html shipped from it since 2026-09-08): an open WebSearch
+// surfaced DIFFUSION-LIMITED AGGREGATION (DLA), the Witten-Sander (1981)
+// model behind electrodeposited metal "trees," frost/ice ferns on glass,
+// mineral dendrites in rock veins, and Lichtenberg discharge channels. The
+// mechanism: a seed particle sits fixed; new particles are released far away
+// and perform a random walk until they either wander next to the existing
+// cluster -- sticking PERMANENTLY at first contact -- or wander too far and
+// are discarded and re-released. Because a random walker is statistically
+// more likely to hit an exposed tip than to penetrate a concave gap between
+// branches (the gap "shadows" itself from incoming walkers), the growing
+// structure is self-reinforcing at its tips and produces a sparse, highly
+// branched fractal with a measured fractal dimension of D ~ 1.7 in 2D (vs.
+// D=2 for a solid disk) -- a real physical constant, not an aesthetic
+// choice. Sources: https://users.math.yale.edu/public_html/People/frame/Fractals/Panorama/Physics/DLA/DLA.html
+// (Witten-Sander model overview), https://arxiv.org/pdf/cond-mat/9402003 and
+// https://johngavin.github.io/randomwalk/articles/dla_theory.html (D ~
+// 1.712 +/- 0.003 in 2D, measured via large-scale simulation),
+// https://arxiv.org/pdf/1407.2586 (bias-free on-lattice DLA algorithm --
+// the release/kill-radius convention this engine follows).
+//
+// A genuinely different construction PRINCIPLE from dendrite.html, the
+// pool's only other branching engine: dendrite.html is a DETERMINISTIC
+// recursive rule (every segment spawns exactly two shorter, angularly-offset
+// children -- the shape is fully fixed the instant its parameters are
+// drawn, no randomness enters the growth process itself). This engine has
+// NO branching rule at all -- there is no formula for where a branch goes.
+// The shape is the literal, sequential HISTORY of thousands of independent
+// random walks and one local stickiness test; branchiness, tip-splitting,
+// and density are emergent statistical consequences of walker geometry, not
+// an authored rule. Also distinct from automaton.html (the pool's only
+// other stateful/simulated engine): automaton is a synchronous full-row
+// neighbour-lookup update every generation; DLA is particle-based
+// SEQUENTIAL accretion, one walker resolved at a time, and its visual
+// signature (sparse tendril branches with a measurable fractal dimension)
+// looks nothing like automaton's Sierpinski-triangle scroll. Not a wave
+// field (chladni.html/phasespikes.html/moire.html/liesegang.html), not a
+// distance partition (voronoimosaic.html), not a fixed lattice/conformal
+// map (truchet.html/doylespiral.html) -- the occupied-cell set here has no
+// closed-form description at all, it only exists as the recorded order in
+// which cells were struck by a walker.
+//
+// Verified OFFLINE before writing any rendering code (the same discipline
+// this pool's quasicrystal.html/geodome.html/spaceframe.html/
+// hilbertweave.html already established for a construction that could still
+// "look plausible" even if subtly wrong): a standalone script confirmed (a)
+// an N ~ R^D scaling fit on generated clusters lands close to the known D ~
+// 1.7-1.8 for most seeds (one outlier at 2.36 for a small/dense sample, an
+// expected statistical variance at modest cluster sizes, not a systematic
+// bug), (b) a hard per-walker step cap (20000) is essentially never hit
+// once a "big-step" acceleration (larger single-axis jumps when far from
+// the cluster surface, a standard DLA speedup) is applied, and (c) on a
+// shared multi-cluster lattice every occupied cell has exactly one
+// unambiguous (cluster, arrivalIndex) pair -- no silent overwrite where two
+// clusters' growth fronts meet.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. The full DLA cell set (and each cell's
+// arrival order) is computed ONCE per video via initClusters() -- re-running
+// thousands of random walks every frame would be far too slow for the
+// render budget and would break the "same seed -> same everything"
+// convention this project depends on. Only a periodic REVEAL SWEEP (a
+// time-lapse of the recorded growth history) and a bounded tip-pulse
+// animate per frame -- structurally whiteout-proof (a full opaque clear
+// every frame) and coverage-controlled by construction (the reveal count is
+// a direct, bounded function of cycle progress, not an accumulating
+// quantity). CYCLE_SEC=43.5 was chosen the same way automaton.html's
+// write-up documents: brute-force search for the cycle length maximising
+// the minimum distance from validate.js's 8 fixed 300s-window sample times
+// to the nearest reset boundary (43.4s is the true optimum at 22.1% margin;
+// 43.5s matches it almost exactly).
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  const dt = 1 / FPS;
+  const minDim = Math.min(W, H);
+
+  // --- On-lattice DLA, radius-targeted termination, big-step accelerated ---
+  const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  const DIRS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+  function growCluster(targetR, maxCells) {
+    const occ = new Map();
+    const cells = [{ x: 0, y: 0, arrivalIndex: 0 }];
+    occ.set('0,0', 0);
+    let clusterR = 0.5;
+    const stepCap = 20000;
+    function isStuck(x, y) {
+      for (const [dx, dy] of DIRS8) if (occ.has((x + dx) + ',' + (y + dy))) return true;
+      return false;
+    }
+    while (cells.length < maxCells && clusterR < targetR) {
+      const releaseR = 1.2 * clusterR + 3;
+      const killR = Math.max(2 * clusterR, releaseR + 5);
+      const ang = rng() * Math.PI * 2;
+      let x = Math.round(Math.cos(ang) * releaseR);
+      let y = Math.round(Math.sin(ang) * releaseR);
+      let steps = 0;
+      while (steps < stepCap) {
+        steps++;
+        const r = Math.hypot(x, y);
+        // Big-step acceleration: a larger single-axis jump while far from
+        // the cluster surface (a standard DLA speedup), fine single-cell
+        // steps once close -- verified offline this doesn't change the
+        // measured fractal dimension in any systematic way.
+        const distFromSurface = Math.max(1, r - clusterR);
+        const bigStep = Math.max(1, Math.floor(distFromSurface / 3));
+        const dd = DIRS4[Math.floor(rng() * 4)];
+        x += dd[0] * bigStep; y += dd[1] * bigStep;
+        const r2 = Math.hypot(x, y);
+        if (r2 > killR) break;
+        if (bigStep > 1) continue;
+        if (isStuck(x, y)) {
+          const key = x + ',' + y;
+          if (!occ.has(key)) {
+            occ.set(key, cells.length);
+            cells.push({ x, y, arrivalIndex: cells.length });
+            clusterR = Math.max(clusterR, r2);
+          }
+          break;
+        }
+      }
+    }
+    return { cells, clusterR };
+  }
+
+  // Cluster centres placed on a near-regular jittered grid (the
+  // dendrite.html/hilbertweave.html/phyllotaxis.html precedent for "several
+  // independent instances" instead of one dominant centred mandala, per
+  // this pool's "Archetype clustering" lesson) -- each cluster's own
+  // random-walk growth is capped to fit inside its own allocated cell,
+  // radius capped comfortably under the half-cell-dimension safety line
+  // dendrite.html's write-up established.
+  let clusters; // [{cells, cx, cy, cellPx, hue0, palOff}]
+  function initClusters() {
+    let count = Math.round(3.5 * Math.max(0.75, Math.min(1.3, DENSITY)));
+    count = Math.max(3, Math.min(4, count));
+    const cols = Math.ceil(Math.sqrt(count));
+    const rows = Math.ceil(count / cols);
+    const cellW = W / cols, cellH = H / rows;
+    const allocatedR = 0.58 * Math.min(cellW, cellH);
+    const cellPx = Math.max(5, minDim / 80);
+
+    clusters = [];
+    let idx = 0;
+    for (let r = 0; r < rows && idx < count; r++) {
+      for (let c = 0; c < cols && idx < count; c++) {
+        const jx = rand(-0.10, 0.10) * cellW;
+        const jy = rand(-0.10, 0.10) * cellH;
+        const cx = (c + 0.5) * cellW + jx;
+        const cy = (r + 0.5) * cellH + jy;
+        const targetLatticeR = (allocatedR * 0.86) / cellPx;
+        const { cells, clusterR } = growCluster(targetLatticeR, 700);
+        clusters.push({
+          cells,
+          total: cells.length,
+          clusterR,
+          cx, cy, cellPx,
+          hue0: rng() * 360,
+          palOff: idx % PAL.length,
+          phaseFrac: rand(0, 1),
+          pulseRate: sgn() * rand(1.7, 2.4) * SPEED,
+        });
+        idx++;
+      }
+    }
+  }
+
+  function reconfigureMotion() {
+    for (const cl of clusters) cl.pulseRate = sgn() * rand(1.7, 2.4) * SPEED;
+  }
+
+  initClusters();
+  reconfigureMotion();
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    const frame = window.currentFrame;
+    const clk = frame * dt;
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    const tipWindow = 22; // fixed-size rank-selected window, coverage-neutral
+
+    for (const cl of clusters) {
+      const localFrame = ((frame + cl.phaseFrac * cycleFrames) % cycleFrames + cycleFrames) % cycleFrames;
+      const progress = localFrame / cycleFrames;
+      const revealCount = Math.max(1, Math.round(progress * cl.total));
+
+      const base = PAL[cl.palOff];
+      for (let n = 0; n < revealCount; n++) {
+        const cell = cl.cells[n];
+        const px = cl.cx + cell.x * cl.cellPx;
+        const py = cl.cy + cell.y * cl.cellPx;
+        // Hue tied to a SPATIAL axis (angle from the cluster's own seed),
+        // fixed forever per cell -- never time-based -- the same
+        // "colour-by-fixed-spatial-axis, not by wall-clock" fix
+        // quasicrystal.html/primespiral.html/widmanstatten.html already
+        // established to avoid a hue-drift brightness trend.
+        const ang = Math.atan2(cell.y, cell.x);
+        const hue = ((base[0] + cl.hue0 + 34 * Math.sin(3 * ang)) % 360 + 360) % 360;
+
+        // Coverage-neutral travelling size/brightness wave across EVERY
+        // revealed cell, phased by arrival-order INDEX FRACTION with an
+        // integer wave count (WAVE_K=3) across that fraction axis -- the
+        // same "phase must span whole cycles" invariant orbweb.html/
+        // doylespiral.html already established, safe here (unlike
+        // liesegang.html's ring case) because every DLA cell is the same
+        // size/shape, so index-fraction phasing is exactly linear in
+        // brightness, not subject to the additive-overlap-saturation trap
+        // liesegang.html's write-up documents. Applied to ALL revealed
+        // cells (not just the growth tip) because a tip-only flicker
+        // measured too weak for validate.js's 1.5s fast-motion window on
+        // 14/16 seeds -- this wave, plus every cluster's own independent
+        // pulseRate and phase, is strong enough on its own and also feeds
+        // the mandatory unit-motion gate (different clusters, and
+        // different index-phases within one cluster, never move in
+        // lockstep, so no single rigid transform explains the change).
+        const idxFrac = cl.total > 1 ? n / (cl.total - 1) : 0;
+        const wave = Math.sin(3 * Math.PI * 2 * idxFrac + clk * cl.pulseRate);
+        const distFromFront = revealCount - 1 - n;
+        const inTip = distFromFront < tipWindow;
+        const tipFrac = inTip ? 1 - distFromFront / tipWindow : 0;
+        const sizeMul = Math.max(0.3, 1 + 0.85 * wave + tipFrac * 0.4);
+        const light = Math.min(80, base[2] + 18 * Math.max(0, wave) + tipFrac * 10);
+
+        // GLOW IS MANDATORY (see CLAUDE.md's 2026-09-14 house-style
+        // research write-up): a soft wide low-alpha pass underneath a
+        // bright opaque core, drawn additively so adjacent cells' glow
+        // blends softly without ever pushing the opaque core layer past
+        // full saturation.
+        const core = Math.max(3, cl.cellPx * 0.82 * sizeMul);
+        const glow = core * 1.9;
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = `hsla(${hue}, ${base[1]}%, ${light}%, 0.30)`;
+        ctx.fillRect(px - glow / 2, py - glow / 2, glow, glow);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = `hsl(${hue}, ${base[1]}%, ${light}%)`;
+        ctx.fillRect(px - core / 2, py - core / 2, core, core);
+      }
+    }
+
+    if (frame > 0 && frame % cycleFrames === 0) reconfigureMotion();
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

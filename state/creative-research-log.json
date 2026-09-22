@@ -359,5 +359,33 @@
     ],
     "nearestNeighbour": "widmanstatten",
     "nearestDistance": 0.702
+  },
+  {
+    "date": "2026-09-22",
+    "inspirationSource": "Diffusion-limited aggregation (DLA) -- the Witten-Sander (1981) model behind electrodeposited metal \"trees,\" frost/ice ferns on glass, mineral dendrites in rock veins, and Lichtenberg discharge channels, category \"random natural structure\" (deliberately picked as the pool's most under-used category recently, only hoppercrystal.html shipped from it since 2026-09-08). A seed particle sits fixed; new particles are released far away and random-walk until they either stick permanently at first contact with the existing cluster, or wander too far and are discarded and re-released. Because a random walker is statistically more likely to hit an exposed tip than penetrate a concave gap between branches, the growing structure self-reinforces at its tips, producing a sparse, highly branched fractal with a measured fractal dimension of D ~ 1.7 in 2D. Sources: https://users.math.yale.edu/public_html/People/frame/Fractals/Panorama/Physics/DLA/DLA.html (Witten-Sander model overview), https://arxiv.org/pdf/cond-mat/9402003 and https://johngavin.github.io/randomwalk/articles/dla_theory.html (D ~ 1.712 +/- 0.003 in 2D, measured via large-scale simulation), https://arxiv.org/pdf/1407.2586 (bias-free on-lattice DLA algorithm, the release/kill-radius convention followed here).",
+    "idea": "3-4 independent DLA clusters grown once per video via on-lattice random-walk accretion (big-step accelerated, radius-targeted termination for render-init speed), each cell's arrival order recorded so a periodic reveal-sweep can play back the growth history as a time-lapse without ever re-simulating a walk at render time. A genuinely different construction principle from dendrite.html, the pool's only other branching engine: dendrite.html is a deterministic recursive rule (every segment spawns exactly two shorter, angularly-offset children, fully fixed the instant its parameters are drawn); DLA has no branching rule at all -- the shape is the literal sequential history of thousands of independent random walks and one local stickiness test, with branchiness and tip-splitting as emergent statistical consequences, not an authored rule. Also distinct from automaton.html (synchronous full-row CA update every generation vs. DLA's particle-based sequential accretion).",
+    "engineName": "frostgrowth",
+    "outcome": "shipped",
+    "reason": "Offline-verified before writing rendering code: an N ~ R^D scaling fit on generated clusters landed close to the known D ~ 1.7-1.8 for most seeds; a hard per-walker step cap (20000) was essentially never hit once big-step acceleration (larger single-axis jumps while far from the cluster surface) was applied; a shared multi-cluster lattice gave every occupied cell exactly one unambiguous (cluster, arrivalIndex) pair. Radius-targeted termination (stop growth once a cluster's own bounding radius reaches its allocated on-screen footprint, capped by a max-cell-count safety valve) replaced an initial fixed-cell-count design after early testing showed a fixed target produced wildly inconsistent physical footprints and needlessly slow growth (thousands of ms) at larger counts; the radius-targeted version grows a full 3-4 cluster video's worth of structure in well under 100ms. First render looked too small/sparse relative to the frame (clusters occupying a small fraction of their allocated cells) -- fixed by enlarging the allocated per-cluster radius fraction and reducing cell pixel size relative to canvas, following muqarnas.html's 'pull the composition closer, fill the frame' precedent. The first motion design (a tip-only flicker on a fixed-size window of recently-revealed cells) measured far too weak for validate.js's 1.5s fast-motion window: 14/16 seeds failed outright. Replaced with a coverage-neutral size/brightness wave phased by arrival-order INDEX FRACTION (an integer wave count across that axis, the same 'phase spans whole cycles' invariant orbweb.html/doylespiral.html established) applied across ALL revealed cells rather than just the growth tip -- safe here (unlike liesegang.html's ring case) because every DLA cell is the same size/shape, so index-fraction phasing is exactly linear in brightness, not subject to the additive-overlap-saturation trap liesegang.html's write-up documents. Needed three rounds of amplitude/rate tuning (0.42/(0.6-1.0 rad/s) -> 0.62/(0.9-1.4) -> 0.75/(1.2-1.8) -> final 0.85/(1.7-2.4)) to clear the fastMotion floor with comfortable margin on every seed, not just a bare pass. Final validateEngine() 16/16 across seeds 1-15 plus the CLI's actual default seed 12345: avgSat 46.0-55.6 (vs the 22 minimum), peakNearWhiteFrac max 0.0022 (vs the 0.12 ceiling), projectedRise -63.5 to +39.3 (vs the 50 rise threshold -- only positive rise is gated, a large dip is fine), compositionDrift 0.0466-0.1292 (vs the 0.015 minimum), unitMotionNonRigidFrac exactly 1.0 on every single seed (vs the 0.40 minimum -- independent clusters and index-phased waves are never explained by one rigid transform), fastMotion always comfortably above its per-frame floor, avgMsPerFrame 3.4-5.9ms giving projectedHourRenderMin 4.9-8.5min (among the cheapest engines in the pool, well inside the CI budget). Visual spot-checks across 2/25/50/75/95/105% of a 43.5s cycle at multiple seeds, actually rendering PNGs and looking at them: vivid, bold, immediately-recognisable frost-fern/lightning-tree branching clusters filling the frame across 3-4 quadrants, a clearly legible growth time-lapse read as the reveal sweep progresses, and distinct palette/branch-shape combinations per seed.",
+    "seedsVerified": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      12345
+    ],
+    "nearestNeighbour": "cascade",
+    "nearestDistance": 1.561
   }
 ]
