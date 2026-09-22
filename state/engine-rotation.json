@@ -1,8 +1,8 @@
 {
   "last3D": "hoppercrystal",
-  "last2D": "automaton",
+  "last2D": "cascade",
   "last3DArchetype": "hoppercrystal",
-  "last2DArchetype": "automaton",
+  "last2DArchetype": "cascade",
   "last3DByArchetype": {
     "geodome": "geodome",
     "hoppercrystal": "hoppercrystal",
@@ -16,7 +16,8 @@
     "auto-2026-08-15-spirograph-hypotrocloid-line-art-in-clea": "auto-2026-08-15-spirograph-hypotrocloid-line-art-in-clea",
     "auto-2026-08-29-eclipse-pair": "auto-2026-08-29-eclipse-pair",
     "auto-2026-09-15-a-daytime-eclipse-moon-occults-venus": "auto-2026-09-15-a-daytime-eclipse-moon-occults-venus",
-    "automaton": "automaton"
+    "automaton": "automaton",
+    "cascade": "cascade"
   },
-  "updatedAt": "2026-09-21T15:58:16.775Z"
+  "updatedAt": "2026-09-22T14:05:10.756Z"
 }
