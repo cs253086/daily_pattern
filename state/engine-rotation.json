@@ -1,7 +1,7 @@
 {
-  "last3D": "hoppercrystal",
+  "last3D": "muqarnas",
   "last2D": "cascade",
-  "last3DArchetype": "hoppercrystal",
+  "last3DArchetype": "muqarnas",
   "last2DArchetype": "cascade",
   "last3DByArchetype": {
     "geodome": "geodome",
@@ -9,7 +9,8 @@
     "spaceframe": "spaceframe",
     "torusrings3d": "torusrings3d",
     "discrete-3d-solids": "solids3d",
-    "auto-2026-09-13-llanberis-lake-north-wales": "auto-2026-09-13-llanberis-lake-north-wales"
+    "auto-2026-09-13-llanberis-lake-north-wales": "auto-2026-09-13-llanberis-lake-north-wales",
+    "muqarnas": "muqarnas"
   },
   "last2DByArchetype": {
     "arcrings": "arcrings",
@@ -19,5 +20,5 @@
     "automaton": "automaton",
     "cascade": "cascade"
   },
-  "updatedAt": "2026-09-22T14:05:10.756Z"
+  "updatedAt": "2026-09-23T14:11:46.665Z"
 }
