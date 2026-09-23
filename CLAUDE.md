@@ -5162,6 +5162,133 @@ distance, not a thin-margin case. `frostgrowth` also forms its own
 singleton archetype group at the pool's perceptual-grouping threshold
 (0.55).
 
+## Tablet-weave bands engine (`tabletweave.html`) — 2026-09-23
+
+Daily creative-research routine. Category was "traditional textile/tiling/
+ornament tradition from a randomly chosen culture" -- the pool's most
+under-used category recently (only `taniko.html` shipped from it since
+2026-09-15), per the `herringbone.html` precedent of varying categories
+rather than defaulting to a heavily-used one. An open WebSearch for a
+textile technique not already covered surfaced **tablet (card) weaving**,
+specifically the **Baltic pick-up** tradition (Latvia/Lithuania, also Sami
+Scandinavia): a warp thread passes through one of 4 holes in each of many
+small square "tablets"; turning a tablet a quarter-turn brings a different
+one of its 4 threaded colours to the front, and turning many tablets
+together in coordinated directions weaves a patterned band. Baltic pick-up
+sashes ("jostas") carry a named motif vocabulary -- diamonds, chevrons, and
+a sacred "serpent" (zaltys) motif -- produced by MIRRORED ("point-turned")
+direction changes across the band. Sources:
+[stringpage.com: Tablet Weaving Theory](https://www.stringpage.com/tw/twtheory.html),
+[stringpage.com: Basic Tablet Weaving](https://www.stringpage.com/tw/basictw.html),
+[shelaghlewins.com: The Ancient Craft of Tablet Weaving](https://www.shelaghlewins.com/tablet_weaving/TW01/TW01.htm),
+[silkewerk.com: Diagonal Patterns](http://www.silkewerk.com/tabletweaving/diagonal.html)
+("S cards turned FORWARD produce Z diagonal stripes"),
+[ASpinnerWeaver: Baltic Pickup](http://aspinnerweaver.blogspot.com/2020/04/doing-some-baltic-pickup-and-looking-at.html),
+[Keith Weaves: Baltic-style pick-up weaving](https://www.keithweaves.com/baltic-style-pick-up-weaving-in-south-america/),
+[Keith Weaves: standard terms and notation](https://www.keithweaves.com/tablet-weaving-standard-terms-and-notation/).
+
+**What it is**: a genuinely different construction PRINCIPLE from every
+textile engine already in the pool -- the generative primitive is a
+PER-UNIT ROTATION STATE, not a static motif or a binary grid state. 1-3
+horizontal bands of 16-28 independently-rotating tablets, each rendered as
+a bold rounded rectangle whose on-screen width foreshortens with
+`|cos(angle)|` (clamped to a guaranteed-minimum fraction so nothing
+vanishes to a sliver) and whose fill colour continuously cycles through
+the palette as a direct function of that SAME rotation angle plus a
+per-column colour-offset gradient -- a literal rendering of the sourced
+"S cards turned forward produce Z diagonal stripes" mechanism: as every
+tablet turns but starts from a different threading offset, a diagonal
+rainbow stripe visibly sweeps across the row. Not `stripweave.html`
+(static opaque motifs, no per-unit rotational state at all); not
+`herringbone.html` (a single BINARY over/under state per grid cell from
+one continuous global modular-shift formula, no rotation); not
+`ikatweave.html` (continuous per-thread POSITIONAL misalignment noise
+around one fixed motif, not rotation); not `taniko.html` (static discrete
+shape primitives charted on a grid, with motion as a choreography layer
+added on top -- here rotation IS the generative rule itself, kinetic by
+construction from the first draft). Each band's tablets split into two
+mirrored-direction groups about a per-band "turning point" column,
+reproducing the sourced Baltic diamond/chevron/serpent point-turned motif
+mechanism directly.
+
+**A first code-comment draft claimed an exact, analytically-proven
+coverage-neutrality argument -- checked offline before trusting it, per
+this pool's established discipline, and the claim was WRONG.** The
+argument was: each band's tablets have base angles evenly spaced through
+an integer number (K) of full 2*PI cycles, so the sum of `|cos(angle_i(t))|`
+across all tablets (which drives total rendered width) should be exactly
+time-invariant, a relabelling of the same evenly-spaced point set under a
+shared rotation. A standalone offline script confirmed this holds ONLY
+when every tablet in a band shares one rotation direction -- with the
+point-turned mirror split (half the tablets running `+rate`, half
+`-rate`, the mechanism that produces the sourced diamond/chevron motif),
+the point set at time t is no longer a pure relabelling of the original
+set, and the measured sum drifts by roughly +/-15% of its mean over a
+cycle: a real, bounded, periodic swing, not an unbounded accumulation,
+but not the exact invariant first claimed. Fixed by correcting the code
+comment to state what was actually verified rather than the overclaimed
+argument, and relying on `validateEngine()` across the full seed battery
+(rather than the flawed analytic proof) to confirm the residual swing
+stays small enough in practice. Lesson, worth generalising: an "exact"
+invariant argument that mixes independent per-unit signs (here, rotation
+direction) into what was proven for a single shared sign needs its own
+separate check -- the two cases are not automatically the same argument.
+
+**Deliberately avoided literal per-tablet direction REVERSAL mid-video**
+(a real tablet-weaving chart does reverse direction at specific rows) --
+a reversal necessarily passes through zero angular velocity, the
+near-zero-motion bug class this file documents at length. Instead each
+tablet's direction is fixed for its whole active period and only
+reassigns (rate + turning-point column) at a `cycleSec` boundary, the
+same "reconfigure rate/sign, never animate through zero" pattern already
+proven safe across dozens of this pool's engines (e.g.
+`arcrings.html`/`cascade.html`/`doylespiral.html`).
+
+**One real visual-quality defect found by rendering and looking, not
+caught by `validate.js`'s numeric thresholds** (per the standing "look at
+it" visual-requirements rule): the first render showed bands far thinner
+than their allocated vertical space, with large unused black gaps above/
+below/between bands -- tablet height was capped by an overly tight
+width-derived limit (`w0*1.9`), directly against the house style's "fills
+the frame" preference (the same defect `muqarnas.html`'s write-up
+documents fixing by pulling the camera in). Fixed by decoupling band
+height from tablet width entirely (`bandH*0.82`), so each band fills its
+allocated vertical space boldly. Re-confirmed visually across 3 seeds and
+multiple cycle fractions after the change, and re-ran the full validation
+battery to confirm nothing regressed (margins widened somewhat with the
+larger lit area, but stayed comfortably inside every threshold).
+
+**Verified**: `validateEngine()` **16/16** across seeds 1-15 plus the
+CLI's actual default seed 12345 (see `geodome.html`'s write-up for why
+that seed matters), confirmed twice -- once before and once after the
+layout fix. Margins comfortable throughout: `avgSat` 62.6-72.5 (vs the 22
+minimum), zero near-white pixels on every seed, `projectedRise` -56 to
++30 (vs the 50 RISE threshold -- only positive rise is gated, a large dip
+is fine), `compositionDrift` 0.044-0.066 (vs the 0.015 minimum),
+`unitMotionNonRigidFrac` exactly **1.0 on every single seed** (vs the
+0.40 minimum -- many independently-phased per-tablet width/colour
+oscillations at fixed screen positions are never explained by one rigid
+transform), `fastMotion` always far above its per-frame floor,
+`projectedHourRenderMin` 11.9-23.3min (well inside the CI budget). Visual
+spot-checks across 2/25/50/75/95/105% of a 34s cycle at 3 seeds, actually
+rendering PNGs and looking at them both before and after the layout fix:
+vivid, bold, immediately-legible rows of colourful turning tablets
+filling the frame, visible independent width/colour variation per
+tablet, a clean diagonal rainbow-stripe read, and no artifacts at the
+cycle-boundary reconfigure.
+
+**Novelty gate**: measured against all 47 existing engines (the
+committed fingerprint cache was several commits stale, so the whole pool
+was fingerprinted fresh alongside the candidate, per this pool's
+established practice; the refreshed cache was not committed, per this
+routine's "touch only the new engine + log + CLAUDE.md" constraint).
+Nearest neighbour is `ikatweave` at distance **1.655** -- comfortably
+clear of the 0.60 threshold and well above this pool's own historical
+median pair distance, not a thin-margin case, despite sharing a
+textile/band archetype with the pool's other four weave engines.
+`tabletweave` also forms its own singleton archetype group at the pool's
+perceptual-grouping threshold (0.55).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

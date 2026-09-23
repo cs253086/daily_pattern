@@ -387,5 +387,33 @@
     ],
     "nearestNeighbour": "cascade",
     "nearestDistance": 1.561
+  },
+  {
+    "date": "2026-09-23",
+    "inspirationSource": "Tablet (card) weaving -- Baltic pick-up band tradition (Latvia/Lithuania, also Sami Scandinavia), category \"traditional textile/tiling/ornament tradition from a randomly chosen culture\" (the pool's most under-used category recently, only taniko.html shipped from it since 2026-09-15). A warp thread passes through one of 4 holes in each of many small square \"tablets\" (cards); turning a tablet a quarter-turn brings a different one of its 4 threaded colours to the front. Baltic pick-up weaving produces named motifs (diamonds, chevrons, and a sacred \"serpent\"/zaltys motif) via mirrored (\"point-turned\") direction changes across the band. Sources: https://www.stringpage.com/tw/twtheory.html, https://www.stringpage.com/tw/basictw.html, https://www.shelaghlewins.com/tablet_weaving/TW01/TW01.htm, http://www.silkewerk.com/tabletweaving/diagonal.html (\"S cards turned FORWARD produce Z diagonal stripes\"), http://aspinnerweaver.blogspot.com/2020/04/doing-some-baltic-pickup-and-looking-at.html, https://www.keithweaves.com/baltic-style-pick-up-weaving-in-south-america/, https://www.keithweaves.com/tablet-weaving-standard-terms-and-notation/.",
+    "idea": "1-3 horizontal bands of 16-28 independently-rotating tablets each, rendered as bold rounded rectangles whose on-screen width foreshortens with |cos(angle)| (clamped to a guaranteed-minimum width so nothing vanishes to a sliver) and whose fill colour continuously cycles through the palette as a direct function of the same rotation angle plus a per-column colour-offset gradient (a literal rendering of the sourced 'S cards turned forward produce Z diagonal stripes' mechanism). A genuinely different construction principle from every textile engine already in the pool: the generative primitive is a PER-UNIT ROTATION STATE (an independent continuous angle per tablet, colour and width both direct functions of it) -- not stripweave's static opaque motifs, not herringbone's single binary over/under grid state, not ikatweave's positional misalignment noise around one fixed motif, not taniko's static shape-charting-plus-choreography-layer. Each band's tablets split into two mirrored-direction groups about a per-band 'turning point' column, reproducing the sourced Baltic diamond/chevron/serpent point-turned motif mechanism directly.",
+    "engineName": "tabletweave",
+    "outcome": "shipped",
+    "reason": "A first code-comment draft claimed exact, analytically-proven coverage-neutrality for the width/colour oscillation (evenly-spaced base angles through an integer number of full 2*PI cycles per band) -- checked with a standalone offline script BEFORE trusting it, per this pool's established discipline, and the claim was WRONG: the argument only holds when every tablet in a band shares one rotation direction. With the point-turned mirror direction split (half the tablets running +rate, half -rate, the mechanism that produces the sourced diamond/chevron motif), the point set at time t is no longer a pure relabelling of the original evenly-spaced base set, and the measured sum of |cos(angle_i(t))| drifts by roughly +/-15% of its mean over a cycle -- a real, bounded, periodic swing, not an unbounded accumulation, but not the exact invariant first claimed. Corrected the code comment to state what was actually verified rather than the overclaimed argument, and relied on validateEngine() across the full seed battery to confirm the residual swing stays small enough in practice: 16/16 passed with projectedRise comfortably inside the +/-50 threshold. Deliberately avoided literal per-tablet direction REVERSAL mid-video (a real tablet-weaving chart does reverse direction at specific rows) since a reversal necessarily passes through zero angular velocity -- the near-zero-motion bug class this pool's CLAUDE.md documents at length; instead each tablet's direction is fixed for its whole active period and only reassigns (rate + turning-point column) at a cycleSec boundary, the same 'reconfigure rate/sign, never animate through zero' pattern already proven safe across dozens of this pool's engines. A first visual pass showed the bands were too thin relative to their allocated vertical space (tablet height was capped by an overly tight width-derived limit, w0*1.9, leaving large unused black gaps against the house style's 'fills the frame' preference) -- fixed by decoupling band height from tablet width entirely (bandH*0.82) so each band fills its allocated vertical space boldly. Final validateEngine() 16/16 across seeds 1-15 plus the CLI's actual default seed 12345: avgSat 62.6-72.5 (vs the 22 minimum), zero near-white pixels on every seed, projectedRise -56 to +30 (vs the 50 RISE threshold -- only positive rise is gated, a large dip is fine), compositionDrift 0.044-0.066 (vs the 0.015 minimum), unitMotionNonRigidFrac exactly 1.0 on every single seed (vs the 0.40 minimum -- many independently-phased per-tablet width/colour oscillations at fixed screen positions are never explained by one rigid transform), fastMotion always far above its per-frame floor, projectedHourRenderMin 11.9-23.3min (well inside the CI budget). Visual spot-checks across 2/25/50/75/95/105% of a 34s cycle at 3 seeds, actually rendering PNGs and looking at them both before and after the layout fix: vivid, bold, immediately-legible rows of colourful turning tablets filling the frame, visible independent width/colour variation per tablet, a clean diagonal rainbow-stripe read, and no artifacts at the cycle-boundary reconfigure.",
+    "seedsVerified": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      12345
+    ],
+    "nearestNeighbour": "ikatweave",
+    "nearestDistance": 1.655
   }
 ]
