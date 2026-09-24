@@ -1,8 +1,8 @@
 {
   "last3D": "muqarnas",
-  "last2D": "cascade",
+  "last2D": "chladni",
   "last3DArchetype": "muqarnas",
-  "last2DArchetype": "cascade",
+  "last2DArchetype": "chladni",
   "last3DByArchetype": {
     "geodome": "geodome",
     "hoppercrystal": "hoppercrystal",
@@ -18,7 +18,8 @@
     "auto-2026-08-29-eclipse-pair": "auto-2026-08-29-eclipse-pair",
     "auto-2026-09-15-a-daytime-eclipse-moon-occults-venus": "auto-2026-09-15-a-daytime-eclipse-moon-occults-venus",
     "automaton": "automaton",
-    "cascade": "cascade"
+    "cascade": "cascade",
+    "chladni": "chladni"
   },
-  "updatedAt": "2026-09-23T14:11:46.665Z"
+  "updatedAt": "2026-09-24T14:12:27.021Z"
 }
