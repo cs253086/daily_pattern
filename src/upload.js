@@ -79,6 +79,11 @@ export async function uploadVideo(auth, opts) {
   process.stdout.write('\n');
 
   const id = res.data.id;
+  // Printed as yes/no on purpose: privacyStatus usually comes from the
+  // YT_PRIVACY secret, so GitHub masks the literal value ("privacy=***")
+  // and a job log could never show whether uploads are publicly visible.
+  const finalPrivacy = (res.data.status && res.data.status.privacyStatus) || privacyStatus;
+  console.log(`[upload] publicly visible: ${finalPrivacy === 'public' ? 'yes' : 'NO -- set the YT_PRIVACY secret to public (or delete it) so viewers can find this video'}`);
   // The insert response reports the destination channel — log it so it's clear
   // which channel a token actually uploads to (the upload-only scope can't
   // query this any other way).

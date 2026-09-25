@@ -198,16 +198,15 @@ export function buildMetadata(info = {}) {
   // Describe the actual render length for the description (kept out of the
   // title, which is intentionally just a few words: mood + subject).
   const durLabel = durationLabel(info.durationSec);
-  // TITLE_STYLE=search (repo variable, default OFF): opt-in search-intent
-  // titles, added 2026-09-25 for subscriber growth ("my first goal is 500").
-  // Every high-view video in this niche puts the words people actually type
-  // into the title -- "Screensaver", "1 Hour", "Relaxing" -- while
-  // "Ambient Geometric Composition" matches no query anyone searches. Default
-  // stays the short mood + subject title because that is the owner's standing
-  // rule (CLAUDE.md item 4); flipping one repo variable switches styles.
+  // Search-intent titles are the DEFAULT since 2026-09-25 (added opt-in that
+  // morning for subscriber growth; the owner then said "do all yourself",
+  // which switched it on). Every high-view video in this niche puts the words
+  // people actually type -- "Screensaver", "1 Hour" -- in the title, while
+  // "Ambient Geometric Composition" matches no query anyone searches.
+  // TITLE_STYLE=short (repo variable) restores the old mood + subject title.
   // The recent-title memory still keys on mood + subject, so the no-repeat
   // guarantee is identical in both styles.
-  const searchStyle = String(info.titleStyle || '').toLowerCase() === 'search';
+  const searchStyle = String(info.titleStyle || '').toLowerCase() !== 'short';
   const longTitle = clampTitle(searchStyle
     ? `${subject} Screensaver | ${durLabel.search} ${mood} Visuals for Sleep & Focus`
     : `${mood} ${subject}`);

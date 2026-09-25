@@ -115,6 +115,12 @@ them:
 4. **Titles are a few words** (mood + subject, e.g. "Calming Geometric
    Patterns") — not long tagged strings. Duration/use-case context belongs in
    the description, not the title (see `src/metadata.js`).
+   - **Superseded as the default on 2026-09-25** for subscriber growth: the
+     owner told Claude to apply the growth plan ("do all yourself"), so titles
+     now default to search style ("Penrose Tiling Screensaver | 1 Hour
+     Hypnotic Visuals for Sleep & Focus"). Repo variable `TITLE_STYLE=short`
+     restores the rule above. The subject accuracy and no-repeat rules below
+     still apply in both styles. See "Subscriber growth" near the end.
    - **The subject must name what the video ACTUALLY SHOWS, and a title must
      not repeat while it's still fresh in a subscriber's feed** (2026-09-07,
      user complaint: "the title names are repeated. based on the video
@@ -5456,9 +5462,11 @@ changing anything:
   Composition" versus the top videos in the niche, which all put "Screensaver",
   "1 Hour"/"4K" and "Relaxing" in the title. House rule item 4 (short
   mood + subject titles) is the owner's rule, so the search style is
-  **opt-in**: repo variable `TITLE_STYLE=search` gives
+  first shipped opt-in: repo variable `TITLE_STYLE=search` gave
   "Penrose Tiling Screensaver | 1 Hour Hypnotic Visuals for Sleep & Focus"
-  (69 chars; subject leads so it survives mobile truncation). The
+  (69 chars; subject leads so it survives mobile truncation). Made the
+  DEFAULT the same day after the owner said "do all yourself";
+  `TITLE_STYLE=short` restores the old style. The
   recent-title memory still keys on mood + subject, so the no-repeat
   guarantee is the same in both styles. Do not claim "4K": renders are 1080p.
 - **The Short didn't lead anywhere.** The Short is uploaded after the long
@@ -5475,6 +5483,10 @@ changing anything:
   can't work until the token is re-minted. `scripts/get-refresh-token*.js`
   now request `youtube.force-ssl` too. Until then, playlist adds log a
   warning that says how to fix it, and the upload carries on normally.
+- `YT_PRIVACY` is a secret, so the job log masks it (`privacy=***`) and
+  nobody could tell whether uploads were public. `uploadVideo()` now logs
+  `publicly visible: yes/NO` from the insert response, so the next job log
+  answers it.
 - Tags now lead with `<subject> screensaver`, `1 hour screensaver` and
   `relaxing screensaver`.
 - Verified: metadata for both title styles (checked title length, that the

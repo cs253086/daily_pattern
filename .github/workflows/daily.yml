@@ -66,9 +66,9 @@ jobs:
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
           YT_PRIVACY: ${{ secrets.YT_PRIVACY }}
           # Growth options (2026-09-25), all optional repo variables:
-          # TITLE_STYLE=search -> "Penrose Tiling Screensaver | 1 Hour
-          #   Hypnotic Visuals for Sleep & Focus" instead of the short
-          #   mood+subject title. YT_PLAYLIST_LONG / YT_PLAYLIST_SHORTS ->
+          # Titles default to search style ("Penrose Tiling Screensaver |
+          #   1 Hour Hypnotic Visuals for Sleep & Focus"); TITLE_STYLE=short
+          #   restores the old short mood+subject title. YT_PLAYLIST_LONG / YT_PLAYLIST_SHORTS ->
           #   playlist IDs each upload is added to (needs a refresh token
           #   minted with youtube.force-ssl, see scripts/get-refresh-token.js).
           #   YT_CHANNEL_ID -> overrides the channel the subscribe link uses.
