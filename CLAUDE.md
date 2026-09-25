@@ -5440,6 +5440,51 @@ pass, not a thin-margin case. `reactiondiffusion` also forms its own
 singleton archetype group at the pool's perceptual-grouping threshold
 (0.55).
 
+## Subscriber growth (14 → 500 goal) — 2026-09-25
+
+User: "My subscriber count isn't growing... my first goal is 500 and current
+is 14." Diagnosed from the real production job log (run 36148034498) before
+changing anything:
+
+- **Every video ships silent, and it isn't by choice.** Log line:
+  `[music] FREESOUND_API_KEY not set; skipping stock music.` The secret was
+  never added, so the music feature the owner asked for on 2026-08-17 has
+  never run in production. This niche is watched for sleep/study/relaxing, so
+  silence matters. Fix is manual: add the secret (free key at
+  https://freesound.org/apiv2/apply/). `PIXABAY_API_KEY` is also blank.
+- **Titles match nothing people search for.** "Ambient Geometric
+  Composition" versus the top videos in the niche, which all put "Screensaver",
+  "1 Hour"/"4K" and "Relaxing" in the title. House rule item 4 (short
+  mood + subject titles) is the owner's rule, so the search style is
+  **opt-in**: repo variable `TITLE_STYLE=search` gives
+  "Penrose Tiling Screensaver | 1 Hour Hypnotic Visuals for Sleep & Focus"
+  (69 chars; subject leads so it survives mobile truncation). The
+  recent-title memory still keys on mood + subject, so the no-repeat
+  guarantee is the same in both styles. Do not claim "4K": renders are 1080p.
+- **The Short didn't lead anywhere.** The Short is uploaded after the long
+  video, so `withFullVideoLink()` (`src/metadata.js`) now puts
+  `▶ Full one-hour version: https://youtu.be/<id>` on its first line. Both
+  descriptions also carry a `?sub_confirmation=1` subscribe link (channel ID
+  from `YT_CHANNEL_ID`, defaulting to the Pattern Flow ID seen in the upload
+  response; `uploadAll()` warns if the video lands on a different channel).
+  The tappable Studio "Related video" link on a Short has no Data API
+  endpoint, so it stays manual.
+- **Playlists**: `addToPlaylist()` in `src/upload.js` appends each upload to
+  `YT_PLAYLIST_LONG` / `YT_PLAYLIST_SHORTS` (repo variables, optional). The
+  production refresh token has only the `youtube.upload` scope, so this
+  can't work until the token is re-minted. `scripts/get-refresh-token*.js`
+  now request `youtube.force-ssl` too. Until then, playlist adds log a
+  warning that says how to fix it, and the upload carries on normally.
+- Tags now lead with `<subject> screensaver`, `1 hour screensaver` and
+  `relaxing screensaver`.
+- Verified: metadata for both title styles (checked title length, that the
+  Short link is added without mutating the input, and that there's no
+  subscribe line or "undefined" when no channel ID is set); the
+  `addToPlaylist` failure path with a bogus token returns false without
+  throwing; `TITLE_STYLE=search DRY_RUN=1 DURATION=8 node src/index.js` runs
+  end to end. The real upload/playlist calls can only be exercised on the
+  Actions runner, because youtube.com is blocked from this sandbox.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

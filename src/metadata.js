@@ -198,7 +198,19 @@ export function buildMetadata(info = {}) {
   // Describe the actual render length for the description (kept out of the
   // title, which is intentionally just a few words: mood + subject).
   const durLabel = durationLabel(info.durationSec);
-  const longTitle = clampTitle(`${mood} ${subject}`);
+  // TITLE_STYLE=search (repo variable, default OFF): opt-in search-intent
+  // titles, added 2026-09-25 for subscriber growth ("my first goal is 500").
+  // Every high-view video in this niche puts the words people actually type
+  // into the title -- "Screensaver", "1 Hour", "Relaxing" -- while
+  // "Ambient Geometric Composition" matches no query anyone searches. Default
+  // stays the short mood + subject title because that is the owner's standing
+  // rule (CLAUDE.md item 4); flipping one repo variable switches styles.
+  // The recent-title memory still keys on mood + subject, so the no-repeat
+  // guarantee is identical in both styles.
+  const searchStyle = String(info.titleStyle || '').toLowerCase() === 'search';
+  const longTitle = clampTitle(searchStyle
+    ? `${subject} Screensaver | ${durLabel.search} ${mood} Visuals for Sleep & Focus`
+    : `${mood} ${subject}`);
 
   // Optional credit when the day's colours were drawn from an image (e.g. NASA
   // APOD). info.imageCredit = { source, title, imageUrl }.
@@ -239,6 +251,15 @@ export function buildMetadata(info = {}) {
     ? `Music: "${mc.title}" by ${mc.username} (freesound.org, CC0 license).`
     : undefined;
 
+  // Subscribe link with YouTube's ?sub_confirmation=1, which opens the
+  // subscribe dialog directly instead of just the channel page.
+  const subscribeUrl = info.channelId
+    ? `https://www.youtube.com/channel/${info.channelId}?sub_confirmation=1`
+    : undefined;
+  const playlistUrl = info.longPlaylistId
+    ? `https://www.youtube.com/playlist?list=${info.longPlaylistId}`
+    : undefined;
+
   const description = [
     hook,
     '',
@@ -251,28 +272,34 @@ export function buildMetadata(info = {}) {
     musicCreditLine,
     '',
     `New ${mood.toLowerCase()} ${subject.toLowerCase()} every day — subscribe so you never miss tomorrow's.`,
+    subscribeUrl ? `Subscribe: ${subscribeUrl}` : undefined,
+    playlistUrl ? `Every full-length video so far: ${playlistUrl}` : undefined,
     '',
     '#generativeart #screensaver #ambient #relaxing #hypnotic',
   ].filter((line) => line !== undefined).join('\n');
 
-  const tags = buildTags([mood, subject, 'generative screensaver', durLabel.tag]);
+  const tags = buildTags([mood, subject, `${subject} screensaver`, `${durLabel.tag} screensaver`, 'relaxing screensaver', 'generative screensaver', durLabel.tag]);
 
   // YouTube Shorts: keep the title short, lead the description with the same
   // hook style (short-form viewers decide in the first line too), include
   // #Shorts (required for reliable Shorts-shelf placement).
-  const shortTitle = clampTitle(`${mood} ${subject} #Shorts`);
+  const shortTitle = clampTitle(searchStyle
+    ? `${mood} ${subject} Screensaver #Shorts`
+    : `${mood} ${subject} #Shorts`);
   const shortDescription = [
     `A 30-second taste of today's ${subject.toLowerCase()}${hasAudio ? ', with a calming ambient soundtrack' : ''} — crisp, hypnotic, and endlessly satisfying to watch.`,
     `New pattern every day. Full ${durLabel.phrase} version is on the channel — subscribe for tomorrow's.`,
+    subscribeUrl ? `Subscribe: ${subscribeUrl}` : undefined,
     '',
     '#Shorts #generativeart #satisfying #ambient #hypnotic',
-  ].join('\n');
+  ].filter((line) => line !== undefined).join('\n');
 
   const shortTags = buildTags(['shorts', mood, subject, 'generative screensaver', durLabel.tag]);
 
   return {
     date,
     seed,
+    channelId: info.channelId,
     long: {
       title: longTitle,
       description,
@@ -284,7 +311,26 @@ export function buildMetadata(info = {}) {
       description: shortDescription,
       tags: shortTags,
       categoryId: '24',
+      durationPhrase: durLabel.phrase,
     },
+  };
+}
+
+// The Short is uploaded AFTER the long video (src/upload.js), so by then the
+// long video's ID is known. Put a direct link to it on the Short's FIRST line
+// -- the only line visible without expanding the description on the Shorts
+// player. Before 2026-09-25 the Short only said "full version is on the
+// channel", leaving a viewer who liked the 30s clip to go hunting for it.
+// (Links in Shorts descriptions are not always tappable; the Studio "Related
+// video" button is the tappable path and has no API, so this is the part code
+// can do.) Returns a new object; the input is not mutated.
+export function withFullVideoLink(shortMeta, longVideoId) {
+  if (!shortMeta || !longVideoId) return shortMeta;
+  const phrase = shortMeta.durationPhrase || 'full';
+  return {
+    ...shortMeta,
+    description: `▶ Full ${phrase} version: https://youtu.be/${longVideoId}\n${shortMeta.description}`
+      .replace(/ Full [^\n]* version is on the channel — subscribe/, ' Subscribe'),
   };
 }
 
@@ -293,15 +339,15 @@ export function buildMetadata(info = {}) {
 function durationLabel(durationSec) {
   const s = Number(durationSec);
   if (!Number.isFinite(s) || s <= 0) {
-    return { title: '1 Hour', phrase: 'one-hour', tag: '1 hour' };
+    return { title: '1 Hour', search: '1 Hour', phrase: 'one-hour', tag: '1 hour' };
   }
   if (s % 3600 === 0) {
     const h = s / 3600;
     const word = h === 1 ? 'One Hour' : `${h} Hour`;
-    return { title: word, phrase: h === 1 ? 'one-hour' : `${h}-hour`, tag: `${h} hour` };
+    return { title: word, search: `${h} Hour`, phrase: h === 1 ? 'one-hour' : `${h}-hour`, tag: `${h} hour` };
   }
   const mins = Math.max(1, Math.round(s / 60));
-  return { title: `${mins} Minute`, phrase: `${mins}-minute`, tag: `${mins} minutes` };
+  return { title: `${mins} Minute`, search: `${mins} Minute`, phrase: `${mins}-minute`, tag: `${mins} minutes` };
 }
 
 // YouTube titles must be <= 100 characters.

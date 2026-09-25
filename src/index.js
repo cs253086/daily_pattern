@@ -755,6 +755,13 @@ async function main() {
     // >1 distinct engine in the scene playlist: the description can say the
     // hour moves through a series of different patterns, not one design.
     sceneMix: new Set(renderResult.playlist || []).size > 1,
+    // Growth wiring (2026-09-25): opt-in search-style titles, and the
+    // channel/playlist IDs the descriptions link to. Default channel is the
+    // one production uploads land on ("Pattern Flow", confirmed from the
+    // upload response in the job log); src/upload.js warns if that changes.
+    titleStyle: process.env.TITLE_STYLE,
+    channelId: process.env.YT_CHANNEL_ID || 'UCh2l3pS4l1J0mInJ23FjKsg',
+    longPlaylistId: process.env.YT_PLAYLIST_LONG,
   });
   if (renderResult.playlist && renderResult.playlist.length > 1) {
     console.log(`[index] scene playlist: ${renderResult.playlist.join(' > ')}`);

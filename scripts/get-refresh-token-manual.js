@@ -12,7 +12,14 @@
 import { google } from 'googleapis';
 
 const REDIRECT = 'http://localhost';
-const SCOPE = 'https://www.googleapis.com/auth/youtube.upload';
+// youtube.upload: upload videos + set thumbnails. youtube.force-ssl (added
+// 2026-09-25): add uploads to playlists (YT_PLAYLIST_LONG/YT_PLAYLIST_SHORTS)
+// and manage comments. A token minted with only the first scope keeps
+// uploading fine; playlist adds just log a warning until it is re-minted.
+const SCOPES = [
+  'https://www.googleapis.com/auth/youtube.upload',
+  'https://www.googleapis.com/auth/youtube.force-ssl',
+];
 
 const clientId = process.env.YT_CLIENT_ID;
 const clientSecret = process.env.YT_CLIENT_SECRET;
@@ -28,7 +35,7 @@ if (!arg) {
   const url = oauth2.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
-    scope: [SCOPE],
+    scope: SCOPES,
   });
   console.log('Open this URL and authorize:\n');
   console.log(url);

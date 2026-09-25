@@ -11,7 +11,14 @@ import http from 'node:http';
 import { URL } from 'node:url';
 import { google } from 'googleapis';
 
-const SCOPE = 'https://www.googleapis.com/auth/youtube.upload';
+// youtube.upload: upload videos + set thumbnails. youtube.force-ssl (added
+// 2026-09-25): add uploads to playlists (YT_PLAYLIST_LONG/YT_PLAYLIST_SHORTS)
+// and manage comments. A token minted with only the first scope keeps
+// uploading fine; playlist adds just log a warning until it is re-minted.
+const SCOPES = [
+  'https://www.googleapis.com/auth/youtube.upload',
+  'https://www.googleapis.com/auth/youtube.force-ssl',
+];
 const PORT = Number(process.env.OAUTH_PORT || 53682);
 const REDIRECT = `http://localhost:${PORT}`;
 
@@ -29,7 +36,7 @@ const oauth2 = new google.auth.OAuth2(clientId, clientSecret, REDIRECT);
 const authUrl = oauth2.generateAuthUrl({
   access_type: 'offline',   // required to receive a refresh token
   prompt: 'consent',        // force a refresh token even on re-auth
-  scope: [SCOPE],
+  scope: SCOPES,
 });
 
 const server = http.createServer(async (req, res) => {

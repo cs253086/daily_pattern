@@ -65,6 +65,17 @@ jobs:
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
           YT_PRIVACY: ${{ secrets.YT_PRIVACY }}
+          # Growth options (2026-09-25), all optional repo variables:
+          # TITLE_STYLE=search -> "Penrose Tiling Screensaver | 1 Hour
+          #   Hypnotic Visuals for Sleep & Focus" instead of the short
+          #   mood+subject title. YT_PLAYLIST_LONG / YT_PLAYLIST_SHORTS ->
+          #   playlist IDs each upload is added to (needs a refresh token
+          #   minted with youtube.force-ssl, see scripts/get-refresh-token.js).
+          #   YT_CHANNEL_ID -> overrides the channel the subscribe link uses.
+          TITLE_STYLE: ${{ vars.TITLE_STYLE }}
+          YT_PLAYLIST_LONG: ${{ vars.YT_PLAYLIST_LONG }}
+          YT_PLAYLIST_SHORTS: ${{ vars.YT_PLAYLIST_SHORTS }}
+          YT_CHANNEL_ID: ${{ vars.YT_CHANNEL_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
           # Optional: "image of the day" (src/imageSources.js) drives BOTH

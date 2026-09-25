@@ -6,6 +6,7 @@
 
 import { createReadStream, statSync } from 'node:fs';
 import { google } from 'googleapis';
+import { withFullVideoLink } from './metadata.js';
 
 const DEFAULT_REDIRECT = 'urn:ietf:wg:oauth:2.0:oob';
 
@@ -108,8 +109,35 @@ export async function setThumbnail(auth, videoId, file) {
   }
 }
 
+// Append a video to a playlist. Optional and non-fatal (2026-09-25, growth
+// work): playlists are a strong "watch next" signal and give the channel page
+// something to browse. playlistItems.insert needs the youtube.force-ssl (or
+// youtube) scope, which the original upload-only refresh token does NOT
+// have -- in that case this logs how to fix it and the upload carries on.
+export async function addToPlaylist(auth, playlistId, videoId) {
+  if (!playlistId || !videoId) return false;
+  const youtube = google.youtube({ version: 'v3', auth });
+  try {
+    await youtube.playlistItems.insert({
+      part: ['snippet'],
+      requestBody: { snippet: { playlistId, resourceId: { kind: 'youtube#video', videoId } } },
+    });
+    console.log(`[upload] added ${videoId} to playlist ${playlistId}`);
+    return true;
+  } catch (e) {
+    const reason = (e.errors && e.errors[0] && e.errors[0].reason) || e.code || e.message;
+    const hint = /insufficient|forbidden|403|scope/i.test(String(reason))
+      ? ' -- the refresh token lacks playlist permission; re-run scripts/get-refresh-token.js (now requests youtube.force-ssl) and update the YT_REFRESH_TOKEN secret'
+      : '';
+    console.warn(`[upload] playlist add FAILED for ${videoId}: ${reason}${hint} (continuing)`);
+    return false;
+  }
+}
+
 // Upload the long video then the short, using a metadata object. Optionally
 // attach a custom thumbnail to the long video (Shorts ignore custom thumbs).
+// Optional env: YT_PLAYLIST_LONG / YT_PLAYLIST_SHORTS -- playlist IDs each
+// upload is appended to (see addToPlaylist).
 export async function uploadAll({ longFile, shortFile, thumbnailFile, metadata, env = process.env }) {
   const auth = getOAuthClient(env);
   const results = {};
@@ -119,15 +147,24 @@ export async function uploadAll({ longFile, shortFile, thumbnailFile, metadata, 
     ...metadata.long,
   });
 
+  // The descriptions carry a subscribe link built from a configured channel
+  // ID; say so loudly if the token actually uploaded somewhere else.
+  const uploadedTo = results.long.snippet && results.long.snippet.channelId;
+  if (metadata.channelId && uploadedTo && uploadedTo !== metadata.channelId) {
+    console.warn(`[upload] WARNING: descriptions link channel ${metadata.channelId} but the video went to ${uploadedTo}; set the YT_CHANNEL_ID repo variable to ${uploadedTo}.`);
+  }
+
   if (thumbnailFile) {
     await setThumbnail(auth, results.long.id, thumbnailFile);
   }
+  await addToPlaylist(auth, env.YT_PLAYLIST_LONG, results.long.id);
 
   if (shortFile) {
     results.short = await uploadVideo(auth, {
       file: shortFile,
-      ...metadata.short,
+      ...withFullVideoLink(metadata.short, results.long.id),
     });
+    await addToPlaylist(auth, env.YT_PLAYLIST_SHORTS, results.short.id);
   }
   return results;
 }
