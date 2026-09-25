@@ -5289,6 +5289,157 @@ textile/band archetype with the pool's other four weave engines.
 `tabletweave` also forms its own singleton archetype group at the pool's
 perceptual-grouping threshold (0.55).
 
+## Reaction-diffusion "petri dish" engine (`reactiondiffusion.html`) — 2026-09-25
+
+Daily creative-research routine, category "a random featured image". An open
+WebSearch for a striking macro/scientific-imaging subject surfaced the
+**emperor angelfish** (Pomacanthus imperator) skin stripe pattern, and the
+landmark real experiment behind it: Kondo & Asai, "A reaction-diffusion wave
+on the skin of the marine angelfish Pomacanthus," Nature 376, 765-768
+(1995) -- the fish's stripes aren't fixed, they are continuously generated
+and REARRANGED (splitting, merging, shifting) by a Turing reaction-diffusion
+system, confirmed by seeding a real simulation from a photographed pattern
+and correctly predicting the fish's future stripe layout months later.
+Follow-up: "Stripe formation in juvenile Pomacanthus explained by a
+generalized Turing mechanism with chemotaxis," PNAS 96(10):5549 (1999).
+Rendered via the **Gray-Scott reaction-diffusion model**, the standard
+widely-used discretisation of Turing's mechanism, with feed/kill-rate
+presets (spots/stripes/mitosis) drawn from Pearson's parameter atlas
+(http://www.mrob.com/pub/comp/xmorphia/index.html). Sources:
+https://plus.maths.org/content/how-leopard-got-its-spots.
+
+**A genuinely different construction PRINCIPLE from every other engine in
+the pool -- the pool's FIRST continuous PDE simulation.** Not a static field
+sampled/thresholded fresh each frame (`chladni.html`'s eigenmode zero-
+crossing, `phasespikes.html`'s 3-wave maxima, `moire.html`'s two rotating
+lattices -- all closed-form functions of (x,y,t) with no history); not a
+discrete local-rule automaton (`automaton.html`'s binary rule lookup on a
+wrapped ring); not particle-based sequential accretion (`frostgrowth.html`'s
+DLA random walkers, precomputed once and replayed as a time-lapse). Unit-
+level motion is inherent to the physics (spots visibly drift, split, and
+merge; stripe segments lengthen, kink, and reconnect) rather than a
+choreography layer bolted on afterward -- this is the literal phenomenon
+Kondo & Asai photographed.
+
+**This engine took two firings (interrupted mid-verification the first time
+by a sandbox container restart that wiped all uncommitted work, including
+the engine file itself, and had to be rebuilt from memory) and needed to fix
+three distinct, genuinely novel failure modes never before seen in this
+pool, plus a real novelty-gate iteration.**
+
+1. **Render cost.** A naive per-cell `fillRect()` approach (calling it once
+   per simulation grid cell, ~22,600 calls/frame) measured 55ms/frame in a
+   real browser -- ~79min projected for a full hour, uncomfortably close to
+   the CI budget. Fixed with the same offscreen-canvas + colour-LUT +
+   single `putImageData()`+`drawImage()` technique this pool already uses
+   for other block-grid engines, dropping cost to under 1ms/frame at low
+   substep counts.
+2. **Dead-zone collapse.** A naive +/-0.001 symmetric jitter on the (F,k)
+   feed/kill-rate parameters could cross a real Gray-Scott "dead zone"
+   boundary near the mitosis preset, decaying the whole field to a flat,
+   patternless state. The true boundary depends on the seeded blobs' own
+   count/size/placement too, not just (F,k) -- a fixed-blob-layout offline
+   sweep was measurably insufficient (narrowing the jitter box still let a
+   real production seed collapse). Fixed with a self-correcting retry loop:
+   after warm-up, measure the field's actual standard deviation directly;
+   if it indicates collapse, nudge k away from the kill boundary
+   deterministically and re-seed/re-run, up to 5 attempts -- detecting and
+   correcting the real failure rather than trying to perfectly characterise
+   a boundary that depends on more variables than (F,k) alone.
+3. **Ostwald-ripening coarsening.** Even after fixing render cost and the
+   dead zone, nearly every seed still failed `validate.js`'s `fastMotion`/
+   `compositionDrift` checks at their mid-timeline sample. Root-caused via
+   a dedicated offline diagnostic (sampling motion over the exact same
+   window `validate.js` itself measures, at increasing elapsed time since
+   warm-up) to a real, well-documented physical phenomenon: a mature
+   Gray-Scott field's own internal reorganisation RATE decreases
+   substantially (~5x measured) as elapsed simulation time grows past
+   warm-up, even though mean concentration stays flat throughout -- a field
+   sampled early looks lively; the same field sampled deep into a long
+   render looks nearly frozen, purely from this physical settling process.
+   Distinct from every prior whiteout/motion bug in this pool: the
+   "aggregate brightness never trends" check (already passing) cannot see
+   this, since it's about the RATE of internal reorganisation, not overall
+   brightness. Continuous small per-step noise injection was tried and
+   measured insufficient (still ~5x slowdown, just delayed). Fixed with
+   **periodic batch blob injection**: a few fresh small blobs, boosted at
+   less than full seedBlobs strength, injected every 260 PDE steps at a
+   position chosen from within a random window's own disk (so the
+   injection's motion contribution is never wasted on off-screen area) --
+   an offline sweep of three candidate injection cadences/magnitudes found
+   this the one that actually PLATEAUS (0.039 -> 0.024 -> 0.025 -> 0.022 ->
+   0.022 over the equivalent of a 300s window) rather than continuing to
+   decay the way the other two candidates did.
+4. **Novelty gate.** The first design (one seamless full-frame field, a
+   mid-lightness background) failed the mandatory novelty gate outright at
+   distance **0.529** vs `widmanstatten` -- diagnosed with a per-feature
+   z-score diagnostic to a real structural collision, not a coincidence:
+   literally every pixel in the frame exceeded `fingerprint.js`'s g>12 "lit"
+   threshold, collapsing 4 of the descriptor's 30 features (coverage,
+   blobCount, blobSizeCV, largestBlobFrac) to the exact same saturated
+   values (1.0/1/0/1.0) shared by every other full-bleed, no-black-
+   background engine in the pool (`widmanstatten`/`voronoimosaic`/
+   `stripweave`). Darkening the background colour ALONE made it WORSE
+   (0.469, not better): `fingerprint.js` downsamples the rendered canvas
+   well below this engine's own simulation-grid resolution before measuring
+   luma, so for a genuinely space-filling maze/stripe texture nearly every
+   downsampled sample pixel blends some foreground into it regardless of
+   how dark the pure background colour is -- coverage stayed exactly 1.0
+   either way. The real fix, applying this pool's own proven
+   `dendrite.html`/`hilbertweave.html`/`phyllotaxis.html` multi-instance-
+   window technique: render the SAME underlying field through several
+   independent circular "petri dish" windows (a near-regular jittered grid
+   of 6 disks) instead of the full rectangular frame, with true uniform
+   black negative space between them -- large blocks of true background
+   survive downsampling intact, genuinely breaking the coverage/blob
+   saturation, while the underlying PDE/warm-up/dead-zone-retry/coarsening-
+   fix mechanisms are all unchanged (this only changes what gets rendered,
+   not how the field evolves). A first attempt at this passed only
+   thinly (0.607); iterating window radius directly traded against
+   `compositionDrift` (smaller windows leave less visible pattern area,
+   diluting the structural-change signal -- 2 of 16 seeds fell to
+   0.0123-0.0136 against the 0.015 floor) and, when window COUNT was
+   raised instead of shrinking radius, pushed novelty distance the WRONG
+   direction (12 small windows measured only 0.369, now nearest to
+   `cascade`'s own "many small units" archetype instead of `widmanstatten`/
+   `voronoimosaic`) -- a concrete instance of this pool's established
+   lesson that not every lever moves novelty distance in the intuitively
+   expected direction. Settled on keeping 6 windows at a smaller radius
+   fraction (0.3-0.36 of each grid cell, down from 0.4-0.46) combined with
+   strengthened in-window injection (260 steps/7 blobs, up from 360/6) to
+   recover the `compositionDrift` margin the smaller windows had cost,
+   without giving back the novelty gain -- reaching a comfortable final
+   distance of **0.660** vs `voronoimosaic`.
+
+**Verified** (final design): `validateEngine()` **16/16** across seeds 1-15
+plus the CLI's actual default seed 12345 (see `geodome.html`'s write-up for
+why that seed matters). Margins comfortable throughout: `avgSat` 72.6-95.6
+(vs the 22 minimum), zero near-white pixels on every seed, `projectedRise`
+-33.6 to -6 (vs the 50 RISE threshold -- only positive rise is gated, a
+large dip is fine), `compositionDrift` 0.0198-0.0441 (vs the 0.015
+minimum), `unitMotionNonRigidFrac` exactly 1.0 on every single seed
+(independent per-window field evolution is never explained by one rigid
+transform), `fastMotion` always above its per-frame floor,
+`projectedHourRenderMin` 40.5-46.8min (well inside the CI budget). Visual
+spot-checks across 2/25/50/75/95/105% of a representative ~1365s span
+(well past `validate.js`'s own 300s test window, to directly confirm the
+coarsening fix holds deep into a render) at 3 seeds, actually rendering
+PNGs and looking at them, not just reading validator output: a vivid, bold,
+immediately-legible grid of independently-evolving "petri dish" windows
+into the same reaction-diffusion field, genuine composition change across
+the timeline, no visible injection-pop artifacts, and distinct spots/
+stripes/mitosis presets and palettes across seeds.
+
+**Novelty gate** (final design): measured against all 48 existing engines
+(the committed fingerprint cache was several commits stale, so the whole
+pool was fingerprinted fresh alongside the candidate, per this pool's
+established practice; the refreshed cache was not committed, per this
+routine's "touch only the new engine + log + CLAUDE.md" constraint).
+Nearest neighbour is `voronoimosaic` at distance **0.660** -- a comfortable
+pass, not a thin-margin case. `reactiondiffusion` also forms its own
+singleton archetype group at the pool's perceptual-grouping threshold
+(0.55).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
