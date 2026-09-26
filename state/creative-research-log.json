@@ -443,5 +443,33 @@
     ],
     "nearestNeighbour": "voronoimosaic",
     "nearestDistance": 0.6598
+  },
+  {
+    "date": "2026-09-26",
+    "inspirationSource": "The Rosensweig (normal-field) instability -- when a pool of ferrofluid sits under a vertical magnetic field strong enough to exceed a critical threshold, the flat surface spontaneously breaks up into a regular hexagonal lattice of sharp liquid spikes. Category \"obscure mathematical object / crystal system / physical phenomenon\" -- the pool's most under-used category recently (only quasicrystal.html/liesegang.html shipped from it before). Real, still-studied fluid-dynamics physics driven by a competition between magnetostatic energy (favours spikes) and gravitational/surface-tension energy (favours flat), with the hexagonal packing arising from intersecting \"active rings\" around each peak. Sources: https://www.sciencedirect.com/science/article/abs/pii/S0304885399000815 (a single peak of the Rosensweig instability), https://www.cambridge.org/core/journals/journal-of-fluid-mechanics/article/abs/234-spike-competition-in-the-rosensweig-instability/06BFC40A25C6164E3AF375B55E5B7C48 (the real \"2-3-4 spike competition\" phenomenon), plus search snippets on the hexagonal-lattice/active-ring mechanism and \"the wave nature of the Rosensweig instability\".",
+    "idea": "A fixed triangular/hexagonal point lattice (verified offline: exact unit nearest-neighbour spacing, every interior point has exactly 6 neighbours) where each site independently grows a low-poly hexagonal-cone spike whose height follows a travelling wave phased by RANK order (not raw radius) across the population -- literally reproducing the real \"wave nature of the Rosensweig instability\" and the \"spike competition\" phenomenon (some spikes rising as neighbours fall). Rendered as real lit 3D WebGL, the pool's eighth real-WebGL engine and a genuinely different composition from every other one: not sparse orbiting solids, not a cube grid, not lit tori, not one continuous convex or concave mesh, not a strut framework, not a lattice of concave niches -- a lattice of many separate CONVEX spikes on a black plane. Colour is tied to each spike's fixed rest radial position, never to its time-varying height, so the wave can never create a hue-affects-luma brightness trend.",
+    "engineName": "rosenspikes",
+    "outcome": "shipped",
+    "reason": "Hex lattice generation verified offline before writing any rendering code: 159 points inside a test ellipse, exact minimum pairwise distance of 1.0 (no collisions), and 111 interior points confirmed to have exactly 6 neighbours at that spacing -- the genuine hexagonal-packing invariant. First full validateEngine() battery (16/16 across seeds 1-15 plus the CLI default 12345) passed outright, but the CLI default seed's projectedRise landed at 49.1 against the 50 threshold -- an uncomfortably thin margin worth fixing rather than shipping on a bare pass, per this pool's own established precedent. Root cause: the height wave's phase was keyed to each spike's raw radial distance with an integer number of full cycles across the radius, reasoning this would sum to zero net height change at every instant -- wrong, because the hex lattice's point DENSITY per unit radius is not uniform (an outer ring holds more points than an inner one), so 'waveK full cycles across raw r' does not exactly cancel. Fixed with the doylespiral.html/frostgrowth.html technique: phase by RANK FRACTION (points sorted by radius, phase spread at exact 2*pi*waveK/N increments by index) instead of raw radius -- this sums to exactly zero at every instant by discrete-Fourier orthogonality regardless of how the points are distributed in space. Re-validated: 16/16 still passed, and the default seed's projectedRise improved to 39.1, a comfortable margin, with every other seed also comfortably inside the threshold. Visual iteration (not a validator issue): the first camera angle left ~20% of the frame as empty black sky above the lattice's horizon, against the house style's \"fills the frame\" preference; two camera adjustments were needed (an intermediate one moved the wrong direction, confirmed by rendering and looking, not just reasoning about the lookAt math) before settling on a steeper downward angle that fills the frame boldly while keeping every spike's silhouette clear. Final validateEngine() 16/16 across seeds 1-15 plus 12345: avgSat 43.2-64.4 (vs the 22 minimum), zero near-white pixels on every seed, projectedRise -8.3 to 39.1 (vs the 50 threshold), compositionDrift 0.039-0.058 (vs the 0.015 minimum), unitMotionNonRigidFrac 0.547-0.863 (vs the 0.40 minimum -- many independent per-spike height changes are never explained by one rigid transform), fastMotion always far above its per-frame floor, projectedHourRenderMin 25.6-41.1min (well inside the CI budget). Visual spot-checks across 2/25/50/75/95% of a 40s cycle at 3 seeds, actually rendering PNGs and looking at them, not just reading validator output: a vivid, bold, immediately-legible hexagonal field of spike peaks with a clear radial colour-ring gradient, visible independent height variation across the lattice, and no injection/camera artifacts.",
+    "seedsVerified": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      12345
+    ],
+    "nearestNeighbour": "muqarnas",
+    "nearestDistance": 0.6627
   }
 ]

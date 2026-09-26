@@ -5497,6 +5497,122 @@ changing anything:
   end to end. The real upload/playlist calls can only be exercised on the
   Actions runner, because youtube.com is blocked from this sandbox.
 
+## Rosensweig spike-lattice engine (`rosenspikes.html`) — 2026-09-26
+
+Daily creative-research routine. Category was "obscure mathematical object /
+crystal system / physical phenomenon" -- the pool's most under-used
+category recently (only `quasicrystal.html`/`liesegang.html` shipped from
+it before). An open WebSearch surfaced the **Rosensweig (normal-field)
+instability**: when a pool of ferrofluid sits under a vertical magnetic
+field strong enough to exceed a critical threshold, the flat surface
+spontaneously breaks up into a regular HEXAGONAL LATTICE of sharp liquid
+spikes -- real, still-studied fluid-dynamics physics, driven by a
+competition between magnetostatic energy (favours spikes) and
+gravitational/surface-tension energy (favours flat), with the hexagonal
+packing itself arising from the intersection of "active rings" around
+each emerging peak. A companion paper is literally titled "The wave
+nature of the Rosensweig instability", and another describes a real
+"2-3-4 spike competition" -- spikes gaining/losing height as neighbours
+compete for the same magnetic flux -- which is the direct inspiration for
+this engine's motion, not an invented embellishment. Sources:
+[a single peak of the Rosensweig instability](https://www.sciencedirect.com/science/article/abs/pii/S0304885399000815),
+[the 2-3-4 spike competition](https://www.cambridge.org/core/journals/journal-of-fluid-mechanics/article/abs/234-spike-competition-in-the-rosensweig-instability/06BFC40A25C6164E3AF375B55E5B7C48),
+search snippets confirming the hexagonal-lattice/active-ring mechanism.
+
+**What it is**: a real lit-3D WebGL engine, the pool's eighth. A genuinely
+different construction PRINCIPLE from every other engine in the pool: not
+a substitution/subdivision tiling, not several overlaid band families, not
+a proximity partition, not a recursively-defined path, not an arithmetic
+sieve, not a branching growth process, not a continuous PDE field
+(`reactiondiffusion.html`) -- a FIXED triangular/hexagonal point lattice
+(verified offline before writing any rendering code: a standalone script
+confirmed exact unit nearest-neighbour spacing across the whole generated
+set -- 159 points, minimum pairwise distance exactly 1.0, no collisions --
+and that every interior point has exactly 6 neighbours at that spacing,
+the genuine hex-packing invariant, not just a plausible-looking scatter)
+where each site independently grows a spike whose height follows a
+travelling wave, echoing the real "spike competition" phenomenon
+directly. Also a genuinely different 3D COMPOSITION from every other
+real-WebGL engine: not sparse orbiting solids (`solids3d.html`), not a
+grid of individually-spinning CUBES (`lattice3d.html`), not lit tori/rings
+(`torusrings3d.html`), not one continuous CONVEX dome mesh
+(`geodome.html`), not a connected strut framework of separate beams
+(`spaceframe.html`), not one continuous CONCAVE excavation
+(`hoppercrystal.html`), not a lattice of separate CONCAVE niche cells
+(`muqarnas.html`) -- a lattice of many separate CONVEX spikes (low-poly
+hexagonal cones) standing up from a flat black plane, each an independent
+unit whose height changes relative to its neighbours every frame. Colour
+is tied to each spike's fixed REST radial position, never to its
+time-varying height (the same "colour by an axis the motion can't
+disturb" fix `geodome.html`/`spaceframe.html`/`hoppercrystal.html`
+established), so the travelling height wave can never create a
+hue-affects-luma brightness trend.
+
+**A real, if thin, brightness-trend margin found only by running the full
+seed battery, not by reasoning about the wave formula.** The first design
+phased each spike's height wave by its raw radial distance from the
+lattice centre, with an integer number of full cycles across the used
+radius -- reasoning this would sum to zero net height change at every
+instant, the same "phase must span whole cycles across the frame"
+invariant this pool's `quasicrystal.html`/`orbweb.html`/`doylespiral.html`/
+`frostgrowth.html` already established. `validateEngine()` passed 16/16
+outright, but the CLI's own default seed (12345) landed at `projectedRise`
+49.1 against the 50 threshold -- an uncomfortably thin margin, worth
+fixing per this pool's own precedent (`voderberg.html`'s "a technical pass
+just above the line is still worth a quick iteration check") rather than
+shipping on a bare pass. Root cause: the hex lattice's point DENSITY per
+unit radius is NOT uniform (an outer ring holds more points than an inner
+one), so "waveK full cycles across raw r" does not sum to an exact
+zero-sum height perturbation the way it would for a uniformly-distributed
+set. Fixed with the `doylespiral.html`/`frostgrowth.html` technique
+generalised to this engine: phase by RANK FRACTION instead of raw radius
+-- sort all points by radius, assign each one a phase at an exact
+`2*pi*waveK/N` increment by its index -- which sums to exactly zero at
+every instant by discrete-Fourier orthogonality regardless of how the
+points are actually distributed in space. Re-validated: 16/16 still
+passed, and the default seed's `projectedRise` improved to 39.1, a
+comfortable margin, with no seed left near the threshold.
+
+**One visual-quality iteration, not caught by `validate.js`'s numeric
+thresholds** (per the standing "look at it" visual-requirements rule):
+the first camera angle left roughly 20% of the frame as empty black sky
+above the lattice's horizon, against the house style's "fills the frame"
+preference. Two adjustments were needed -- the first one, tried by
+reasoning about the `mat4LookAt` inputs alone, actually moved the horizon
+the WRONG way (confirmed only by rendering and looking, not by re-deriving
+the math), before a second, correctly-reasoned change (reducing the
+camera's horizontal distance from the lattice while keeping its height,
+genuinely steepening the downward viewing angle) filled the frame boldly
+while keeping every spike's silhouette clear.
+
+**Verified**: `validateEngine()` **16/16** across seeds 1-15 plus the
+CLI's actual default seed 12345 (see `geodome.html`'s write-up for why
+that seed matters), confirmed twice -- once before and once after the
+rank-phase fix. Final margins comfortable throughout: `avgSat` 43.2-64.4
+(vs the 22 minimum), zero near-white pixels on every seed, `projectedRise`
+-8.3 to 39.1 (vs the 50 threshold, no seed left near the line),
+`compositionDrift` 0.039-0.058 (vs the 0.015 minimum), `unitMotionNonRigidFrac`
+0.547-0.863 (vs the 0.40 minimum -- many independent per-spike height
+changes are never explained by one rigid transform), `fastMotion` always
+far above its per-frame floor, `projectedHourRenderMin` 25.6-41.1min
+(well inside the CI budget). Visual spot-checks across 2/25/50/75/95% of
+a 40s cycle at 3 seeds, actually rendering PNGs and looking at them, not
+just reading validator output: a vivid, bold, immediately-legible
+hexagonal field of spike peaks with a clear radial colour-ring gradient,
+visible independent height variation across the lattice, and no
+injection/camera artifacts.
+
+**Novelty gate**: measured against all 49 existing engines (the committed
+fingerprint cache was several commits stale, so the whole pool was
+fingerprinted fresh alongside the candidate, per this pool's established
+practice; the refreshed cache was not committed, per this routine's
+"touch only the new engine + log + CLAUDE.md" constraint). Nearest
+neighbour is `muqarnas` at distance **0.663** -- comfortably clear of the
+0.60 threshold, not a thin-margin case, though the two nearest-WebGL-
+lattice engines landing closest to each other in the pool is not
+surprising. `rosenspikes` also forms its own singleton archetype group at
+the pool's perceptual-grouping threshold (0.55).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

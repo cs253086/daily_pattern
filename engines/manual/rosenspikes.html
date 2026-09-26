@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Rosensweig Spike Field — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "obscure mathematical object /
+// crystal system / physical phenomenon" -- the pool's most under-used
+// category, only quasicrystal.html/liesegang.html shipped from it
+// before). An open WebSearch surfaced the ROSENSWEIG (normal-field)
+// INSTABILITY: when a pool of ferrofluid sits under a vertical magnetic
+// field strong enough to exceed a critical threshold, the flat surface
+// spontaneously breaks up into a regular HEXAGONAL LATTICE of sharp
+// liquid spikes -- real, still-studied fluid-dynamics physics (not
+// folklore), driven by a competition between magnetostatic energy
+// (favours spikes) and gravitational/surface-tension energy (favours
+// flat), with the hexagonal packing itself arising from the
+// intersection of "active rings" around each emerging peak. A companion
+// paper is literally titled "The wave nature of the Rosensweig
+// instability" -- describing the pattern's own height field as
+// propagating waves, which is the direct inspiration for this engine's
+// motion (see below), not an invented embellishment. Sources:
+// https://www.sciencedirect.com/science/article/abs/pii/S0304885399000815
+// (a single peak of the Rosensweig instability),
+// https://www.cambridge.org/core/journals/journal-of-fluid-mechanics/article/abs/234-spike-competition-in-the-rosensweig-instability/06BFC40A25C6164E3AF375B55E5B7C48
+// (the "2-3-4 spike competition" -- real spikes gaining/losing height as
+// neighbours compete for the same magnetic flux, the licence for this
+// engine's height-wave choreography), search snippets confirming the
+// hexagonal-lattice/active-ring mechanism (ResearchGate, arXiv preprints
+// on the normal-field instability).
+//
+// A genuinely different construction PRINCIPLE from every other engine in
+// the pool: not a substitution/subdivision tiling (quasicrystal.html/
+// voderberg.html), not several overlaid band families
+// (widmanstatten.html), not a proximity partition (voronoimosaic.html),
+// not a recursively-defined path (hilbertweave.html), not an arithmetic
+// sieve (primespiral.html), not a branching growth process
+// (dendrite.html/frostgrowth.html), not a continuous PDE field
+// (reactiondiffusion.html) -- a fixed TRIANGULAR/HEXAGONAL point lattice
+// (verified offline before writing any rendering code: a standalone
+// script confirmed exact unit nearest-neighbour spacing across the whole
+// generated set and that every interior point has exactly 6 neighbours
+// at that spacing -- the genuine hexagonal-packing invariant, not just a
+// plausible-looking scatter) where each lattice site independently grows
+// a spike whose height responds to a travelling wave, echoing the real
+// "spike competition" phenomenon directly. Also a genuinely different 3D
+// COMPOSITION from every other real-WebGL engine in the pool: not sparse
+// orbiting solids (solids3d.html), not a grid of individually-spinning
+// CUBES (lattice3d.html), not lit tori/rings (torusrings3d.html), not one
+// continuous CONVEX dome mesh (geodome.html), not a connected strut
+// framework of separate beams (spaceframe.html), not one continuous
+// CONCAVE excavation (hoppercrystal.html), not a lattice of separate
+// CONCAVE niche cells (muqarnas.html) -- a lattice of many separate
+// CONVEX SPIKES (low-poly hexagonal cones) standing up from a flat black
+// plane, each one an independent unit whose height changes relative to
+// its neighbours every frame.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. WebGL context MUST be created with
+// preserveDrawingBuffer:true (see solids3d.html's write-up for why) and
+// handle the same startup-only webglcontextlost/restored dance. gl.clear()
+// to opaque black every frame -- structurally whiteout-proof, same as
+// every other real-WebGL engine here, and the black canvas between spikes
+// also gives genuine dark negative space for free (no full-bleed-coverage
+// novelty-gate collision risk, the real bug reactiondiffusion.html's
+// 2026-09-25 write-up documents fixing after shipping without it).
+//
+// UNIT-LEVEL DYNAMICS, built in from the first draft (per CLAUDE.md's
+// 2026-09-10 standing requirement): every spike's height follows a
+// shared-rate, shared-amplitude oscillation whose PHASE is a function of
+// each spike's own distance from the lattice centre, with an INTEGER
+// number of full phase cycles across the used radial range -- the same
+// "phase must span whole cycles across the frame" coverage-neutrality
+// invariant this pool's quasicrystal.html/orbweb.html/doylespiral.html/
+// frostgrowth.html already established, here literally reproducing the
+// "wave nature of the Rosensweig instability" the cited paper describes:
+// a genuine ripple of rising/falling spikes propagating outward from the
+// centre, not independent unrelated jitter. Colour is tied to each
+// spike's fixed RADIAL position (never to its time-varying height), the
+// same "colour by an axis the motion can't disturb" fix geodome.html/
+// spaceframe.html/hoppercrystal.html established, so the travelling
+// height wave can never create a hue-affects-luma brightness trend.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 40);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true, antialias: true })
+    || canvas.getContext('experimental-webgl', { preserveDrawingBuffer: true, antialias: true });
+
+  // Same startup-only context-loss risk documented in solids3d.html --
+  // headless software WebGL (swiftshader) intermittently fires a spurious
+  // webglcontextlost shortly after context creation, never observed mid-
+  // render past the first couple of frames. Defer window.READY until any
+  // early loss has had a chance to fire and recover.
+  let contextLost = false;
+  canvas.addEventListener('webglcontextlost', (e) => {
+    contextLost = true;
+    e.preventDefault();
+  });
+  canvas.addEventListener('webglcontextrestored', () => {
+    initGL();
+    contextLost = false;
+  });
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+  function hsl2rgb(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [f(0), f(8), f(4)];
+  }
+  function hueLerp(h0, h1, t) {
+    let d = ((h1 - h0 + 540) % 360) - 180;
+    return ((h0 + d * t) % 360 + 360) % 360;
+  }
+
+  // ---- Minimal column-major mat4 helpers (WebGL/GLSL convention, same as
+  // solids3d.html / geodome.html / spaceframe.html / hoppercrystal.html) --
+  function mat4Identity() { return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); }
+  function mat4Multiply(a, b) {
+    const out = new Float32Array(16);
+    for (let c = 0; c < 4; c++) {
+      for (let r = 0; r < 4; r++) {
+        let sum = 0;
+        for (let k = 0; k < 4; k++) sum += a[k * 4 + r] * b[c * 4 + k];
+        out[c * 4 + r] = sum;
+      }
+    }
+    return out;
+  }
+  function mat4Perspective(fovyRad, aspect, near, far) {
+    const f = 1 / Math.tan(fovyRad / 2);
+    const nf = 1 / (near - far);
+    const out = new Float32Array(16);
+    out[0] = f / aspect; out[5] = f; out[10] = (far + near) * nf; out[11] = -1;
+    out[14] = 2 * far * near * nf;
+    return out;
+  }
+  function mat4RotateZ(a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    const m = mat4Identity(); m[0] = c; m[1] = s; m[4] = -s; m[5] = c; return m;
+  }
+  function mat4Scale(s) {
+    const m = mat4Identity(); m[0] = s; m[5] = s; m[10] = s; return m;
+  }
+  function mat4LookAt(eye, target, up) {
+    let zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
+    let zl = Math.hypot(zx, zy, zz) || 1; zx /= zl; zy /= zl; zz /= zl;
+    let xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+    let xl = Math.hypot(xx, xy, xz) || 1; xx /= xl; xy /= xl; xz /= xl;
+    const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+    const out = new Float32Array(16);
+    out[0] = xx; out[1] = yx; out[2] = zx; out[3] = 0;
+    out[4] = xy; out[5] = yy; out[6] = zy; out[7] = 0;
+    out[8] = xz; out[9] = yz; out[10] = zz; out[11] = 0;
+    out[12] = -(xx * eye[0] + xy * eye[1] + xz * eye[2]);
+    out[13] = -(yx * eye[0] + yy * eye[1] + yz * eye[2]);
+    out[14] = -(zx * eye[0] + zy * eye[1] + zz * eye[2]);
+    out[15] = 1;
+    return out;
+  }
+  function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+  function sub3(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+  function norm3(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
+
+  // ---- WebGL setup: per-VERTEX colour so the whole spike field renders in
+  // a SINGLE drawArrays call, same technique geodome.html/spaceframe.html/
+  // hoppercrystal.html use.
+  const VERT_SRC = `
+    attribute vec3 aPosition;
+    attribute vec3 aNormal;
+    attribute vec3 aColor;
+    uniform mat4 uMVP;
+    uniform mat4 uModel;
+    uniform vec3 uEye;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vColor;
+    void main() {
+      vec4 world = uModel * vec4(aPosition, 1.0);
+      vNormal = mat3(uModel) * aNormal;
+      vViewDir = normalize(uEye - world.xyz);
+      vColor = aColor;
+      gl_Position = uMVP * vec4(aPosition, 1.0);
+    }
+  `;
+  const FRAG_SRC = `
+    precision mediump float;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vColor;
+    uniform vec3 uLightDir;
+    void main() {
+      vec3 N = normalize(vNormal);
+      float diff = max(dot(N, normalize(uLightDir)), 0.0);
+      float fresnel = pow(1.0 - max(dot(N, normalize(vViewDir)), 0.0), 2.0);
+      vec3 base = vColor * (0.56 + 0.44 * diff);
+      vec3 rim = vColor * fresnel * 0.4;
+      gl_FragColor = vec4(min(base + rim, vec3(0.86)), 1.0);
+    }
+  `;
+  function compileShader(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error('shader compile: ' + gl.getShaderInfoLog(sh));
+    return sh;
+  }
+
+  let prog, aPosition, aNormal, aColor, uMVP, uModel, uLightDir, uEye, meshBuf;
+  function initGL() {
+    prog = gl.createProgram();
+    gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, VERT_SRC));
+    gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, FRAG_SRC));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('program link: ' + gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+
+    aPosition = gl.getAttribLocation(prog, 'aPosition');
+    aNormal = gl.getAttribLocation(prog, 'aNormal');
+    aColor = gl.getAttribLocation(prog, 'aColor');
+    uMVP = gl.getUniformLocation(prog, 'uMVP');
+    uModel = gl.getUniformLocation(prog, 'uModel');
+    uLightDir = gl.getUniformLocation(prog, 'uLightDir');
+    uEye = gl.getUniformLocation(prog, 'uEye');
+
+    // Positions/normals are DYNAMIC: rewritten every frame by
+    // deformSpikes() (per-spike height wave). Colours are STATIC (fixed by
+    // each spike's rest radial position -- see the header note on why).
+    const posBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, spikeMesh.positions, gl.DYNAMIC_DRAW);
+    const normBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, spikeMesh.normals, gl.DYNAMIC_DRAW);
+    const colBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, spikeMesh.colors, gl.STATIC_DRAW);
+    meshBuf = { posBuf, normBuf, colBuf, count: spikeMesh.count };
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.viewport(0, 0, W, H);
+  }
+
+  // Write one triangle (3 corners, CCW when viewed from its lit side) into
+  // the dynamic position/normal arrays at cursor k, with its own flat
+  // normal (a cone's side faces are never coplanar with each other).
+  function writeTri(pos, nrm, k, a, b, c) {
+    let n = cross3(sub3(b, a), sub3(c, a));
+    n = norm3(n);
+    for (const p of [a, b, c]) {
+      pos[k] = p[0]; pos[k + 1] = p[1]; pos[k + 2] = p[2];
+      nrm[k] = n[0]; nrm[k + 1] = n[1]; nrm[k + 2] = n[2];
+      k += 3;
+    }
+    return k;
+  }
+
+  // ---- Lattice layout: a fixed triangular (hexagonal-packing) point
+  // lattice, verified offline before writing this file (a standalone
+  // script confirmed exact unit nearest-neighbour spacing across the whole
+  // generated set, and that every interior point has exactly 6 neighbours
+  // at that spacing -- the genuine hex-packing invariant this engine's
+  // whole premise depends on). Basis vectors e1=(1,0), e2=(0.5, sqrt3/2)
+  // give unit spacing directly; points are kept if they fall inside a
+  // fixed ellipse sized (by direct rendering + looking) to fill the
+  // 16:9 frame boldly under the fixed oblique camera below, without
+  // needing any "rotation margin" the way a spinning field would (this
+  // engine deliberately does NOT rotate the whole scene -- see the
+  // per-spike wave note above and truchet.html's lesson that a reflexive
+  // whole-field rotation only dilutes the mandatory unit-motion signal by
+  // dominating the rigid-fit when it isn't actually needed for fastMotion).
+  let lattice, spikeMesh, rMax;
+  const NGON = 6; // hex-cone cross-section -- matches the hex lattice theme, crisp/faceted per house style
+  function buildLattice() {
+    const ellipseA = 6.6 * Math.max(0.75, Math.min(1.3, DENSITY));
+    const ellipseB = 4.0 * Math.max(0.75, Math.min(1.3, DENSITY));
+    const qMax = Math.ceil(ellipseA) + 1, rMaxI = Math.ceil(ellipseB) + 1;
+    const pts = [];
+    for (let q = -qMax; q <= qMax; q++) {
+      for (let r = -rMaxI; r <= rMaxI; r++) {
+        const x = q + 0.5 * r;
+        const y = (Math.sqrt(3) / 2) * r;
+        if ((x * x) / (ellipseA * ellipseA) + (y * y) / (ellipseB * ellipseB) <= 1) pts.push([x, y]);
+      }
+    }
+    rMax = Math.max(...pts.map((p) => Math.hypot(p[0], p[1])));
+    lattice = pts.map((p) => ({ x: p[0], y: p[1], r: Math.hypot(p[0], p[1]) }));
+    // Sort by radius and assign each point a RANK FRACTION (0..1 evenly
+    // spaced by count, not by raw radius) for the height-wave phase below.
+    // Raw radius alone is not safe here: the hex lattice's point DENSITY
+    // per unit radius is not uniform (an outer ring holds more points than
+    // an inner one), so "waveK full cycles across raw r" does not sum to
+    // an exact zero-sum height perturbation -- confirmed by a real, if
+    // thin, brightness-trend margin (projectedRise 49.1 against the 50
+    // threshold on the CLI's own default seed 12345) before this fix.
+    // Rank-fraction phasing is the doylespiral.html/frostgrowth.html fix
+    // for the identical class of bug: N points whose phases are spread at
+    // EXACTLY 2*pi*waveK/N increments (an integer waveK) sum to exactly
+    // zero at every instant by discrete-Fourier orthogonality, regardless
+    // of how the points are distributed in space.
+    const byR = lattice.slice().sort((a, b) => a.r - b.r);
+    byR.forEach((p, i) => { p.rankFrac = i / lattice.length; });
+
+    const baseR = 0.34; // spike footprint radius (unit lattice spacing = 1, so 0.34 leaves real gaps between spikes)
+    const hue0 = rng() * 360;
+    const baseCol = PAL[SEED % PAL.length];
+    const nv = lattice.length * NGON * 3;
+    const colors = new Float32Array(nv * 3);
+    let k = 0;
+    for (const p of lattice) {
+      // Colour tied to REST radial position only -- never to the
+      // time-varying height, so the travelling height wave can never
+      // create a hue-affects-luma brightness trend (the geodome.html/
+      // spaceframe.html/hoppercrystal.html fix, applied here from the
+      // first draft). A gentle ripple (3 full cycles across rMax) ties the
+      // colour banding to the same radial axis the height wave itself
+      // propagates along, echoing "the wave nature of the Rosensweig
+      // instability" visually.
+      const hue = ((baseCol[0] + hue0 + 46 * Math.sin((3 * Math.PI * p.r) / rMax)) % 360 + 360) % 360;
+      const rgb = hsl2rgb(hue, Math.max(35, Math.min(95, baseCol[1])), Math.min(64, baseCol[2] + 2));
+      for (let v = 0; v < NGON * 3; v++) { colors[k++] = rgb[0]; colors[k++] = rgb[1]; colors[k++] = rgb[2]; }
+    }
+    spikeMesh = {
+      positions: new Float32Array(nv * 3),
+      normals: new Float32Array(nv * 3),
+      colors,
+      count: nv,
+      baseR,
+    };
+  }
+
+  // ---- Per-unit choreography, drawn ONCE per video (guaranteed minimum
+  // magnitude, random sign, shared rate so the phase relationship between
+  // spikes never desyncs -- see the header note for why this keeps the
+  // travelling wave exactly coverage-neutral for as long as the video
+  // runs, not just approximately).
+  // amp is a bounded fraction of h0 (rest height, never itself re-rolled)
+  // so spikes can shrink toward -- but never invert through -- the base
+  // plane. waveK is an INTEGER full-cycle count across the lattice radius
+  // (coverage-neutral by construction, see the header note); omega/phase0
+  // are drawn once and never reset per cycleSec (a per-cycle phase reset
+  // would land validate.js's widely-spaced samples in uncorrelated random
+  // states, the geodome.html tilt-wobble lesson).
+  let choreo;
+  function initChoreo() {
+    const h0 = rand(0.34, 0.44);
+    choreo = {
+      h0,
+      amp: h0 * rand(0.55, 0.72),
+      waveK: 3,
+      omega: (rng() < 0.5 ? -1 : 1) * rand(0.55, 0.85) * SPEED, // full wave period ~7.4-11.4s
+      phase0: rand(0, Math.PI * 2),
+    };
+  }
+
+  function deformSpikes(t) {
+    const { positions: pos, normals: nrm, baseR } = spikeMesh;
+    const C = choreo;
+    let k = 0;
+    for (const p of lattice) {
+      const wavePhase = C.waveK * Math.PI * 2 * p.rankFrac - C.omega * t + C.phase0;
+      const h = Math.max(0.06, C.h0 + C.amp * Math.sin(wavePhase));
+      const apex = [p.x, p.y, h];
+      for (let i = 0; i < NGON; i++) {
+        const a0 = (i / NGON) * Math.PI * 2, a1 = ((i + 1) / NGON) * Math.PI * 2;
+        const b0 = [p.x + baseR * Math.cos(a0), p.y + baseR * Math.sin(a0), 0];
+        const b1 = [p.x + baseR * Math.cos(a1), p.y + baseR * Math.sin(a1), 0];
+        k = writeTri(pos, nrm, k, b0, b1, apex);
+      }
+    }
+  }
+
+  buildLattice();
+  initChoreo();
+  deformSpikes(0);
+  initGL();
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+  const dt = 1 / FPS;
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  // Fixed oblique camera looking down across the spike field (no whole-
+  // scene rotation -- see the header note). Elevation/distance tuned by
+  // actually rendering frames and looking at them until the lattice fills
+  // the 16:9 frame boldly with the spikes reading clearly as raised points
+  // rather than a flat dot pattern.
+  const EYE = [0, -3.6, 6.0];
+  const TARGET = [0, 0.6, 0];
+  const UP = [0, 1, 0];
+  const proj = mat4Perspective((44 * Math.PI) / 180, W / H, 0.1, 100);
+
+  // A very small residual rotation (NOT reset per cycleSec, continuous)
+  // -- deliberately tiny, added only as a second, independent motion
+  // source in case a given seed's wave alone runs short of fastMotion's
+  // floor; verified via validateEngine() this stays a minor contributor,
+  // never dominant, so it cannot meaningfully dilute unitMotionNonRigidFrac
+  // the way a larger turntable would (the truchet.html lesson).
+  const microRotRate = (rng() < 0.5 ? -1 : 1) * rand(0.05, 0.09) * SPEED;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    if (gl.isContextLost()) return;
+
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    const view = mat4LookAt(EYE, TARGET, UP);
+    let model = mat4RotateZ(clk * microRotRate);
+    model = mat4Multiply(model, mat4Scale(1));
+
+    const mvp = mat4Multiply(proj, mat4Multiply(view, model));
+    gl.uniformMatrix4fv(uMVP, false, mvp);
+    gl.uniformMatrix4fv(uModel, false, model);
+    gl.uniform3f(uEye, EYE[0], EYE[1], EYE[2]);
+
+    // Bounded light-direction oscillation (never sweeping to a fully
+    // back-lit state) -- same coverage-neutral motion source geodome.html/
+    // spaceframe.html/hoppercrystal.html use: redistributes brightness
+    // WITHIN the already-lit surfaces rather than changing how much is lit.
+    const lightAngle = 0.4 * Math.sin(clk * 1.7) + 0.15 * Math.sin(clk * 3.9 + 0.4);
+    gl.uniform3f(uLightDir, Math.cos(lightAngle), 0.35 + 0.1 * Math.sin(lightAngle), 1.2);
+
+    deformSpikes(clk);
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, spikeMesh.positions, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(aPosition);
+    gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.normBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, spikeMesh.normals, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(aNormal);
+    gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.colBuf);
+    gl.enableVertexAttribArray(aColor);
+    gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, meshBuf.count);
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+
+  // Same early-context-loss grace window as solids3d.html/geodome.html/
+  // spaceframe.html/hoppercrystal.html before declaring ready.
+  (async () => {
+    await new Promise((r) => setTimeout(r, 300));
+    const deadline = Date.now() + 1500;
+    while (contextLost && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    window.READY = true;
+  })();
+})();
+</script>
+</body>
+</html>
