@@ -1,8 +1,8 @@
 {
   "last3D": "muqarnas",
-  "last2D": "composer",
+  "last2D": "dendrite",
   "last3DArchetype": "muqarnas",
-  "last2DArchetype": "composer",
+  "last2DArchetype": "dendrite",
   "last3DByArchetype": {
     "geodome": "geodome",
     "hoppercrystal": "hoppercrystal",
@@ -20,7 +20,8 @@
     "automaton": "automaton",
     "cascade": "cascade",
     "chladni": "chladni",
-    "composer": "composer"
+    "composer": "composer",
+    "dendrite": "dendrite"
   },
-  "updatedAt": "2026-09-25T14:37:17.282Z"
+  "updatedAt": "2026-09-26T13:44:04.275Z"
 }
