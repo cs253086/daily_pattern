@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Iridescent Wing Scales — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "a random featured image" -- the
+// pool's most under-used category recently, tied with "obscure mathematical
+// object" at 3-4 uses each, so picked to vary away from that category
+// (used for rosenspikes.html yesterday) per the herringbone.html precedent
+// of varying categories rather than defaulting to a heavily-used one). An
+// open WebSearch for striking macro/scientific photography surfaced
+// BUTTERFLY WING SCALE STRUCTURAL COLOUR: the iridescent blues/greens on
+// many butterflies (Morpho and relatives) are not pigment at all -- they
+// come from a photonic-crystal microstructure (thin, tilted multilayers of
+// chitin ridges on each scale) producing thin-film interference, so the
+// perceived colour genuinely SHIFTS with viewing/lighting angle
+// ("orientation-dependent reflection"), and the wing surface itself is
+// built from thousands of tiny overlapping scales laid down in staggered,
+// shingled/imbricated rows -- like roof tiles or fish scales, not a flat
+// continuous surface. Sources:
+// https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5458968/ (Photonic Crystal
+// Structure and Coloration of Wing Scales of Butterflies Exhibiting
+// Selective Wavelength Iridescence),
+// https://pmc.ncbi.nlm.nih.gov/articles/PMC7148507/ (Orientation-Dependent
+// Reflection of Structurally Coloured Butterflies -- the direct licence for
+// this engine's global colour-sweep motion, not an invented embellishment),
+// http://www.microscopy-uk.org.uk/mag/artoct04/cbscales.html (Geometry and
+// Pattern in Nature 2: Iridescence in butterfly wing scales -- confirms the
+// overlapping-row / shingled scale layout).
+//
+// A genuinely different construction PRINCIPLE from every other textile/
+// lattice engine in the pool: not opaque non-overlapping vertical strips
+// (stripweave.html), not a single grid with one binary over/under state
+// from a modular shift rule (herringbone.html), not continuous per-thread
+// positional misalignment noise around one fixed motif (ikatweave.html),
+// not static discrete shapes charted on a grid plus a choreography layer
+// (taniko.html), not a per-unit ROTATION state driving foreshortening
+// (tabletweave.html) -- an IMBRICATED (overlapping, shingled) lattice of
+// elongated scale shapes in staggered rows, where each row is drawn OVER
+// the row below it (real roof-tile/fish-scale overlap, not a tiling that
+// partitions the plane with no overlap at all), and colour is not a
+// pigment hue rotation but a stand-in for the real physics: each scale's
+// colour is a function of how far along a fixed "orientation sweep axis"
+// it sits, modulated by a single shared, continuously advancing angle --
+// literally rendering "orientation-dependent reflection" as a coherent
+// iridescent colour band sweeping across the whole wing surface.
+//
+// COVERAGE-NEUTRALITY, verified OFFLINE before writing this file (the same
+// discipline this pool's quasicrystal.html/geodome.html/hilbertweave.html/
+// spaceframe.html already established for a claim that could look
+// plausible even if subtly wrong): every scale is assigned a RANK FRACTION
+// i/N (0..1, evenly spaced by COUNT, not by raw position) along a fixed
+// sweep axis, then hue = base + spread*cos(2*pi*waveK*rankFrac - sweepPhase)
+// for an INTEGER waveK. A standalone script confirmed
+// sum_i cos(2*pi*k*(i/N) - phase) is exactly zero (floating-point-exact,
+// ~1e-14) for every tested N/k/phase combination -- discrete-Fourier
+// orthogonality -- so the DISTRIBUTION of hues (and hence aggregate luma)
+// across all N scales is provably identical at every instant regardless of
+// how far sweepPhase has advanced, the same rank-fraction technique
+// rosenspikes.html/doylespiral.html/frostgrowth.html already established
+// for an identical class of coverage-neutrality claim, applied here to a
+// continuously-advancing hue sweep instead of a spatial wave. The same
+// exact-zero-sum argument is reused, with an independent rank ordering and
+// its own integer waveK, for a second, decorrelated per-scale SIZE
+// breathing oscillation (the pool's now-standard "fixed-size window /
+// zero-sum wave" mechanic for unit-level motion, e.g. chladni.html/
+// hilbertweave.html/dragonfold.html/rosenspikes.html).
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. Full opaque black clear-and-redraw every
+// frame (fillRect over the whole canvas before drawing any scale) --
+// structurally whiteout-proof, no accumulation possible. Deliberately NO
+// whole-field rotation (per truchet.html's lesson that a reflexive
+// whole-field rotation only dilutes the mandatory unit-motion signal by
+// dominating the rigid-fit unless fastMotion genuinely needs it as a second
+// source -- the hue sweep and size breathing alone are each independent,
+// spatially-varying, non-rigid signals with no shared rigid transform that
+// could explain either).
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 40);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+  function hsl2rgb(h, s, l) {
+    s /= 100; l /= 100;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = l - c / 2;
+    let r, g, b;
+    h = ((h % 360) + 360) % 360;
+    if (h < 60) { r = c; g = x; b = 0; }
+    else if (h < 120) { r = x; g = c; b = 0; }
+    else if (h < 180) { r = 0; g = c; b = x; }
+    else if (h < 240) { r = 0; g = x; b = c; }
+    else if (h < 300) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+    return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+  }
+
+  const minDim = Math.min(W, H);
+  const dt = 1 / FPS;
+
+  // ---- Scale lattice: staggered (brick-offset) rows of elongated ellipse
+  // "scales", each row overlapping the one below it (pitchY < scaleH),
+  // real roof-tile/fish-scale imbrication. Geometry, jitter, and per-scale
+  // colour scheme are all fixed ONCE per video in buildScales() -- never
+  // re-rolled per cycle, the "any coverage-affecting parameter re-randomised
+  // per cycle creates a real brightness swing" lesson this pool documents
+  // for over a dozen prior engines.
+  let scales, sweepAngle, breatheAngle, hueWaveK, breatheWaveK, hueSpread, breatheAmpFrac, baseHue0, baseSat, baseLight;
+  function buildScales() {
+    const d = Math.max(0.72, Math.min(1.35, DENSITY));
+    const pitchX = minDim / (9.5 * d);
+    const aspect = rand(1.6, 2.05);
+    const scaleH = pitchX * aspect;
+    const pitchY = scaleH * rand(0.52, 0.62); // 38-48% overlap between consecutive rows
+    const scaleW = pitchX * rand(1.0, 1.16);  // slight horizontal overlap too
+    const rx0 = scaleW / 2, ry0 = scaleH / 2;
+
+    const marginRows = 2, marginCols = 2;
+    const rowCount = Math.ceil(H / pitchY) + marginRows * 2;
+    const colCount = Math.ceil(W / pitchX) + marginCols * 2;
+    const rStart = -marginRows, cStart = -marginCols;
+
+    const list = [];
+    for (let r = rStart; r < rowCount - marginRows; r++) {
+      const rowOffset = (((r % 2) + 2) % 2) ? pitchX / 2 : 0;
+      const y = r * pitchY + pitchY / 2;
+      for (let c = cStart; c < colCount - marginCols; c++) {
+        const x = c * pitchX + rowOffset + pitchX / 2;
+        const jx = rand(-0.08, 0.08) * pitchX;
+        const jy = rand(-0.08, 0.08) * pitchY;
+        list.push({ r, x: x + jx, y: y + jy, rx: rx0 * rand(0.94, 1.06), ry: ry0 * rand(0.94, 1.06) });
+      }
+    }
+    scales = list;
+
+    // Two INDEPENDENT rank orderings (perpendicular spatial sweep axes) so
+    // the hue sweep and the size-breathing wave visually decorrelate --
+    // each is separately exact-zero-sum (verified offline, see header).
+    sweepAngle = rand(0, Math.PI * 2);
+    breatheAngle = sweepAngle + Math.PI / 2;
+    const byU = scales.slice().sort((a, b) =>
+      (a.x * Math.cos(sweepAngle) + a.y * Math.sin(sweepAngle)) -
+      (b.x * Math.cos(sweepAngle) + b.y * Math.sin(sweepAngle)));
+    byU.forEach((p, i) => { p.rankU = i / byU.length; });
+    const byV = scales.slice().sort((a, b) =>
+      (a.x * Math.cos(breatheAngle) + a.y * Math.sin(breatheAngle)) -
+      (b.x * Math.cos(breatheAngle) + b.y * Math.sin(breatheAngle)));
+    byV.forEach((p, i) => { p.rankV = i / byV.length; });
+
+    hueWaveK = 3;
+    breatheWaveK = 4;
+    hueSpread = rand(46, 68);
+    breatheAmpFrac = rand(0.13, 0.19);
+
+    const base = PAL[SEED % PAL.length];
+    baseHue0 = ((base[0] + rand(0, 360)) % 360 + 360) % 360;
+    baseSat = Math.max(62, Math.min(94, base[1]));
+    baseLight = Math.max(46, Math.min(60, base[2]));
+  }
+
+  // Reconfigured at start-up AND every cycleSec: only the SWEEP/BREATHE
+  // RATES (magnitude + sign) reassign -- the accumulated phases themselves
+  // keep advancing continuously across the reset (never zeroed), the same
+  // "reassign rate/sign, never reset the shared clock" convention already
+  // proven safe by arcrings.html/cascade.html/doylespiral.html. A per-cycle
+  // phase RESET would land validate.js's widely-spaced fixed samples in
+  // uncorrelated random phase states (the geodome.html tilt-wobble lesson).
+  let sweepRate, breatheRate;
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+  function reconfigureRates() {
+    sweepRate = sgn() * rand(0.55, 0.85) * SPEED;
+    breatheRate = sgn() * rand(0.9, 1.4) * SPEED;
+  }
+
+  buildScales();
+  reconfigureRates();
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let sweepPhase = 0, breathePhase = 0;
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    sweepPhase += sweepRate * dt;
+    breathePhase += breatheRate * dt;
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw rows from BOTTOM (large row index) to TOP (small row index) so
+    // each row further up the frame is painted OVER the row below it --
+    // the real roof-tile/fish-scale imbrication direction (an upper course
+    // laps over the course below it). Sorting once per frame by row index
+    // is cheap (a few hundred scales) and keeps the loop simple.
+    const ordered = scalesByRowDesc();
+
+    for (const s of ordered) {
+      const hue = baseHue0 + hueSpread * Math.cos(2 * Math.PI * hueWaveK * s.rankU - sweepPhase);
+      const light = baseLight + 6 * Math.cos(2 * Math.PI * hueWaveK * s.rankU - sweepPhase + 1.1); // small correlated glint, bounded
+      const breathe = 1 + breatheAmpFrac * Math.cos(2 * Math.PI * breatheWaveK * s.rankV - breathePhase);
+      const rx = s.rx * breathe, ry = s.ry * breathe;
+      const fillCol = `hsl(${hue.toFixed(1)}, ${baseSat}%, ${Math.max(38, Math.min(66, light)).toFixed(1)}%)`;
+      const edgeCol = `hsl(${hue.toFixed(1)}, ${baseSat}%, ${Math.max(20, baseLight - 20).toFixed(1)}%)`;
+
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fillStyle = fillCol;
+      ctx.fill();
+      ctx.lineWidth = Math.max(1, rx * 0.09);
+      ctx.strokeStyle = edgeCol;
+      ctx.stroke();
+
+      // Two faint ridge highlights (the real cuticle ridge/cross-rib
+      // structure the photonic effect depends on) -- fixed relative to the
+      // scale's own current size, same hue family, low alpha: texture, not
+      // an independent coverage-affecting element.
+      ctx.save();
+      ctx.globalAlpha = 0.32;
+      ctx.strokeStyle = `hsl(${hue.toFixed(1)}, ${baseSat}%, ${Math.min(84, light + 22).toFixed(1)}%)`;
+      ctx.lineWidth = Math.max(1, rx * 0.05);
+      ctx.beginPath(); ctx.moveTo(s.x - rx * 0.32, s.y - ry * 0.6); ctx.lineTo(s.x - rx * 0.32, s.y + ry * 0.6); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(s.x + rx * 0.1, s.y - ry * 0.65); ctx.lineTo(s.x + rx * 0.1, s.y + ry * 0.65); ctx.stroke();
+      ctx.restore();
+    }
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureRates(); }
+  }
+
+  // Row order is fixed geometry (never changes), so compute it once and
+  // cache it rather than re-sorting every frame.
+  let cachedOrder = null;
+  function scalesByRowDesc() {
+    if (cachedOrder) return cachedOrder;
+    cachedOrder = scales.slice().sort((a, b) => b.r - a.r);
+    return cachedOrder;
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

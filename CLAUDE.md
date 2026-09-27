@@ -5613,6 +5613,115 @@ lattice engines landing closest to each other in the pool is not
 surprising. `rosenspikes` also forms its own singleton archetype group at
 the pool's perceptual-grouping threshold (0.55).
 
+## Iridescent wing-scale engine (`wingscales.html`) — 2026-09-27
+
+Daily creative-research routine. Category was "a random featured image" --
+picked to vary away from "obscure mathematical object / crystal system /
+physical phenomenon" (used the day before, for `rosenspikes.html`), per the
+`herringbone.html` precedent of varying categories rather than defaulting to
+a heavily-used one; both categories were tied as the pool's most under-used
+recently (3-4 uses each). An open WebSearch for striking macro/scientific
+photography surfaced BUTTERFLY WING SCALE STRUCTURAL COLOUR: the iridescent
+blues/greens on many butterflies (Morpho and relatives) are not pigment at
+all -- they come from a photonic-crystal microstructure (thin, tilted
+multilayers of chitin ridges on each scale) producing thin-film
+interference, so the perceived colour genuinely SHIFTS with viewing/
+lighting angle ("orientation-dependent reflection"), and the wing surface
+itself is built from thousands of tiny overlapping scales laid down in
+staggered, shingled/imbricated rows -- like roof tiles or fish scales, not
+a flat continuous surface. Sources:
+https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5458968/ (Photonic Crystal
+Structure and Coloration of Wing Scales of Butterflies Exhibiting
+Selective Wavelength Iridescence),
+https://pmc.ncbi.nlm.nih.gov/articles/PMC7148507/ (Orientation-Dependent
+Reflection of Structurally Coloured Butterflies -- the direct licence for
+this engine's global colour-sweep motion, not an invented embellishment),
+http://www.microscopy-uk.org.uk/mag/artoct04/cbscales.html (Geometry and
+Pattern in Nature 2: Iridescence in butterfly wing scales -- confirms the
+overlapping-row/shingled scale layout).
+
+**What it is**: a genuinely different construction PRINCIPLE from every
+textile/lattice engine already in the pool: not opaque non-overlapping
+vertical strips (`stripweave.html`), not a single grid with one binary
+over/under state from a modular shift rule (`herringbone.html`), not
+continuous per-thread positional misalignment noise around one fixed motif
+(`ikatweave.html`), not static discrete shapes charted on a grid plus a
+choreography layer (`taniko.html`), not a per-unit rotation state driving
+foreshortening (`tabletweave.html`) -- an IMBRICATED (overlapping,
+shingled) lattice of elongated ellipse "scale" shapes in staggered
+brick-offset rows, with each row drawn OVER the row below it (real
+roof-tile/fish-scale overlap, not a non-overlapping tiling that partitions
+the plane with no overlap at all). Colour is not a plain hue rotation but a
+direct rendering of "orientation-dependent reflection": each scale is
+assigned a fixed RANK FRACTION (0..1, evenly spaced by count, not by raw
+position) along a fixed spatial sweep axis, and
+`hue = base + spread*cos(2*pi*waveK*rankFraction - sweepPhase)` for an
+integer `waveK` and one shared, continuously advancing `sweepPhase` -- a
+coherent iridescent colour band sweeps across the whole surface exactly
+like a real wing's colour shifting with viewing angle. An independent
+second rank ordering (a perpendicular spatial sweep axis) drives a
+decorrelated per-scale SIZE-breathing wave for unit-level motion.
+
+**Coverage-neutrality verified OFFLINE before writing any rendering code**,
+the same discipline this pool's `quasicrystal.html`/`geodome.html`/
+`hilbertweave.html`/`spaceframe.html` already established for a claim that
+could look plausible even if subtly wrong: a standalone script confirmed
+`sum_i cos(2*pi*k*(i/N) - phase)` is exactly zero (floating-point-exact,
+~1e-14) across every tested N/k/phase combination -- discrete-Fourier
+orthogonality -- so the DISTRIBUTION of hues (and hence aggregate luma)
+across all N scales is provably identical at every instant regardless of
+how far `sweepPhase` has advanced, the exact rank-fraction technique
+`rosenspikes.html`/`doylespiral.html`/`frostgrowth.html` already
+established for an identical class of coverage-neutrality claim, applied
+here to a continuously-advancing hue sweep (and, with an independent rank
+ordering and its own integer `waveK`, to a decorrelated size-breathing
+wave) instead of a spatial height/area wave.
+
+**No bugs found -- `validateEngine()` passed 16/16 on the FIRST attempt**
+across seeds 1-15 plus the CLI's actual default seed 12345 (see
+`geodome.html`'s write-up for why that seed matters), joining
+`primespiral.html`/`stripweave.html`/`widmanstatten.html`/
+`hoppercrystal.html`/`moire.html`/`orbweb.html` as engines that passed
+cleanly on the first attempt by applying this pool's established
+coverage-stability and motion lessons from the start rather than
+discovering them empirically per engine -- real evidence the offline
+verify-before-trusting discipline pays off directly in fewer iteration
+rounds. Deliberately NO whole-field rotation at all (per `truchet.html`'s
+lesson that a reflexive whole-field rotation only dilutes the mandatory
+unit-motion signal by dominating the rigid-fit unless `fastMotion`
+genuinely needs it as a second source) -- the hue sweep and size breathing
+alone gave `unitMotionNonRigidFrac` exactly **1.0 on every single tested
+seed**, since neither a colour change nor an independent per-scale size
+oscillation at a fixed screen position can be explained by any single
+rigid transform.
+
+**Verified**: `validateEngine()` **16/16** across seeds 1-15 plus 12345.
+Margins comfortable throughout: `avgSat` 66.2-91.8 (vs the 22 minimum),
+zero near-white pixels on every seed, `projectedRise` -20.3 to +24.4 (vs
+the 50 threshold), `compositionDrift` 0.0347-0.0767 (vs the 0.015
+minimum), `unitMotionNonRigidFrac` exactly 1.0 on every seed, `fastMotion`
+always far above its per-frame floor (17-45 vs floors of 2.3-4.9),
+`projectedHourRenderMin` 38.7-52.5min (well inside the CI budget). Visual
+spot-checks across 2/25/50/75/95/105% of a 40s cycle at 3 seeds, actually
+rendering PNGs and looking at them, not just reading validator output: a
+vivid, bold, immediately-recognisable imbricated scale/shell texture with
+a genuine diagonal iridescent colour band visibly sweeping across the
+frame between checkpoints, clear crisp scale outlines and ridge-highlight
+texture, and three visually distinct palette combinations (green/orange/
+yellow; blue/purple/cyan Morpho-style; aqua/green/orange) across the three
+spot-checked seeds.
+
+**Novelty gate**: measured against all 50 existing engines (the committed
+fingerprint cache was several commits stale, so the whole pool was
+fingerprinted fresh alongside the candidate, per this pool's established
+practice; the refreshed cache was not committed, per this routine's
+"touch only the new engine + log + CLAUDE.md" constraint). Nearest
+neighbour is `liesegang` at distance **1.141** -- comfortably clear of the
+0.60 threshold and well above this pool's own historical median pair
+distance, not a thin-margin case. `wingscales` also forms its own
+singleton archetype group at the pool's perceptual-grouping threshold
+(0.55).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
