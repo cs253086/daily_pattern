@@ -130,11 +130,14 @@ export function resolveConfig(cli = {}) {
     crf: pick(cli, 'crf', 'CRF', 20, num),
     preset: pick(cli, 'preset', 'PRESET', 'medium'),
 
-    // short cut: a 30s clip. Default (blank) = derived from the FIRST scene
+    // short cut: a 15s clip (was 30s until 2026-09-28: channel analytics
+    // showed several 30s Shorts losing viewers ~10s in, while the ones
+    // watched past 100% were replays. A shorter clip gets finished and
+    // looped more). Default start (blank) = derived from the FIRST scene
     // so the Short always shows the headline engine the title names (see
     // shortWindow); an explicit value is an absolute offset in seconds.
     shortStart: pick(cli, 'shortStart', 'SHORT_START', '', (v) => String(v)),
-    shortDuration: pick(cli, 'shortDuration', 'SHORT_DURATION', 30, num),
+    shortDuration: pick(cli, 'shortDuration', 'SHORT_DURATION', 15, num),
     // short aspect ratio: 'fill' = scale-and-crop to vertical 9:16 (best for
     // centered generative art); 'pad' = letterbox the source inside 9:16;
     // 'none' = keep the source aspect (no crop). YouTube Shorts strongly

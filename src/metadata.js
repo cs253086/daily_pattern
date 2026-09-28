@@ -310,7 +310,7 @@ export function buildMetadata(info = {}) {
     ? `${mood} ${subject} Screensaver #Shorts`
     : `${mood} ${subject} #Shorts`);
   const shortDescription = [
-    `A 30-second taste of today's ${subject.toLowerCase()}${hasAudio ? ', with a calming ambient soundtrack' : ''} — crisp, hypnotic, and endlessly satisfying to watch.`,
+    `A quick taste of today's ${subject.toLowerCase()}${hasAudio ? ', with a calming ambient soundtrack' : ''} — crisp, hypnotic, and endlessly satisfying to watch.`,
     `New pattern every day. Full ${durLabel.phrase} version is on the channel — subscribe for tomorrow's.`,
     subscribeUrl ? `Subscribe: ${subscribeUrl}` : undefined,
     '',
@@ -343,7 +343,7 @@ export function buildMetadata(info = {}) {
 // long video's ID is known. Put a direct link to it on the Short's FIRST line
 // -- the only line visible without expanding the description on the Shorts
 // player. Before 2026-09-25 the Short only said "full version is on the
-// channel", leaving a viewer who liked the 30s clip to go hunting for it.
+// channel", leaving a viewer who liked the short clip to go hunting for it.
 // (Links in Shorts descriptions are not always tappable; the Studio "Related
 // video" button is the tappable path and has no API, so this is the part code
 // can do.) Returns a new object; the input is not mutated.

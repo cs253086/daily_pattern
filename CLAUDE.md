@@ -1,6 +1,6 @@
 # daily_pattern — project guidance
 
-Automated pipeline: renders a daily generative-art video (1 hour) + a 30s
+Automated pipeline: renders a daily generative-art video (1 hour) + a 15s
 Short, silent by default (optional CC0 music, see "Ambient music" below), uploads both to the "Pattern Flow" YouTube channel. Runs via GitHub
 Actions cron (`.github/workflows/daily.yml`) calling `src/index.js`.
 
@@ -5516,6 +5516,16 @@ changing anything:
   throwing; `TITLE_STYLE=search DRY_RUN=1 DURATION=8 node src/index.js` runs
   end to end. The real upload/playlist calls can only be exercised on the
   Actions runner, because youtube.com is blocked from this sandbox.
+
+- **Shorts are 15s, not 30s (2026-09-28).** First look at real channel
+  analytics (owner's Studio screenshot, Aug 31 - Sep 27: 5.2K views, 181.7
+  watch hours, +4 subscribers): 30s Shorts split sharply. Two held viewers
+  only ~10s (30-37% viewed) while the best ones were replayed (68%, and
+  204% on the composer Short). `shortDuration` default 30 -> 15 in
+  `src/render.js` (`SHORT_DURATION` overrides); the Short description no
+  longer hard-codes "30-second". The same data showed the Jul 18 video with
+  a descriptive "... for Calm & Concentration - One Hour Screensaver" title
+  still at #2 for the month, i.e. evidence for the search-style titles.
 
 ## Rosensweig spike-lattice engine (`rosenspikes.html`) — 2026-09-26
 
