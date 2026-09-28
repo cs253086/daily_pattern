@@ -18,7 +18,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import 'dotenv/config';
 
 import { render, resolveConfig } from './render.js';
-import { buildMetadata } from './metadata.js';
+import { buildMetadata, MANDALA_ENGINES } from './metadata.js';
+import { composeThumbnail } from './thumbnail.js';
 import { uploadAll } from './upload.js';
 import { generateEngine } from './generate.js';
 import { validateEngine } from './validate.js';
@@ -113,6 +114,9 @@ function readRotationState() {
       // inspection -- this exact bug shipped once already in this file's
       // history for a different field (see the old-schema migration
       // comment above) and repeated here until the test caught it.
+      // Featured-mandala cursor (2026-09-28, see curatedOr). Listed here for
+      // the same whitelist reason as every field below.
+      lastMandala: typeof data.lastMandala === 'string' ? data.lastMandala : null,
       last3DArchetype: typeof data.last3DArchetype === 'string' ? data.last3DArchetype : null,
       last2DArchetype: typeof data.last2DArchetype === 'string' ? data.last2DArchetype : null,
       // Per-archetype internal cursors (2026-09-06, see nextInBucket()
@@ -353,6 +357,7 @@ const MAX_SINGLE_ENGINE_FREQ = 0.20;
 function effectiveP3D(n3D) {
   return Math.min(DESIRED_P_3D, MAX_SINGLE_ENGINE_FREQ * n3D);
 }
+const MANDALA_DAY_PCT = 33;
 function curatedOr(reason, seed) {
   const pool = curatedPool();
   if (pool.length === 0) {
@@ -363,6 +368,28 @@ function curatedOr(reason, seed) {
   const pool3D = pool.filter(isWebGLEngine);
   const pool2D = pool.filter((p) => !isWebGLEngine(p));
   const state = readRotationState();
+
+  // Featured mandala day (2026-09-28). Channel analytics showed the
+  // "Kaleidoscope"/"Sacred Geometry" videos are the ones bringing viewers
+  // back, and the 2026-09-14 research found radial symmetry the most
+  // reliably liked shape family. On about 1 in 3 curated days the pick
+  // comes from MANDALA_ENGINES instead (own name-keyed round-robin, so they
+  // take turns), on top of their normal turns in the main rotation.
+  // Seed-hashed like the 3D/2D choice, so the same date always decides the
+  // same way. FEATURE_MANDALA=0 turns it off.
+  const mandalaPool = pool.filter((p) => MANDALA_ENGINES.includes(path.basename(p, '.html')));
+  if (process.env.FEATURE_MANDALA !== '0' && mandalaPool.length > 0
+      && (hashStr(`${seed}:mandala`) % 100) < MANDALA_DAY_PCT) {
+    const names = mandalaPool.map((p) => path.basename(p, '.html'));
+    const lastIdx = names.indexOf(state.lastMandala);
+    let idx = lastIdx >= 0 ? (lastIdx + 1) % names.length : hashStr(String(seed)) % names.length;
+    // Don't repeat yesterday's curated pick if the main rotation just used it.
+    if (names.length > 1 && (names[idx] === state.last2D || names[idx] === state.last3D)) idx = (idx + 1) % names.length;
+    const name = names[idx];
+    writeRotationState({ ...state, lastMandala: name });
+    console.log(`[index] featured mandala day -- using curated engine ${name}${reason ? ` (${reason})` : ''}.`);
+    return { engine: mandalaPool[idx], source: `curated:${name}` };
+  }
 
   const p3D = effectiveP3D(pool3D.length);
   const want3D = pool3D.length > 0 && (pool2D.length === 0 || (hashStr(`${seed}:dim`) % 100) < p3D * 100);
@@ -769,6 +796,23 @@ async function main() {
   });
   if (renderResult.playlist && renderResult.playlist.length > 1) {
     console.log(`[index] scene playlist: ${renderResult.playlist.join(' > ')}`);
+  }
+
+  // Custom thumbnail: most vivid candidate frame + big text (see
+  // src/thumbnail.js). Non-fatal: on any failure the plain frame render()
+  // already wrote is uploaded instead. THUMB_TEXT=0 turns it off.
+  if (process.env.THUMB_TEXT !== '0' && renderResult.thumbnailCandidates?.length) {
+    try {
+      const t = await composeThumbnail({
+        candidates: renderResult.thumbnailCandidates,
+        outPath: renderResult.thumbnail,
+        headline: String(metadata.durationLabel || '').toUpperCase(),
+        subline: metadata.subject,
+      });
+      console.log(`[index] thumbnail: picked ${path.basename(t.picked)} of ${t.scores.length} candidates, added text`);
+    } catch (e) {
+      console.warn(`[index] custom thumbnail failed, using the plain frame: ${e.message}`);
+    }
   }
   console.log(`[index] long title : ${metadata.long.title}`);
   console.log(`[index] short title: ${metadata.short.title}`);

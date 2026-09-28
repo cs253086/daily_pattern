@@ -33,7 +33,7 @@ const MOODS = [
 // every day and whose slug comes from the source PHOTO's title, not from
 // what the engine draws) fall back to a dimension-aware generic below.
 const ENGINE_SUBJECTS = {
-  arcrings: 'Rotating Arc Rings',
+  arcrings: 'Mandala Rings',
   automaton: 'Fractal Cell Growth',
   cascade: 'Cascading Blocks',
   chladni: 'Cymatic Wave Patterns',
@@ -43,7 +43,7 @@ const ENGINE_SUBJECTS = {
   dragonfold: 'Dragon Curve Fractal',
   frostgrowth: 'Frost Crystal Growth',
   geodome: 'Geodesic Dome',
-  geometric: 'Geometric Patterns',
+  geometric: 'Sacred Geometry Mandala',
   grid: 'Op-Art Grid',
   herringbone: 'Herringbone Weave',
   hilbertweave: 'Hilbert Curve Weave',
@@ -63,8 +63,8 @@ const ENGINE_SUBJECTS = {
   rosenspikes: 'Ferrofluid Spikes',
   solids3d: 'Floating 3D Solids',
   spaceframe: 'Octet Space Frame',
-  spirograph: 'Spirograph Curves',
-  starburst: 'Nested Starbursts',
+  spirograph: 'Spirograph Mandala',
+  starburst: 'Starburst Mandala',
   stripweave: 'Woven Strip Patterns',
   tabletweave: 'Tablet Weaving Bands',
   taniko: 'Taniko Woven Borders',
@@ -77,8 +77,19 @@ const ENGINE_SUBJECTS = {
   widmanstatten: 'Crystal Lattice Bands',
   wingscales: 'Butterfly Wing Scales',
   wireframe: 'Wireframe Polytopes',
-  ziggurat: 'Art Deco Ziggurats',
+  ziggurat: 'Art Deco Mandala',
 };
+
+// Engines whose picture genuinely reads as a kaleidoscope / mandala
+// (centred, radially symmetric), checked by rendering a frame of each
+// candidate and looking at it (2026-09-28). Channel analytics listed
+// "Kaleidoscope" and "Sacred Geometry" titles as the videos bringing
+// viewers back, so these get mandala/kaleidoscope wording in their subject
+// and tags, and src/index.js features them more often (featuredMandala in
+// curatedOr). Quasicrystal, muqarnas and orbweb are radial too but did not
+// read as mandalas in the check, so they are deliberately left out.
+export const MANDALA_ENGINES = ['kaleidoscope', 'starburst', 'spirograph', 'geometric', 'arcrings', 'ziggurat'];
+const MANDALA_TAGS = ['mandala', 'kaleidoscope', 'sacred geometry', 'mandala screensaver', 'kaleidoscope screensaver'];
 
 // Fallback for engines with no entry above -- Gemini's daily auto-* engines.
 // Their filename slug describes the SOURCE PHOTO ("scenic-view-of-gardens"),
@@ -301,7 +312,8 @@ export function buildMetadata(info = {}) {
     '#generativeart #screensaver #ambient #relaxing #hypnotic',
   ].filter((line) => line !== undefined).join('\n');
 
-  const tags = buildTags([mood, subject, `${subject} screensaver`, `${durLabel.tag} screensaver`, 'relaxing screensaver', 'generative screensaver', durLabel.tag]);
+  const mandalaTags = MANDALA_ENGINES.includes(String(info.engineName || '').trim()) ? MANDALA_TAGS : [];
+  const tags = buildTags([mood, subject, ...mandalaTags, `${subject} screensaver`, `${durLabel.tag} screensaver`, 'relaxing screensaver', 'generative screensaver', durLabel.tag]);
 
   // YouTube Shorts: keep the title short, lead the description with the same
   // hook style (short-form viewers decide in the first line too), include
@@ -323,6 +335,9 @@ export function buildMetadata(info = {}) {
     date,
     seed,
     channelId: info.channelId,
+    // For the custom thumbnail text (src/thumbnail.js).
+    subject,
+    durationLabel: durLabel.search,
     long: {
       title: longTitle,
       description,

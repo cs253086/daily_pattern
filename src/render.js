@@ -533,7 +533,23 @@ async function extractThumbnail(cfg, scene0Sec = cfg.duration) {
     cfg.thumbnailPath,
   ];
   await runFfmpeg(args, 'thumbnail');
-  return { at: t };
+
+  // Candidate frames for src/thumbnail.js, which picks the most vivid one
+  // and adds text (2026-09-28). All from inside the headline scene, like
+  // the frame above. Failures here are non-fatal: the plain frame above is
+  // still a valid thumbnail.
+  const candidates = [];
+  for (const [i, f] of [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9].entries()) {
+    const at = Math.max(0, Math.min(cfg.duration - 0.1, scene0Sec * f));
+    const file = path.join(cfg.outDir, `thumb-cand-${i}.jpg`);
+    try {
+      await runFfmpeg(['-y', '-ss', String(at), '-i', cfg.longPath, '-frames:v', '1', '-q:v', '2', file], 'thumbnail-candidate');
+      candidates.push(file);
+    } catch (e) {
+      console.warn(`[render] thumbnail candidate at ${at.toFixed(1)}s failed: ${e.message}`);
+    }
+  }
+  return { at: t, candidates };
 }
 
 function runFfmpeg(args, label) {
@@ -743,6 +759,7 @@ export async function render(cli = {}) {
       long: cfg.longPath,
       short: cfg.shortPath,
       thumbnail: cfg.thumbnailPath,
+      thumbnailCandidates: thumbInfo.candidates,
       seed: cfg.seed,
       width: cfg.width,
       height: cfg.height,

@@ -5527,6 +5527,34 @@ changing anything:
   a descriptive "... for Calm & Concentration - One Hour Screensaver" title
   still at #2 for the month, i.e. evidence for the search-style titles.
 
+- **Thumbnails get text and a picked frame; mandala patterns are featured
+  (2026-09-28).** Studio's Content and Audience tabs (owner-supplied) showed:
+  60.9K impressions, 89% from recommendations, 2.8% click-through (low end
+  of YouTube's stated 2-10% range for half of channels); traffic = Shorts
+  feed 37.6%, suggested 32.9%, browse 14.5%, search only 5.3%; both
+  subscribers came from long videos, none from Shorts; 64.2% of watch time
+  on TVs; "Kaleidoscope"/"Sacred Geometry" titles lead "videos growing
+  your audience". So:
+  - `src/thumbnail.js` (new): `render()` now also extracts 8 candidate
+    frames from the headline scene (`thumb-cand-N.jpg`); `composeThumbnail()`
+    scores them in headless Chromium (saturation x luma contrast, penalised
+    for mostly-empty or blown-out frames), keeps the best, and draws "1
+    HOUR" (yellow) + the pattern name (white, black outline) on a dark left
+    scrim. The frame is shifted right only when its own left edge is dark;
+    shifting a full-bleed pattern left a hard black band (seen on the
+    Doyle spiral and Voronoi samples before the fix). Canvas, not ffmpeg,
+    because of this repo's ffmpeg filter-graph history. Non-fatal; the plain
+    frame is kept on failure. `THUMB_TEXT=0` disables it.
+  - `MANDALA_ENGINES` in `src/metadata.js` (kaleidoscope, starburst,
+    spirograph, geometric, arcrings, ziggurat), chosen by rendering frames
+    and looking: quasicrystal, muqarnas and orbweb are radial but didn't
+    read as mandalas. Their subjects now say Mandala/Sacred Geometry, they
+    get mandala/kaleidoscope tags, and `curatedOr()` gives about 1 in 3
+    curated days to them via a separate `lastMandala` cursor (whitelisted in
+    `readRotationState()`). 90-day simulation: 36% of curated days mandala,
+    5-6 turns each, zero same-engine repeats on consecutive days.
+    `FEATURE_MANDALA=0` disables it. Gemini days are unaffected.
+
 ## Rosensweig spike-lattice engine (`rosenspikes.html`) — 2026-09-26
 
 Daily creative-research routine. Category was "obscure mathematical object /
