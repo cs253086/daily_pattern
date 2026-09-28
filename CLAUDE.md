@@ -5489,6 +5489,15 @@ changing anything:
   answers it.
 - Tags now lead with `<subject> screensaver`, `1 hour screensaver` and
   `relaxing screensaver`.
+- **Confirmed from the 2026-09-27 production log**: search titles ship, and
+  uploads are public. GitHub masks the substring "public" because it equals
+  the `YT_PRIVACY` secret, so the line reads `***ly visible: yes`. Same log
+  exposed a real gap: 15 curated engines added since 2026-09-10 had no
+  `ENGINE_SUBJECTS` entry, so the Doyle spiral video was titled "Generative
+  Geometry Screensaver". All 15 added; `subjectFor()` now warns in the job
+  log whenever a non-`auto-*` engine has no entry, so the next gap is
+  visible instead of silent. The daily research routine must add the entry
+  in the same commit as the engine (item 4 already says so).
 - Verified: metadata for both title styles (checked title length, that the
   Short link is added without mutating the input, and that there's no
   subscribe line or "undefined" when no channel ID is set); the

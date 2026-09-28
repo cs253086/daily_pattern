@@ -39,27 +39,42 @@ const ENGINE_SUBJECTS = {
   chladni: 'Cymatic Wave Patterns',
   composer: 'Geometric Composition',
   dendrite: 'Fractal Branches',
+  doylespiral: 'Doyle Spiral Circles',
+  dragonfold: 'Dragon Curve Fractal',
+  frostgrowth: 'Frost Crystal Growth',
   geodome: 'Geodesic Dome',
   geometric: 'Geometric Patterns',
   grid: 'Op-Art Grid',
   herringbone: 'Herringbone Weave',
   hilbertweave: 'Hilbert Curve Weave',
   hoppercrystal: 'Hopper Crystal Staircase',
+  ikatweave: 'Ikat Weave Patterns',
   kaleidoscope: 'Kaleidoscope Patterns',
   lattice3d: 'Spinning Cube Lattice',
+  liesegang: 'Liesegang Rings',
+  moire: 'Moire Patterns',
+  muqarnas: 'Muqarnas Honeycomb Vault',
+  orbweb: 'Spider Web Spiral',
+  phasespikes: 'Hexagon Spike Lattice',
   phyllotaxis: 'Golden Spiral Clusters',
   primespiral: 'Prime Number Spiral',
   quasicrystal: 'Penrose Tiling',
+  reactiondiffusion: 'Reaction Diffusion Patterns',
+  rosenspikes: 'Ferrofluid Spikes',
   solids3d: 'Floating 3D Solids',
   spaceframe: 'Octet Space Frame',
   spirograph: 'Spirograph Curves',
   starburst: 'Nested Starbursts',
   stripweave: 'Woven Strip Patterns',
+  tabletweave: 'Tablet Weaving Bands',
+  taniko: 'Taniko Woven Borders',
   tessellation: 'Recursive Tessellation',
   torusrings3d: 'Glowing 3D Rings',
+  truchet: 'Truchet Tile Maze',
   voderberg: 'Voderberg Spiral',
   voronoimosaic: 'Voronoi Mosaic',
   widmanstatten: 'Crystal Lattice Bands',
+  wingscales: 'Butterfly Wing Scales',
   wireframe: 'Wireframe Polytopes',
   ziggurat: 'Art Deco Ziggurats',
 };
@@ -73,8 +88,16 @@ const GENERIC_SUBJECT_3D = 'Lit 3D Geometry';
 const GENERIC_SUBJECT_2D = 'Generative Geometry';
 
 function subjectFor(engineName, engineIs3D) {
-  const known = ENGINE_SUBJECTS[String(engineName || '').trim()];
+  const name = String(engineName || '').trim();
+  const known = ENGINE_SUBJECTS[name];
   if (known) return known;
+  // 13 curated engines added 2026-09-10..25 shipped without an entry, so
+  // e.g. the 2026-09-27 Doyle spiral video was titled "Generative Geometry".
+  // Only Gemini's auto-* engines are expected to land here; say so loudly
+  // for anything else so the job log shows the gap.
+  if (name && !name.startsWith('auto-')) {
+    console.warn(`[metadata] no ENGINE_SUBJECTS entry for curated engine "${name}" -- title falls back to a generic subject; add one in src/metadata.js`);
+  }
   return engineIs3D ? GENERIC_SUBJECT_3D : GENERIC_SUBJECT_2D;
 }
 
