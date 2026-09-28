@@ -391,8 +391,12 @@ function curatedOr(reason, seed) {
 async function chooseEngine(cli, imageInfo) {
   const seed = cli.seed ?? (process.env.SEED || defaultSeedStr());
 
-  if (cli.engine) {
-    const requested = path.isAbsolute(cli.engine) ? cli.engine : path.resolve(repoRoot, cli.engine);
+  // ENGINE (env) was documented at the top of this file but never read;
+  // the workflow's manual-run "engine" input needs it to re-render a
+  // specific day's pattern (2026-09-28: re-upload a video without music).
+  const wanted = cli.engine || process.env.ENGINE;
+  if (wanted) {
+    const requested = path.isAbsolute(wanted) ? wanted : path.resolve(repoRoot, wanted);
     if (existsSync(requested)) return { engine: requested, source: 'explicit' };
     return curatedOr(`requested engine not found (${requested})`, seed);
   }

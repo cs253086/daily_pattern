@@ -154,17 +154,16 @@ export function resolveConfig(cli = {}) {
 
     // Ambient music: a real license-free (CC0) track fetched from
     // Freesound.org by src/stockMusic.js and looped to cover the render.
-    // ON by default (user request, 2026-08-17; source changed from
-    // procedurally-synthesized to real fetched CC0 tracks, 2026-08-19, per
-    // user request "don't make music yourself, get a license free music
-    // somewhere"). Disable with --music=0 / MUSIC=0 (wired through to the
-    // workflow as vars.MUSIC, same pattern as IMAGE_PALETTE) if needed.
+    // OFF by default since 2026-09-28: the first day it actually ran (a
+    // sitar/drone raga track) the owner asked for it removed and chose "no
+    // music at all" going forward. Opt back in with --music=1 / MUSIC=1
+    // (repo variable vars.MUSIC, same pattern as IMAGE_PALETTE).
     // musicTrackPath is the local file path of that day's downloaded
     // track, set by the caller (src/index.js) before calling render() —
     // render() itself does no network fetching. If music is on but no
     // track path is given (fetch failed/skipped upstream), the video is
     // shipped silent rather than failing the run.
-    music: pick(cli, 'music', 'MUSIC', true, (v) => !(v === false || v === '0' || v === 'false')),
+    music: pick(cli, 'music', 'MUSIC', false, (v) => v === true || v === '1' || v === 'true'),
     musicTrackPath: pick(cli, 'musicTrackPath', 'MUSIC_TRACK_PATH', '', (v) => String(v)),
   };
 

@@ -1,8 +1,7 @@
 # daily_pattern — project guidance
 
 Automated pipeline: renders a daily generative-art video (1 hour) + a 30s
-Short, both with procedurally generated ambient music (see "Ambient music"
-below), uploads both to the "Pattern Flow" YouTube channel. Runs via GitHub
+Short, silent by default (optional CC0 music, see "Ambient music" below), uploads both to the "Pattern Flow" YouTube channel. Runs via GitHub
 Actions cron (`.github/workflows/daily.yml`) calling `src/index.js`.
 
 ## Standing visual requirements (apply to ALL engines — curated and AI-generated)
@@ -639,9 +638,21 @@ touching WebGL in this codebase again:
 
 ## Ambient music (`src/stockMusic.js`)
 
-**ON by default** (`cfg.music` defaults to `true` in `resolveConfig()`,
-`src/render.js`) as of 2026-08-17 — user request ("insert license free
-music in each video"). Disable with `--music=0` / `MUSIC=0`, or set the
+**OFF by default since 2026-09-28.** Music first actually shipped that day
+(the `FREESOUND_API_KEY` secret had never been set before), with a
+sitar/drone raga track; the owner asked for it removed and, given the
+choice, picked "no music at all" going forward. `cfg.music` now defaults to
+`false` in `resolveConfig()` (`src/render.js`); repo variable `MUSIC=1`
+turns it back on (the key is still configured). History: it was ON by
+default from 2026-08-17 (user request, "insert license free music in each
+video") but silently did nothing until the key was added. Re-rendering one
+day's pattern without music: the workflow's manual run now has an `engine`
+input (wired to `ENGINE`, which `chooseEngine()` in `src/index.js` now
+actually reads — it was documented but ignored); pass e.g.
+`engines/manual/rosenspikes.html` plus that day's seed. The old upload must
+be deleted in YouTube Studio by hand (the token can't delete videos).
+
+The paragraph below describes the pre-2026-09-28 default. Disable with `--music=0` / `MUSIC=0`, or set the
 repo variable `vars.MUSIC=0` (wired into `.github/workflows/daily.yml` the
 same way as `IMAGE_PALETTE`) if it ever needs to be turned off again
 without a code change.

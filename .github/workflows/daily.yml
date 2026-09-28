@@ -19,6 +19,10 @@ on:
         description: 'Override seed (blank = derive from date)'
         required: false
         default: ''
+      engine:
+        description: 'Force a specific pattern, e.g. engines/manual/rosenspikes.html (blank = normal daily pick)'
+        required: false
+        default: ''
 
 # Never run two daily renders at once.
 concurrency:
@@ -92,14 +96,11 @@ jobs:
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           SMITHSONIAN_API_KEY: ${{ secrets.SMITHSONIAN_API_KEY }}
           IMAGE_PALETTE: ${{ vars.IMAGE_PALETTE }}
-          # Background music: a real license-free track fetched from
-          # Freesound.org (src/stockMusic.js), restricted to CC0-licensed
-          # results only (no attribution required). Requires a free API key
-          # from https://freesound.org/apiv2/apply/ -- without it, music is
-          # skipped and the video ships silent (non-fatal). ON by default
-          # (user request, 2026-08-17; switched from procedurally-generated
-          # to real fetched CC0 tracks, 2026-08-19). Set repo variable
-          # MUSIC=0 to disable entirely if ever needed again.
+          # Background music: a license-free CC0 track from Freesound.org
+          # (src/stockMusic.js). OFF by default since 2026-09-28 (owner: "no
+          # music at all"). Set repo variable MUSIC=1 to turn it back on;
+          # FREESOUND_API_KEY is then required (free key from
+          # https://freesound.org/apiv2/apply/).
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
           MUSIC: ${{ vars.MUSIC }}
           # Scene-based rendering (src/render.js, 2026-09-08): the hour is
@@ -127,6 +128,7 @@ jobs:
           # (e.g. set 840 for 14-min while the channel is still unverified).
           DURATION: ${{ github.event.inputs.duration || vars.RENDER_DURATION || '3600' }}
           SEED: ${{ github.event.inputs.seed || '' }}
+          ENGINE: ${{ github.event.inputs.engine || '' }}
           DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '' }}
         run: node src/index.js
 
