@@ -5731,6 +5731,138 @@ distance, not a thin-margin case. `wingscales` also forms its own
 singleton archetype group at the pool's perceptual-grouping threshold
 (0.55).
 
+## Floating tensegrity-chain engine (`tensegritychain.html`) — 2026-09-28
+
+Daily creative-research routine. Category was "random architectural or
+typographic movement" -- picked to vary away from "obscure mathematical
+object" and "a random featured image" (used the two prior days, for
+`rosenspikes.html`/`wingscales.html`), per the `herringbone.html` precedent
+of varying categories rather than defaulting to a heavily-used one. An open
+WebSearch surfaced TENSEGRITY ("tensional integrity", or "floating
+compression" as sculptor Kenneth Snelson himself preferred to call it):
+rigid compression members (struts) never touch one another at all -- each
+is individually suspended, held apart and together purely by a network of
+continuously taut tension members (cables), a condition Snelson (who
+discovered it in 1948, before Buckminster Fuller coined the "tensegrity"
+portmanteau) called "continuous tension, discontinuous compression". His
+sculptures -- most famously "Needle Tower" -- are built from a stack of
+identical twisted 3-strut prism modules, each rotated relative to the one
+below. Sources: https://en.wikipedia.org/wiki/Tensegrity,
+https://en.wikipedia.org/wiki/Kenneth_Snelson (search snippets only --
+Wikipedia is blocked in this sandbox), http://kennethsnelson.net/Tensegrity_and_Weaving.pdf.
+
+**What it is**: a real lit-3D WebGL engine, the pool's ninth. A genuinely
+different construction PRINCIPLE from every other real-WebGL engine: not
+sparse orbiting solids (`solids3d.html`), not a grid of individually-
+spinning cubes (`lattice3d.html`), not lit tori/rings (`torusrings3d.html`),
+not one continuous convex mesh (`geodome.html`), not a CONNECTED strut
+framework where every beam meets its neighbours at shared rigid joints
+(`spaceframe.html`'s octet truss -- a dense, solid-feeling lattice), not a
+concave excavation (`hoppercrystal.html`), not a lattice of concave niche
+cells (`muqarnas.html`) or independently-growing convex spikes
+(`rosenspikes.html`) -- the pool's first "discontinuous compression"
+structure: rigid bars that never touch each other at all, giving an open,
+airy, almost-floating silhouette that is the structural OPPOSITE of
+`spaceframe.html`'s dense, load-bearing truss. A chain of twisted
+triangular tensegrity-prism modules is stacked along one axis, each pair
+of adjacent rings (3 shared vertices) connected by 3 diagonal struts (a
+bottom vertex to a DIFFERENT top vertex -- the classic skew connection
+that makes consecutive triangles interlock without their struts ever
+touching), with each ring's own 3 edges serving as the tension cables.
+Rendered HORIZONTALLY (not vertically like Needle Tower itself) so the
+twisting structure fills a 16:9 frame rather than occupying a thin
+vertical strip.
+
+**The core geometry was verified OFFLINE before writing any rendering
+code**, the same discipline this pool's `quasicrystal.html`/`geodome.html`/
+`hilbertweave.html`/`spaceframe.html` already established for a
+construction that could still "look plausible" even if subtly wrong: a
+standalone script confirmed that for TWIST angles in 100-135 degrees, the
+3 struts within one tensegrity-prism tier never come within less than
+0.32-0.55 (ring-spacing units) of touching each other -- comfortably clear
+of the ~0.1-unit strut width used -- and that under a +-35 degree per-ring
+angular wobble, strut length stays in a safe, non-degenerate band
+(1.18-1.59 vs a 1.47 baseline, no near-zero collapse).
+
+**A real visual-quality defect found only by rendering and looking, not
+caught by any numeric gate** (per the standing "look at it" visual-
+requirements rule): the first design (5-10 tiers at radius 0.55-0.72)
+rendered as a thin horizontal strip across the vertical centre of the
+frame, most of the canvas left as unused black margin -- directly against
+the house style's "fills the frame boldly" preference, because the
+chain's length:diameter ratio (~11.7:1) was far more elongated than the
+16:9 frame. Fixed by treating tier count and radius as a function of the
+CANVAS ASPECT RATIO rather than free parameters: 4-7 tiers at radius
+1.15-1.5 gives a length:diameter ratio close to 16:9 (5 tiers * 1.0
+spacing = 5 long, 2*1.4 radius = 2.8 across, ratio 1.79) -- a genuinely
+different lesson from `muqarnas.html`'s/`tabletweave.html`'s own "pull the
+camera closer" framing fixes, since here the composition's own PROPORTIONS
+(not the camera) needed to change to fit a 16:9 canvas.
+
+**Unit-level dynamics were built in from the first draft** (per CLAUDE.md's
+2026-09-10 standing requirement) and deliberately include NO whole-
+structure rotation at all (per `truchet.html`'s lesson that a reflexive
+whole-field rotation only dilutes the mandatory unit-motion signal by
+dominating the rigid-fit unless `fastMotion` genuinely needs it as a
+second source): each ring has its own independent angular wobble
+(guaranteed-minimum-magnitude, random sign rate/phase), which leaves
+cables exactly length-invariant by construction (rotating a rigid triangle
+about the chain axis never changes its own side lengths) while making
+every strut (spanning between two independently-wobbling rings) visibly
+flex relative to its neighbours -- no single rigid transform can explain
+many independently-wobbling rings moving at once. Colour is tied to each
+strut's fixed TIER INDEX, never to the live wobble angle, the same
+"colour by an axis the motion can't disturb" fix `geodome.html`/
+`spaceframe.html`/`hoppercrystal.html`/`rosenspikes.html` established.
+
+**A thin-margin `fastMotion` failure on one seed, found only by running the
+full seed battery, not by reasoning about the wobble formula.**
+`validateEngine()` across seeds 1-15 plus the CLI's actual default seed
+12345 initially passed 15/16, with seed 13 failing at 5.64 against a 6.31
+floor -- an unlucky coincidence of several fully-independent-random wobble
+phases landing near their own zero-angular-velocity point simultaneously
+at the 1.5s sample window, the same class of risk `torusrings3d.html`'s
+write-up documents for its own wobble. Fixed by raising wobble amplitude
+(12-20 to 16-24 degrees) and rate (0.5-0.85 to 0.65-1.05 rad/s, still
+comfortably inside the offline-verified safe band up to 35 degrees) for
+more margin, rather than restructuring phase spacing, since only one seed
+in sixteen was affected and by a small amount. Re-validated 16/16; seed
+13's `fastMotion` improved to 13.97 against its 6.35 floor.
+
+**Verified** (final design): `validateEngine()` **16/16** across seeds
+1-15 plus 12345, confirmed twice -- once before and once after the wobble
+fix. Final margins comfortable throughout: `avgSat` 50.4-63.1 (vs the 22
+minimum), zero near-white pixels on every seed, `projectedRise` -14.7 to
++23.6 (vs the 50 threshold), `compositionDrift` 0.0278-0.0567 (vs the
+0.015 minimum), `unitMotionNonRigidFrac` 0.978-1.0 (vs the 0.40 minimum --
+no thin-margin seeds remaining after the fix), `fastMotion` always
+comfortably above its per-frame floor, `projectedHourRenderMin`
+32.2-92.2min (well inside the CI budget). Visual spot-checks across
+2/25/50/75/95/105% of a 43.5s cycle at 3 seeds, actually rendering PNGs
+and looking at them, not just reading validator output: a vivid, bold,
+immediately-recognisable open zigzag lattice of twisted floating struts
+with clearly visible taut cable triangles, filling the 16:9 frame boldly
+after the aspect-ratio fix, no clipping or artifacts at any tested
+fraction, and three visually distinct palette combinations (green-to-blue
+rainbow, orange-to-teal, red-to-green) across seeds.
+
+**Novelty gate**: measured against all 51 existing engines (the committed
+fingerprint cache was several commits stale, so the whole pool was
+fingerprinted fresh alongside the candidate, per this pool's established
+practice; the refreshed cache was not committed, per this routine's
+"touch only the new engine + log + CLAUDE.md" constraint). Nearest
+neighbour is `stripweave` at distance **1.275** -- comfortably clear of
+the 0.60 threshold and well above this pool's own historical median pair
+distance, not a thin-margin case. `tensegritychain` also forms its own
+singleton archetype group at the pool's perceptual-grouping threshold
+(0.55).
+
+**A `src/metadata.js` `ENGINE_SUBJECTS` entry was added in the same
+commit** (`tensegritychain: 'Floating Tensegrity Chain'`), per the
+standing house-style rule 4 and the 2026-09-27 fix's explicit note that
+the daily research routine must do this going forward -- the exact gap
+that left 15 engines titled generically until that fix.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

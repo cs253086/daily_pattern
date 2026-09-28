@@ -499,5 +499,33 @@
     ],
     "nearestNeighbour": "liesegang",
     "nearestDistance": 1.141
+  },
+  {
+    "date": "2026-09-28",
+    "inspirationSource": "Tensegrity / \"floating compression\" -- Kenneth Snelson's structural principle (discovered 1948, before Buckminster Fuller coined the \"tensegrity\" portmanteau), category \"random architectural or typographic movement\" (picked to vary away from \"obscure mathematical object\" and \"a random featured image\", used the two prior days, per the herringbone.html precedent of varying categories rather than defaulting to a heavily-used one). Rigid compression members (struts) never touch one another at all -- each is individually suspended, held apart and together purely by a network of continuously taut tension members (cables), a condition Snelson called \"continuous tension, discontinuous compression\". His sculptures (most famously \"Needle Tower\") are built from a stack of identical twisted 3-strut prism modules, each rotated relative to the one below. Sources: https://en.wikipedia.org/wiki/Tensegrity, https://en.wikipedia.org/wiki/Kenneth_Snelson (search snippets only -- Wikipedia is blocked in this sandbox), http://kennethsnelson.net/Tensegrity_and_Weaving.pdf.",
+    "idea": "A chain of twisted triangular tensegrity-prism modules stacked along one axis, rendered horizontally (not vertically like Needle Tower itself) so the twisting structure fills a 16:9 frame rather than occupying a thin vertical strip. Each pair of adjacent rings (3 shared vertices) is connected by 3 diagonal struts (skew connections between a bottom vertex and a DIFFERENT top vertex, verified offline to never come near touching each other); each ring's own 3 edges are the tension cables. A genuinely different construction principle from every other real-WebGL engine in the pool: not sparse orbiting solids, not a grid of spinning cubes, not lit tori, not one continuous convex mesh, not a CONNECTED strut framework where every beam meets at shared rigid joints (spaceframe.html's octet truss -- a dense, solid-feeling lattice), not a concave excavation, not a lattice of concave niche cells or convex spikes -- the pool's first \"discontinuous compression\" structure: rigid bars that never touch each other at all, giving an open, airy silhouette that is the structural OPPOSITE of spaceframe.html's dense truss.",
+    "engineName": "tensegritychain",
+    "outcome": "shipped",
+    "reason": "The core geometry (strut non-touching, strut length safety under the planned per-ring wobble) was verified OFFLINE before writing any rendering code, the same discipline this pool's quasicrystal.html/geodome.html/hilbertweave.html/spaceframe.html already established: a standalone script confirmed that for TWIST angles in 100-135 degrees, the 3 struts within one tensegrity-prism tier never come within less than 0.32-0.55 (ring-spacing units) of touching each other (comfortably clear of the ~0.1-unit strut width used), and that under a +-35 degree per-ring angular wobble, strut length stays in a safe, non-degenerate band (1.18-1.59 vs a 1.47 baseline, no near-zero collapse). A real visual-quality defect was found only by rendering and looking, not caught by any numeric gate: the first design (5-10 tiers at radius 0.55-0.72) rendered as a thin horizontal strip across the vertical centre of the frame, most of the canvas left as unused black margin -- directly against the house style's 'fills the frame boldly' preference, because the chain's length:diameter ratio (~11.7:1) was far more elongated than the 16:9 frame. Fixed by treating tier count and radius as a function of the CANVAS aspect ratio rather than free parameters: 4-7 tiers at radius 1.15-1.5 gives a length:diameter ratio close to 16:9 (5 tiers * 1.0 spacing = 5 long, 2*1.4 radius = 2.8 across, ratio 1.79). Unit-level dynamics were built in from the first draft (per CLAUDE.md's 2026-09-10 standing requirement) and deliberately include NO whole-structure rotation at all (per truchet.html's lesson that a reflexive whole-field rotation only dilutes the mandatory unit-motion signal by dominating the rigid-fit unless fastMotion genuinely needs it): each ring has its own independent angular wobble (guaranteed-minimum-magnitude, random sign, rate/phase), which leaves cables exactly length-invariant (rotating a rigid triangle about the chain axis never changes its own side lengths) while making every strut (spanning between two independently-wobbling rings) visibly flex relative to its neighbours -- no single rigid transform can explain many independently-wobbling rings at once. validateEngine() across seeds 1-15 plus the CLI's actual default seed 12345 initially passed 15/16, with seed 13 failing fastMotion on a thin margin (5.64 vs a 6.31 floor -- an unlucky coincidence of several independently-random wobble phases landing near their own zero-angular-velocity point simultaneously at the 1.5s sample window, the same class of risk torusrings3d.html's write-up documents for its own wobble). Fixed by raising wobble amplitude (12-20 to 16-24 degrees) and rate (0.5-0.85 to 0.65-1.05 rad/s, still comfortably inside the offline-verified safe band up to 35 degrees) for more margin; re-validated 16/16, seed 13's fastMotion improved to 13.97 vs its 6.35 floor. Final validateEngine() 16/16 across seeds 1-15 plus 12345: avgSat 50.4-63.1 (vs the 22 minimum), zero near-white pixels on every seed, projectedRise -14.7 to +23.6 (vs the 50 threshold), compositionDrift 0.0278-0.0567 (vs the 0.015 minimum), unitMotionNonRigidFrac 0.978-1.0 (vs the 0.40 minimum -- no thin-margin seeds after the fix), fastMotion always comfortably above its per-frame floor, projectedHourRenderMin 32.2-92.2min (well inside the CI budget). Visual spot-checks across 2/25/50/75/95/105% of a 43.5s cycle at 3 seeds, actually rendering PNGs and looking at them, not just reading validator output: a vivid, bold, immediately-recognisable open zigzag lattice of twisted floating struts with clearly visible taut cable triangles, filling the 16:9 frame boldly after the aspect-ratio fix, no clipping or artifacts at any tested fraction, and three visually distinct palette combinations (green-to-blue rainbow, orange-to-teal, red-to-green) across seeds.",
+    "seedsVerified": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      12345
+    ],
+    "nearestNeighbour": "stripweave",
+    "nearestDistance": 1.275
   }
 ]

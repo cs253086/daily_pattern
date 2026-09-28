@@ -68,6 +68,7 @@ const ENGINE_SUBJECTS = {
   stripweave: 'Woven Strip Patterns',
   tabletweave: 'Tablet Weaving Bands',
   taniko: 'Taniko Woven Borders',
+  tensegritychain: 'Floating Tensegrity Chain',
   tessellation: 'Recursive Tessellation',
   torusrings3d: 'Glowing 3D Rings',
   truchet: 'Truchet Tile Maze',
