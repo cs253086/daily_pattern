@@ -1,7 +1,7 @@
 {
-  "last3D": "muqarnas",
+  "last3D": "rosenspikes",
   "last2D": "doylespiral",
-  "last3DArchetype": "muqarnas",
+  "last3DArchetype": "rosenspikes",
   "last2DArchetype": "doylespiral",
   "last3DByArchetype": {
     "geodome": "geodome",
@@ -10,7 +10,8 @@
     "torusrings3d": "torusrings3d",
     "discrete-3d-solids": "solids3d",
     "auto-2026-09-13-llanberis-lake-north-wales": "auto-2026-09-13-llanberis-lake-north-wales",
-    "muqarnas": "muqarnas"
+    "muqarnas": "muqarnas",
+    "rosenspikes": "rosenspikes"
   },
   "last2DByArchetype": {
     "arcrings": "arcrings",
@@ -24,5 +25,5 @@
     "dendrite": "dendrite",
     "doylespiral": "doylespiral"
   },
-  "updatedAt": "2026-09-27T14:49:07.251Z"
+  "updatedAt": "2026-09-28T17:33:13.918Z"
 }
