@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pendulum Wave — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Physics-based curated engine (2026-09-29, owner request: "it will be also
+// fun to use physic engine for a creative pattern"). A PENDULUM WAVE: a set
+// of pendulums whose lengths are tuned so that, within one fixed "pattern
+// period" Tp, pendulum i completes exactly K+i full swings. They start in
+// phase, drift apart into travelling snake-waves, pass through apparent
+// chaos, and then all line up again at every multiple of Tp -- the classic
+// physics-demonstration apparatus.
+//
+// Physics: small-angle pendulums are simple harmonic oscillators, so each
+// bob's displacement is exactly A*cos(omega_i*t) with omega_i =
+// 2*pi*(K+i)/Tp (period sqrt(L/g) scaling fixes each length). That closed
+// form is used directly instead of numerically integrating -- it is the
+// exact solution, costs nothing per frame, and is deterministic by
+// construction (no step-size drift over an hour).
+//
+// Two layouts, picked once per video from the seed:
+//   row  -- the classic apparatus seen from slightly above: pendulums hang
+//           from a bar across the top, bobs swing toward/away from the
+//           viewer (drawn as vertical displacement), so the row of bobs
+//           forms the familiar snake wave;
+//   ring -- the same apparatus bent into a circle: each pendulum swings
+//           radially, giving mandala-like rosettes that snap back into a
+//           perfect circle every Tp (either a spiral ordering K+j around
+//           the ring, or a mirrored ordering K+min(j, N-j) for bilateral
+//           symmetry).
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. Clear-and-redraw every frame, a fixed
+// number of equal-size bobs, so total lit area is constant by construction.
+// cycleSec is accepted but unused: the motion is exactly periodic already.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = Math.max(0.2, fltP('speed', 1));
+  const DENSITY = Math.max(0.3, fltP('density', 1));
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Consecutive small seeds give correlated first draws from Mulberry32;
+  // discard a few so seed 1, 2, 3... don't all pick the same layout.
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  // Smooth colour along the palette (shortest-path hue interpolation), so
+  // neighbouring pendulums shade into each other like a rainbow row.
+  function palAt(t) {
+    const n = PAL.length;
+    const x = Math.min(0.9999, Math.max(0, t)) * (n - 1);
+    const i = Math.floor(x), f = x - i;
+    const a = PAL[i], b = PAL[Math.min(n - 1, i + 1)];
+    let dh = b[0] - a[0];
+    if (dh > 180) dh -= 360; if (dh < -180) dh += 360;
+    const h = ((a[0] + dh * f) % 360 + 360) % 360;
+    const s = a[1] + (b[1] - a[1]) * f;
+    const l = Math.max(52, Math.min(66, a[2] + (b[2] - a[2]) * f));
+    return [h, s, l];
+  }
+
+  const minDim = Math.min(W, H);
+  const layout = rng() < 0.5 ? 'row' : 'ring';
+  const mirrored = rng() < 0.5;
+  const N = layout === 'row'
+    ? Math.max(9, Math.round(rand(15, 22) * DENSITY))
+    : Math.max(12, Math.round(rand(24, 34) * DENSITY));
+  // Pattern period Tp: every pendulum returns to its start together at each
+  // multiple of Tp. K chosen so the slowest pendulum swings once every
+  // ~1.8-2.4s (lively pace rule: 4-15s is the slow end for rotations; a
+  // pendulum swing reads well faster than that).
+  const Tp = rand(36, 52) / SPEED;
+  const K = Math.max(8, Math.round(Tp / rand(1.8, 2.4)));
+  // Start somewhere inside the pattern period so a video doesn't always
+  // open on the perfectly aligned frame.
+  const t0 = rand(0, Tp);
+
+  const pend = [];
+  for (let j = 0; j < N; j++) {
+    const idx = layout === 'ring' && mirrored ? Math.min(j, N - j) : j;
+    pend.push({
+      omega: (2 * Math.PI * (K + idx)) / Tp,
+      col: palAt(layout === 'ring' ? (mirrored ? idx / Math.max(1, Math.floor(N / 2)) : j / N) : j / (N - 1)),
+    });
+  }
+
+  // Geometry.
+  const row = {
+    left: W * 0.07, right: W * 0.93, barY: H * 0.1, restY: H * 0.56, amp: H * 0.3,
+  };
+  const spacing = (row.right - row.left) / (N - 1);
+  const ring = { r0: minDim * 0.29, amp: minDim * 0.14, hub: minDim * 0.05 };
+  const bobR = layout === 'row'
+    ? Math.min(spacing * 0.36, H * 0.045)
+    : Math.min((2 * Math.PI * ring.r0) / N * 0.4, minDim * 0.042);
+
+  const dt = 1 / FPS;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+  let clk = 0;
+
+  function hsl(c, dl = 0, a = 1) {
+    return `hsla(${c[0].toFixed(1)}, ${c[1]}%, ${Math.min(78, c[2] + dl)}%, ${a})`;
+  }
+
+  function positions(t) {
+    const pts = [];
+    for (let j = 0; j < N; j++) {
+      const d = Math.cos(pend[j].omega * t);
+      if (layout === 'row') {
+        pts.push({ x: row.left + j * spacing, y: row.restY + row.amp * d, px: row.left + j * spacing, py: row.barY, d });
+      } else {
+        const ang = (2 * Math.PI * j) / N - Math.PI / 2;
+        const r = ring.r0 + ring.amp * d;
+        pts.push({
+          x: W / 2 + Math.cos(ang) * r, y: H / 2 + Math.sin(ang) * r,
+          px: W / 2 + Math.cos(ang) * ring.hub, py: H / 2 + Math.sin(ang) * ring.hub, d,
+        });
+      }
+    }
+    return pts;
+  }
+
+  function renderFrame() {
+    clk += dt;
+    const t = t0 + clk;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    const pts = positions(t);
+
+    // Support structure: the bar (row) or hub (ring).
+    const frameCol = PAL[0];
+    ctx.lineCap = 'round';
+    if (layout === 'row') {
+      ctx.strokeStyle = hsl(frameCol, 4, 0.25); ctx.lineWidth = 14;
+      ctx.beginPath(); ctx.moveTo(row.left - spacing * 0.5, row.barY); ctx.lineTo(row.right + spacing * 0.5, row.barY); ctx.stroke();
+      ctx.strokeStyle = hsl(frameCol, 8); ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(row.left - spacing * 0.5, row.barY); ctx.lineTo(row.right + spacing * 0.5, row.barY); ctx.stroke();
+    } else {
+      ctx.strokeStyle = hsl(frameCol, 4, 0.25); ctx.lineWidth = 12;
+      ctx.beginPath(); ctx.arc(W / 2, H / 2, ring.hub, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = hsl(frameCol, 8); ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(W / 2, H / 2, ring.hub, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    // Strings.
+    ctx.lineWidth = 2;
+    for (let j = 0; j < N; j++) {
+      ctx.strokeStyle = hsl(pend[j].col, 0, 0.45);
+      ctx.beginPath(); ctx.moveTo(pts[j].px, pts[j].py); ctx.lineTo(pts[j].x, pts[j].y); ctx.stroke();
+    }
+
+    // The wave itself: a faint line through the bobs, which is what makes
+    // the snake / rosette shape read at a glance.
+    ctx.strokeStyle = hsl(PAL[PAL.length - 1], 6, 0.35);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (let j = 0; j < N; j++) { if (j === 0) ctx.moveTo(pts[j].x, pts[j].y); else ctx.lineTo(pts[j].x, pts[j].y); }
+    if (layout === 'ring') ctx.closePath();
+    ctx.stroke();
+
+    // Bobs: soft glow underneath, bright core, small specular highlight.
+    ctx.globalCompositeOperation = 'lighter';
+    for (let j = 0; j < N; j++) {
+      const c = pend[j].col;
+      ctx.fillStyle = hsl(c, 0, 0.16);
+      ctx.beginPath(); ctx.arc(pts[j].x, pts[j].y, bobR * 1.9, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    for (let j = 0; j < N; j++) {
+      const c = pend[j].col;
+      ctx.fillStyle = hsl(c, 0);
+      ctx.beginPath(); ctx.arc(pts[j].x, pts[j].y, bobR, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = hsl(c, 14, 0.85);
+      ctx.beginPath(); ctx.arc(pts[j].x - bobR * 0.32, pts[j].y - bobR * 0.32, bobR * 0.32, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

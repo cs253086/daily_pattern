@@ -5912,6 +5912,47 @@ standing house-style rule 4 and the 2026-09-27 fix's explicit note that
 the daily research routine must do this going forward -- the exact gap
 that left 15 engines titled generically until that fix.
 
+## Physics engines: pendulum wave + bouncing balls (`pendulumwave.html`, `spinbounce.html`) — 2026-09-29
+
+Owner request: "it will be also fun to use physic engine for a creative
+pattern." Picked the two ideas most likely to be enjoyed: a calm one (the
+classic pendulum-wave demonstration) and an energetic one (balls bouncing
+inside a spinning polygon, a style that does well as satisfying Shorts).
+Both are hand-written, no physics library.
+
+- **`pendulumwave.html`**: pendulum i completes exactly K+i swings per
+  pattern period Tp (36-52s), so they start aligned, split into snake
+  waves, look chaotic, and realign every Tp. Uses the exact small-angle
+  solution `A*cos(omega_i*t)` instead of numerical integration: exact,
+  free per frame, and no drift over an hour. Two layouts picked per video:
+  `row` (the classic bar of pendulums, snake wave across the screen) and
+  `ring` (pendulums swinging radially around a hub, with a spiral or
+  mirrored ordering -- mandala-like rosettes that snap back into a circle).
+- **`spinbounce.html`**: 7-11 balls under gravity in a rotating regular
+  polygon (5-8 sides). Fixed sub-steps (6 per frame) for determinism;
+  ball-wall contacts use the moving wall's own velocity so the spin throws
+  balls around; containment is re-enforced every sub-step by projecting
+  back inside each edge (the polygon is convex), so nothing can tunnel
+  out; a gentle thermostat holds kinetic energy in a band so the video
+  never runs down (the "stops developing" failure in item 6) or blows up;
+  a speed cap and a non-finite guard back that up. Checked at 10
+  simulated minutes: every ball still inside and moving. Brief contact
+  flashes on balls and wall edges.
+- **A seeding gotcha found while testing**: Mulberry32's first outputs for
+  consecutive small seeds are correlated (seeds 1-4 all drew "ring").
+  Both engines now discard 4 draws first. Production seeds are dates and
+  hashed per-scene seeds, but validation uses 1-15.
+- **Verified**: `validateEngine()` 16/16 on each (seeds 1-15 + 12345).
+  pendulumwave: rise -23.5..+10.1, sat 54-69, drift 0.054-0.146, unit
+  0.78-1.0, 10.5-32.9 min/hour. spinbounce: rise -8.8..+6.5, sat 60-70,
+  drift 0.061-0.134, unit 0.57-0.91, 16.7-36.1 min/hour. Zero near-white
+  on all 32. Frames rendered and looked at for 4 pendulum seeds (both
+  layouts) and 3 bounce seeds at 2s/60s/600s; both run end to end through
+  `ENGINE=... DRY_RUN=1 node src/index.js` with the new text thumbnail.
+  Novelty gate (pool re-fingerprinted fresh, 25 stale entries):
+  pendulumwave nearest starburst 0.743, spinbounce nearest wireframe
+  0.809. `ENGINE_SUBJECTS`: "Pendulum Wave", "Bouncing Balls".
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
