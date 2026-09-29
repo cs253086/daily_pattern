@@ -1,8 +1,9 @@
 {
   "last3D": "rosenspikes",
-  "last2D": "doylespiral",
+  "last2D": "dragonfold",
+  "lastMandala": null,
   "last3DArchetype": "rosenspikes",
-  "last2DArchetype": "doylespiral",
+  "last2DArchetype": "dragonfold",
   "last3DByArchetype": {
     "geodome": "geodome",
     "hoppercrystal": "hoppercrystal",
@@ -23,7 +24,8 @@
     "chladni": "chladni",
     "composer": "composer",
     "dendrite": "dendrite",
-    "doylespiral": "doylespiral"
+    "doylespiral": "doylespiral",
+    "dragonfold": "dragonfold"
   },
-  "updatedAt": "2026-09-28T17:33:13.918Z"
+  "updatedAt": "2026-09-29T15:37:42.226Z"
 }
