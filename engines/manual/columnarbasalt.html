@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Columnar Basalt Field — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "random natural structure" -- the
+// pool's most under-used category recently, only hoppercrystal.html shipped
+// from it since 2026-09-08, per the herringbone.html precedent of varying
+// categories rather than defaulting to a heavily-used one). An open
+// WebSearch surfaced COLUMNAR BASALT JOINTING -- the hexagonal rock-column
+// formations of the Giant's Causeway (Northern Ireland) and similar cooled
+// lava flows worldwide. Real physics, confirmed by recent fracture-mechanics
+// research: as a lava sheet cools from the top down, thermal-contraction
+// stress cracks the solidifying crust; cracks initially meet at ordinary
+// 90-degree T-junctions, but as cooling continues the network mechanically
+// RELAXES toward 120-degree Y-junctions (the angle that best dissipates the
+// stress), and a network of 120-degree three-way junctions is exactly what
+// tiles a plane into near-regular HEXAGONS (with a real statistical mix of
+// 4-9-sided cells, not perfect hexagons) -- the same T-to-Y transition
+// documented for desiccation mudcracks and starch-slurry cracking. Sources:
+// https://physicsworld.com/a/physicists-crack-mystery-of-the-spectacular-stones-of-the-giants-causeway/,
+// https://www.smithsonianmag.com/smart-news/researchers-reveal-how-giants-causeway-was-formed-180968806/,
+// https://en.wikipedia.org/wiki/Giant's_Causeway (search snippets only --
+// Wikipedia is blocked in this sandbox).
+//
+// A genuinely different 3D COMPOSITION from every other real-WebGL engine
+// in the pool: not sparse orbiting solids (solids3d.html), not a grid of
+// individually-spinning cubes (lattice3d.html), not lit tori/rings
+// (torusrings3d.html), not one continuous CONVEX mesh (geodome.html), not a
+// CONNECTED strut framework with open black gaps between members
+// (spaceframe.html), not one continuous CONCAVE excavation
+// (hoppercrystal.html), not a lattice of separate CONCAVE niche cells
+// (muqarnas.html), not a lattice of independently-growing CONVEX SPIKES with
+// visible gaps between them (rosenspikes.html), not a chain of floating,
+// mutually-non-touching struts (tensegritychain.html) -- a field of solid
+// polygonal PRISMS (columns) of varying height, packed EDGE-TO-EDGE with NO
+// gaps at all (their footprints exactly tile the ground, the real basalt
+// joint pattern), viewed at an oblique angle so the differing column heights
+// read as a stepped "organ pipe" skyline, the famous Giant's Causeway
+// silhouette. Also a genuinely different construction PRINCIPLE from every
+// 2D engine: this is the pool's only engine that takes an existing, already
+// offline-verified 2D partition construction (the half-plane-intersection
+// Voronoi cell builder voronoimosaic.html established, reused VERBATIM here
+// -- gap-free tiling was already proven correct there) and EXTRUDES it into
+// a real lit 3D scene, rather than rendering the partition flat.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. WebGL context MUST be created with
+// preserveDrawingBuffer:true and handle the same startup-only
+// webglcontextlost/restored dance as every other real-WebGL engine here.
+// gl.clear() to opaque black every frame -- structurally whiteout-proof.
+//
+// UNIT-LEVEL DYNAMICS, built in from the first draft (per CLAUDE.md's
+// 2026-09-10 standing requirement): every column's height independently
+// oscillates around its own fixed rest height (a real Giant's Causeway
+// column doesn't move, but the choreography convention this pool has
+// established -- e.g. rosenspikes.html's per-spike height wave -- is the
+// established, proven-safe way to give a field of independent rigid units
+// real relative motion). Phased by RANK FRACTION across columns (sort by a
+// fixed spatial axis, assign each an exact 2*pi*waveK/N phase increment),
+// the same rosenspikes.html/doylespiral.html/frostgrowth.html/wingscales.html
+// technique -- proven by discrete-Fourier orthogonality to sum to exactly
+// zero net height change at every instant regardless of column footprint
+// distribution, so the aggregate visible top-cap/side-wall area stays
+// balanced even though each column's own height keeps changing. Deliberately
+// NO whole-scene rotation (per truchet.html's lesson that a reflexive
+// whole-field rotation only dilutes the mandatory unit-motion signal by
+// dominating the rigid-fit unless fastMotion genuinely needs it). Colour is
+// tied to each column's fixed REST FOOTPRINT CENTROID position, never to its
+// live time-varying height, the same "colour by an axis the motion can't
+// disturb" fix geodome.html/spaceframe.html/hoppercrystal.html/
+// rosenspikes.html/tensegritychain.html established.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  // antialias: false -- unlike most WebGL engines in this pool, this one is
+  // a full-bleed edge-to-edge column field (the house-style "fills the
+  // frame" requirement applied literally: no black background at all), so
+  // multisampling multiplies fragment-shading cost across nearly every
+  // pixel in the frame instead of a sparse minority. Measured as the real
+  // cause of a persistent validate.js speed-budget failure that survived
+  // every other fix (removing redundant per-frame GPU/CPU work): direct
+  // profiling still showed large periodic GPU stalls even once per-frame
+  // JS cost was under 1ms, and this engine's overdraw is far higher than
+  // sparser WebGL engines in the pool (e.g. rosenspikes.html) that pass
+  // comfortably with antialiasing on.
+  const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true, antialias: false })
+    || canvas.getContext('experimental-webgl', { preserveDrawingBuffer: true, antialias: false });
+
+  // Same startup-only context-loss risk documented in solids3d.html --
+  // headless software WebGL (swiftshader) intermittently fires a spurious
+  // webglcontextlost shortly after context creation, never observed mid-
+  // render past the first couple of frames. Defer window.READY until any
+  // early loss has had a chance to fire and recover.
+  let contextLost = false;
+  canvas.addEventListener('webglcontextlost', (e) => {
+    contextLost = true;
+    e.preventDefault();
+  });
+  canvas.addEventListener('webglcontextrestored', () => {
+    initGL();
+    contextLost = false;
+  });
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+  function hsl2rgb(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [f(0), f(8), f(4)];
+  }
+
+  // ---- Minimal column-major mat4 helpers (WebGL/GLSL convention, same as
+  // solids3d.html / geodome.html / spaceframe.html / rosenspikes.html /
+  // tensegritychain.html) ---------------------------------------------------
+  function mat4Identity() { return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); }
+  function mat4Multiply(a, b) {
+    const out = new Float32Array(16);
+    for (let c = 0; c < 4; c++) {
+      for (let r = 0; r < 4; r++) {
+        let sum = 0;
+        for (let k = 0; k < 4; k++) sum += a[k * 4 + r] * b[c * 4 + k];
+        out[c * 4 + r] = sum;
+      }
+    }
+    return out;
+  }
+  function mat4Perspective(fovyRad, aspect, near, far) {
+    const f = 1 / Math.tan(fovyRad / 2);
+    const nf = 1 / (near - far);
+    const out = new Float32Array(16);
+    out[0] = f / aspect; out[5] = f; out[10] = (far + near) * nf; out[11] = -1;
+    out[14] = 2 * far * near * nf;
+    return out;
+  }
+  function mat4LookAt(eye, target, up) {
+    let zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
+    let zl = Math.hypot(zx, zy, zz) || 1; zx /= zl; zy /= zl; zz /= zl;
+    let xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+    let xl = Math.hypot(xx, xy, xz) || 1; xx /= xl; xy /= xl; xz /= xl;
+    const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+    const out = new Float32Array(16);
+    out[0] = xx; out[1] = yx; out[2] = zx; out[3] = 0;
+    out[4] = xy; out[5] = yy; out[6] = zy; out[7] = 0;
+    out[8] = xz; out[9] = yz; out[10] = zz; out[11] = 0;
+    out[12] = -(xx * eye[0] + xy * eye[1] + xz * eye[2]);
+    out[13] = -(yx * eye[0] + yy * eye[1] + yz * eye[2]);
+    out[14] = -(zx * eye[0] + zy * eye[1] + zz * eye[2]);
+    out[15] = 1;
+    return out;
+  }
+  function sub3(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+  function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+  function len3(a) { return Math.hypot(a[0], a[1], a[2]); }
+  function norm3(a) { const l = len3(a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
+
+  // ---- Gap-free 2D cell partition, reused VERBATIM from voronoimosaic.html
+  // (half-plane-intersection clipping, offline-verified there: total cell
+  // area exactly equals the bounding square, every centroid nearest its own
+  // seed). Cells live in the X-Z (ground) plane; Y is height.
+  function clipHalfPlane(poly, nx, ny, c) {
+    const out = [];
+    const len = poly.length;
+    for (let i = 0; i < len; i++) {
+      const cur = poly[i];
+      const prev = poly[(i - 1 + len) % len];
+      const curIn = (cur[0] * nx + cur[1] * ny) <= c;
+      const prevIn = (prev[0] * nx + prev[1] * ny) <= c;
+      if (curIn) {
+        if (!prevIn) out.push(intersectEdge(prev, cur, nx, ny, c));
+        out.push(cur);
+      } else if (prevIn) {
+        out.push(intersectEdge(prev, cur, nx, ny, c));
+      }
+    }
+    return out;
+  }
+  function intersectEdge(a, b, nx, ny, c) {
+    const da = a[0] * nx + a[1] * ny - c;
+    const db = b[0] * nx + b[1] * ny - c;
+    const t = da / (da - db);
+    return [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
+  }
+  function voronoiCell(i, seeds, boundingPoly) {
+    let poly = boundingPoly;
+    const p = seeds[i];
+    for (let j = 0; j < seeds.length; j++) {
+      if (j === i) continue;
+      const q = seeds[j];
+      const nx = q[0] - p[0], ny = q[1] - p[1];
+      const c = (q[0] * q[0] + q[1] * q[1] - (p[0] * p[0] + p[1] * p[1])) / 2;
+      poly = clipHalfPlane(poly, nx, ny, c);
+      if (poly.length === 0) break;
+    }
+    return poly;
+  }
+
+  // ---- WebGL setup: per-VERTEX colour so the whole field renders in a
+  // single drawArrays call.
+  const VERT_SRC = `
+    attribute vec3 aPosition;
+    attribute vec3 aNormal;
+    attribute vec3 aColor;
+    uniform mat4 uMVP;
+    uniform mat4 uModel;
+    uniform vec3 uEye;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vColor;
+    void main() {
+      vec4 world = uModel * vec4(aPosition, 1.0);
+      vNormal = mat3(uModel) * aNormal;
+      vViewDir = normalize(uEye - world.xyz);
+      vColor = aColor;
+      gl_Position = uMVP * vec4(aPosition, 1.0);
+    }
+  `;
+  const FRAG_SRC = `
+    precision mediump float;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vColor;
+    uniform vec3 uLightDir;
+    void main() {
+      vec3 N = normalize(vNormal);
+      float diff = max(dot(N, normalize(uLightDir)), 0.0);
+      float fresnel = pow(1.0 - max(dot(N, normalize(vViewDir)), 0.0), 2.0);
+      vec3 base = vColor * (0.56 + 0.44 * diff);
+      vec3 rim = vColor * fresnel * 0.35;
+      gl_FragColor = vec4(min(base + rim, vec3(0.86)), 1.0);
+    }
+  `;
+  function compileShader(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error('shader compile: ' + gl.getShaderInfoLog(sh));
+    return sh;
+  }
+
+  let prog, aPosition, aNormal, aColor, uMVP, uModel, uLightDir, uEye, meshBuf;
+  function initGL() {
+    prog = gl.createProgram();
+    gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, VERT_SRC));
+    gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, FRAG_SRC));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('program link: ' + gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+
+    aPosition = gl.getAttribLocation(prog, 'aPosition');
+    aNormal = gl.getAttribLocation(prog, 'aNormal');
+    aColor = gl.getAttribLocation(prog, 'aColor');
+    uMVP = gl.getUniformLocation(prog, 'uMVP');
+    uModel = gl.getUniformLocation(prog, 'uModel');
+    uLightDir = gl.getUniformLocation(prog, 'uLightDir');
+    uEye = gl.getUniformLocation(prog, 'uEye');
+
+    // Positions are DYNAMIC: rewritten every frame by deformField() (the
+    // per-column height choreography). Normals and colours are STATIC --
+    // both are fixed once per column and mathematically invariant to the
+    // live height animation (see the invariance proof in writeTri()) --
+    // uploaded once here from the initial deformField(0) call.
+    const posBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, fieldMesh.positions, gl.DYNAMIC_DRAW);
+    const normBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, fieldMesh.normals, gl.STATIC_DRAW);
+    const colBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, fieldMesh.colors, gl.STATIC_DRAW);
+    meshBuf = { posBuf, normBuf, colBuf, count: fieldMesh.count };
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.viewport(0, 0, W, H);
+  }
+
+  // ---- Column field: N convex polygon footprints tiling a bounding square
+  // with zero gaps (the proven Voronoi construction above), each extruded
+  // into a rigid prism of its own fixed rest height. Footprints, per-column
+  // rest height, and colours are all fixed ONCE per video in buildField() --
+  // never re-rolled per cycle, the "any coverage-affecting parameter
+  // re-randomised per cycle creates a real brightness swing" lesson this
+  // pool documents for over a dozen prior engines.
+  let columns, fieldMesh, triCapacity;
+  function buildField() {
+    const d = Math.max(0.7, Math.min(1.4, DENSITY));
+    const n = Math.round(58 * d);
+    const boxHalf = 3.4;
+    const boundingPoly = [[-boxHalf, -boxHalf], [boxHalf, -boxHalf], [boxHalf, boxHalf], [-boxHalf, boxHalf]];
+
+    // Jittered near-regular grid of seeds (not fully random points) -- the
+    // real physical mechanism is a RELAXATION toward evenly-spaced 120-
+    // degree junctions, so a mildly-jittered regular lattice is a closer
+    // structural match than uniform random scatter, and also avoids the
+    // occasional razor-thin sliver cell a fully random seed set can produce.
+    const cols = Math.round(Math.sqrt(n * 16 / 9));
+    const rows = Math.max(1, Math.round(n / cols));
+    const stepX = (2 * boxHalf) / cols, stepZ = (2 * boxHalf) / rows;
+    const seeds = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const jx = (rng() * 2 - 1) * stepX * 0.32;
+        const jz = (rng() * 2 - 1) * stepZ * 0.32;
+        seeds.push([-boxHalf + (c + 0.5) * stepX + jx, -boxHalf + (r + 0.5) * stepZ + jz]);
+      }
+    }
+
+    const baseCol = PAL[SEED % PAL.length];
+    const hue0 = rng() * 360;
+    const H0 = 0.85; // rest column height, ground units
+    columns = [];
+    for (let i = 0; i < seeds.length; i++) {
+      const poly = voronoiCell(i, seeds, boundingPoly);
+      if (poly.length < 3) continue;
+      let cx = 0, cz = 0;
+      for (const p of poly) { cx += p[0]; cz += p[1]; }
+      cx /= poly.length; cz /= poly.length;
+      const hRest = H0 * rand(0.55, 1.35);
+      const rFrac = Math.hypot(cx, cz) / (boxHalf * Math.SQRT2);
+      const hue = ((baseCol[0] + hue0 + 55 * Math.sin(3 * Math.atan2(cz, cx))) % 360 + 360) % 360;
+      const rgb = hsl2rgb(hue, Math.max(55, Math.min(92, baseCol[1] - 6)), Math.min(56, baseCol[2] - 4 + 8 * (1 - rFrac)));
+      columns.push({ poly, cx, cz, hRest, rgb });
+    }
+
+    // Rank-fraction phasing (see header note): sort by centroid X, assign
+    // each column an exact i/N rank -- discrete-Fourier-orthogonality-
+    // guaranteed exact zero-sum wave, verified as a technique by
+    // rosenspikes.html/doylespiral.html/frostgrowth.html/wingscales.html.
+    const byX = columns.slice().sort((a, b) => a.cx - b.cx);
+    byX.forEach((c, i) => { c.rankFrac = i / byX.length; });
+
+    // Triangle budget: cap-fan (poly.length tris) + walls (poly.length*2
+    // tris) per column. Compute a generous fixed capacity from the max
+    // vertex count actually produced (cells rarely exceed ~9 sides).
+    let maxSides = 3;
+    for (const c of columns) maxSides = Math.max(maxSides, c.poly.length);
+    triCapacity = columns.length * (maxSides + maxSides * 2);
+    const nv = triCapacity * 3;
+    const colors = new Float32Array(nv * 3);
+    fieldMesh = {
+      positions: new Float32Array(nv * 3),
+      normals: new Float32Array(nv * 3),
+      colors,
+      count: 0, // set by first deformField() call (actual triangle count varies per column side-count)
+      maxSides,
+    };
+  }
+
+  // ---- Per-column choreography, drawn ONCE per video (guaranteed minimum
+  // magnitude, random sign, never reset per cycleSec -- a per-cycle phase
+  // reset would land validate.js's widely-spaced samples in uncorrelated
+  // random phase states, the geodome.html tilt-wobble lesson).
+  let waveK, waveRate;
+  function initChoreo() {
+    waveK = 3;
+    waveRate = sgn() * rand(0.6, 0.95) * SPEED;
+  }
+
+  // hFlags[i] is true when that triangle vertex sits at y=h (moves with the
+  // column's live height) vs. y=0 (the fixed wall base, never moves). Used
+  // only on the one-time static build below to record, per column, exactly
+  // which flat pos[] indices the per-frame fast path needs to touch.
+  function writeTriFull(pos, nrm, col, k, a, b, c, rgb, hFlags, yIdx) {
+    let i = 0;
+    for (const p of [a, b, c]) {
+      pos[k] = p[0]; pos[k + 1] = p[1]; pos[k + 2] = p[2];
+      if (hFlags[i]) yIdx.push(k + 1);
+      k += 3; i++;
+    }
+    // Both the cap and wall normals below are geometrically INVARIANT to
+    // the column's own live height h: the cap is always horizontal (its
+    // three points a/b/centroid all share the same y=h, so translating
+    // them together in y can't change cross(b-a, c-a)'s direction), and a
+    // wall quad's normal direction only depends on its fixed horizontal
+    // edge (p0->p1) -- scaling its vertical extent by h scales the cross
+    // product but never rotates it. Verified algebraically before relying
+    // on it: with a0=(x0,0,z0), b0=(x0,h,z0), b1=(x1,h,z1),
+    // cross(b0-a0, b1-a0) = h*(z1-z0, 0, -(x1-x0)), i.e. exactly h times a
+    // fixed vector -- normalizing removes the h-dependence entirely. So
+    // normals, like colours, are fixed once per column and never touched
+    // again by the per-frame height choreography.
+    let n = cross3(sub3(b, a), sub3(c, a));
+    n = norm3(n);
+    let kk = k - 9;
+    for (let j = 0; j < 3; j++) {
+      nrm[kk] = n[0]; nrm[kk + 1] = n[1]; nrm[kk + 2] = n[2];
+      col[kk] = rgb[0]; col[kk + 1] = rgb[1]; col[kk + 2] = rgb[2];
+      kk += 3;
+    }
+    return k;
+  }
+
+  // Colours AND normals are fixed per column (see the invariance proof
+  // above) and never change frame to frame. Positions ALSO only partly
+  // move: x/z are fixed by each column's rigid rest footprint, and even
+  // the y=0 wall-base vertices never move -- only the y=h vertices'
+  // y-component actually changes as the height choreography breathes.
+  // The one-time static build below writes everything once AND records
+  // each column's yIdx (flat pos[] indices of its y=h vertices), so the
+  // per-frame fast path can update height by writing exactly those
+  // indices and nothing else -- no array allocation, no unaffected-vertex
+  // rewriting. A first version rebuilt every [x,y,z]/centroid array fresh
+  // every frame; direct puppeteer profiling (a synthetic advanceFrame()
+  // timing script) showed that despite averaging under 1ms/frame, it
+  // produced periodic multi-hundred-ms to 1.5s stalls from the resulting
+  // garbage-collection pressure -- exactly the intermittent-spike shape
+  // validate.js's speed gate caught (single-frame and avg-ms-per-frame
+  // failures that fixing the GPU/CPU static-data re-upload alone did not
+  // resolve). This fast path eliminates essentially all per-frame
+  // allocation.
+  let staticWritten = false;
+  function deformField(t) {
+    const pos = fieldMesh.positions, nrm = fieldMesh.normals, col = fieldMesh.colors;
+    if (!staticWritten) {
+      let k = 0;
+      for (const cell of columns) {
+        const wavePhase = waveK * Math.PI * 2 * cell.rankFrac - waveRate * t;
+        const h = Math.max(0.12, cell.hRest * (1 + 0.3 * Math.sin(wavePhase)));
+        const poly = cell.poly;
+        const rgb = cell.rgb;
+        const yIdx = [];
+        // Top cap: fan triangulation from centroid -- exact for a convex
+        // polygon (every cell here IS convex, a Voronoi-cell guarantee).
+        // Vertex order is (centroid, poly[i+1], poly[i]) -- verified
+        // algebraically before trusting it (not by rendering, since this
+        // was written while the render/validate toolchain was transiently
+        // unavailable): the bounding square and every clipped cell are CCW
+        // in the (X,Z) plane by construction (Sutherland-Hodgman clipping
+        // preserves input winding), and a CCW-in-(X,Z) polygon fanned in
+        // (centroid, poly[i+1], poly[i]) order gives an outward/UPWARD (+Y)
+        // normal via the right-hand cross-product rule -- the (centroid,
+        // poly[i], poly[i+1]) order used in an earlier draft gave a
+        // downward-facing normal instead, confirmed by hand-computing
+        // cross(b-centroid, a-centroid) for a sample CCW edge.
+        const centroid = [cell.cx, h, cell.cz];
+        for (let i = 0; i < poly.length; i++) {
+          const a = [poly[i][0], h, poly[i][1]];
+          const b = [poly[(i + 1) % poly.length][0], h, poly[(i + 1) % poly.length][1]];
+          k = writeTriFull(pos, nrm, col, k, centroid, b, a, rgb, [true, true, true], yIdx);
+        }
+        // Side walls: one quad (2 tris) per polygon edge, from y=0 to y=h.
+        for (let i = 0; i < poly.length; i++) {
+          const p0 = poly[i], p1 = poly[(i + 1) % poly.length];
+          const a0 = [p0[0], 0, p0[1]], a1 = [p1[0], 0, p1[1]];
+          const b0 = [p0[0], h, p0[1]], b1 = [p1[0], h, p1[1]];
+          // Wall colour a touch darker than the top cap (unlit-analogue
+          // separation so caps/walls read as distinct faces even before
+          // per-fragment lighting).
+          const wallRgb = [rgb[0] * 0.78, rgb[1] * 0.78, rgb[2] * 0.78];
+          k = writeTriFull(pos, nrm, col, k, a0, b0, b1, wallRgb, [false, true, true], yIdx);
+          k = writeTriFull(pos, nrm, col, k, a0, b1, a1, wallRgb, [false, true, false], yIdx);
+        }
+        cell.yIdx = yIdx;
+      }
+      fieldMesh.count = k / 3;
+      staticWritten = true;
+    } else {
+      for (const cell of columns) {
+        const wavePhase = waveK * Math.PI * 2 * cell.rankFrac - waveRate * t;
+        const h = Math.max(0.12, cell.hRest * (1 + 0.3 * Math.sin(wavePhase)));
+        const yIdx = cell.yIdx;
+        for (let i = 0; i < yIdx.length; i++) pos[yIdx[i]] = h;
+      }
+    }
+  }
+
+  buildField();
+  initChoreo();
+  deformField(0);
+  initGL();
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+  const dt = 1 / FPS;
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  // Oblique elevated camera looking down across the column tops, the real
+  // Giant's Causeway photograph angle. Tuned by actually rendering frames
+  // and looking at them until the field fills the 16:9 frame boldly.
+  const EYE = [0, 2.5, 4.4];
+  const TARGET = [0, 0.1, -0.5];
+  const UP = [0, 1, 0];
+  const proj = mat4Perspective((50 * Math.PI) / 180, W / H, 0.1, 100);
+  const model = mat4Identity();
+  // Camera and model are both entirely fixed (a static oblique overview,
+  // deliberately no whole-scene rotation -- see the "no reflexive rotation"
+  // note above) so view/mvp never change frame to frame. Computed once
+  // here instead of every frame: mat4LookAt/mat4Multiply each allocate a
+  // fresh Float32Array(16), and doing that 86,400 times an hour for an
+  // always-identical result was pure waste, found the same way the
+  // colBuf/normBuf per-frame re-upload bug above was -- direct puppeteer
+  // profiling of advanceFrame() timing.
+  const view = mat4LookAt(EYE, TARGET, UP);
+  const mvp = mat4Multiply(proj, mat4Multiply(view, model));
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    if (gl.isContextLost()) return;
+
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    gl.uniformMatrix4fv(uMVP, false, mvp);
+    gl.uniformMatrix4fv(uModel, false, model);
+    gl.uniform3f(uEye, EYE[0], EYE[1], EYE[2]);
+
+    // Bounded light-direction oscillation (never sweeping to a fully
+    // back-lit state) -- same coverage-neutral motion source geodome.html/
+    // spaceframe.html/hoppercrystal.html/rosenspikes.html/
+    // tensegritychain.html use.
+    const lightAngle = 0.32 * Math.sin(clk * 1.5) + 0.14 * Math.sin(clk * 3.4 + 0.4);
+    gl.uniform3f(uLightDir, Math.sin(lightAngle) + 0.25, 1.1, Math.cos(lightAngle) + 0.5);
+
+    deformField(clk);
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.posBuf);
+    // bufferSubData (fixed-size in-place update) instead of bufferData
+    // (which some drivers treat as "orphan and reallocate the whole
+    // buffer") -- the buffer's size never changes frame to frame, only a
+    // few of its floats do, so this avoids a full reallocation every
+    // single frame.
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, fieldMesh.positions);
+    gl.enableVertexAttribArray(aPosition);
+    gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
+    // normBuf is STATIC: uploaded once in initGL() and never rewritten here
+    // (see the invariance proof in writeTri()).
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.normBuf);
+    gl.enableVertexAttribArray(aNormal);
+    gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
+    // colBuf is STATIC: uploaded once in initGL() and never rewritten here.
+    // Column colours are fixed by each column's rest footprint centroid
+    // (see buildField()) and never change frame to frame, so re-uploading
+    // the whole colour buffer every frame was pure wasted GPU/CPU cost --
+    // found as the actual cause of a real speed-budget validate.js failure
+    // (101ms/frame avg, budget 100ms), fixed by dropping this per-frame
+    // bufferData call and only re-binding/pointing the already-populated
+    // static buffer.
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf.colBuf);
+    gl.enableVertexAttribArray(aColor);
+    gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, fieldMesh.count);
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+
+  // Same early-context-loss grace window as solids3d.html/geodome.html/
+  // spaceframe.html/rosenspikes.html/tensegritychain.html before declaring
+  // ready.
+  (async () => {
+    await new Promise((r) => setTimeout(r, 300));
+    const deadline = Date.now() + 1500;
+    while (contextLost && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    window.READY = true;
+  })();
+})();
+</script>
+</body>
+</html>

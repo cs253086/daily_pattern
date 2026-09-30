@@ -5953,6 +5953,176 @@ Both are hand-written, no physics library.
   pendulumwave nearest starburst 0.743, spinbounce nearest wireframe
   0.809. `ENGINE_SUBJECTS`: "Pendulum Wave", "Bouncing Balls".
 
+## Columnar-basalt extrusion engine (`columnarbasalt.html`) — 2026-09-29/30
+
+Daily creative-research routine. Category was "random natural structure". An
+open WebSearch surfaced **columnar basalt jointing** (Giant's Causeway,
+Devils Postpile, and similar sites worldwide): real fracture-mechanics
+physics, not folklore -- as a lava flow cools from its top surface downward,
+thermal-contraction cracks initially form 90-degree T-junctions, then
+mechanically relax toward 120-degree Y-junctions (the angle that best
+dissipates stress across the cooling front), producing a near-hexagonal
+(statistically 4-9 sided) polygon tiling with essentially no gaps, extruded
+downward into columns as the cooling front advances. The same T-to-Y
+relaxation mechanism also produces mudcrack networks and drying-paint
+craquelure at smaller scales. Sources: physicsworld.com,
+smithsonianmag.com, en.wikipedia.org/wiki/Giant%27s_Causeway.
+
+**What it is**: a real lit-3D WebGL engine, the pool's tenth. A field of
+solid polygonal PRISMS (columns) of varying height, packed edge-to-edge
+with zero gaps, viewed at an oblique elevated angle looking down across
+the column tops -- the pool's only engine that takes an EXISTING,
+already offline-verified 2D partition construction and EXTRUDES it into a
+real lit 3D scene, rather than devising new 3D geometry from scratch: the
+column footprints are generated with `voronoimosaic.html`'s own proven
+half-plane-intersection Voronoi cell algorithm (`clipHalfPlane`/
+`intersectEdge`/`voronoiCell`), reused verbatim rather than re-derived,
+since that construction was already offline-verified there. A genuinely
+different composition from every other real-WebGL engine in the pool: not
+sparse orbiting solids (`solids3d.html`), not a grid of spinning cubes
+(`lattice3d.html`), not lit tori (`torusrings3d.html`), not one continuous
+convex mesh (`geodome.html`), not a connected strut framework
+(`spaceframe.html`), not a concave excavation (`hoppercrystal.html`) or
+niche-cell lattice (`muqarnas.html`), not independently-growing convex
+spikes (`rosenspikes.html`), not a floating tensegrity chain
+(`tensegritychain.html`) -- a dense field of individually-heighted,
+gap-free polygonal columns, closer in spirit to a landscape than to any
+single-object composition elsewhere in the pool.
+
+**A real geometry bug caught by hand algebra, not by rendering** -- this
+firing was interrupted mid-draft by a transient Bash-tool infrastructure
+outage that made the render/validate toolchain unavailable for a full
+day. Rather than stall, the top-cap triangle fan's vertex winding was
+verified by explicit cross-product computation on sample coordinates
+(the same discipline this pool's `quasicrystal.html`/`geodome.html`/
+`spaceframe.html` already established for a construction that could
+still "look plausible" even if subtly wrong, just carried out with pen-
+and-paper algebra instead of a script): the bounding square and every
+Voronoi-clipped cell are CCW in the (X,Z) plane by construction
+(Sutherland-Hodgman clipping preserves input winding), so a fan order of
+`(centroid, poly[i], poly[i+1])` was hand-computed to give a DOWNWARD
+(-Y) normal -- wrong -- while `(centroid, poly[i+1], poly[i])` gives the
+correct UPWARD (+Y) normal. Fixed before any frame was ever rendered,
+and confirmed correct once rendering resumed the next day.
+
+**Colour is tied to each column's fixed footprint-centroid ANGLE**
+(`atan2(cz, cx)`, a rest-state coordinate the height animation can never
+disturb), the same "colour by an axis the motion can't disturb" fix
+`geodome.html`/`spaceframe.html`/`hoppercrystal.html`/`rosenspikes.html`
+established. Height follows a rank-fraction-phased travelling wave (the
+`doylespiral.html`/`rosenspikes.html`/`frostgrowth.html` technique: sort
+columns by a spatial axis, assign each one rank fraction `i/N`, phase an
+integer-`waveK` wave by that fraction) -- exactly zero-sum by discrete-
+Fourier orthogonality regardless of how non-uniformly the Voronoi cells
+are actually distributed in space, so column heights breathe with no net
+coverage/brightness trend by construction. Deliberately no whole-scene
+rotation at all (per `truchet.html`'s lesson that a reflexive rotation
+only dilutes the mandatory unit-motion signal unless `fastMotion`
+genuinely needs it) -- the height wave alone gave `unitMotionNonRigidFrac`
+comfortably above the 0.40 floor on every tested seed.
+
+**A persistent `validate.js` speed-budget failure survived three real,
+legitimate fixes before the actual remaining cause was found** -- each
+fix was independently correct and worth making, but none of them alone
+(nor all three together) fully resolved the failure, which is the
+interesting part of this writeup:
+1. The render loop was redundantly re-uploading the entire (unchanged)
+   colour buffer to the GPU every single frame, even though column
+   colours are fixed once per video and never change. Fixed by making
+   `colBuf` `STATIC_DRAW`, uploaded once in `initGL()`, never touched
+   again in the render loop.
+2. `deformField()` was reallocating fresh `[x,y,z]` coordinate arrays for
+   every triangle vertex every frame, plus recomputing every triangle's
+   normal via a fresh cross-product every frame -- even though (verified
+   algebraically before trusting it) BOTH the top-cap and side-wall
+   normals are geometrically INVARIANT to the column's own live height h
+   (translating a horizontal cap in y can't change its cross-product
+   direction; a vertical wall's cross-product direction is independent of
+   how far it extends). Fixed by writing normals/colours only once (like
+   the colour buffer) and, for positions, precomputing per-column
+   flat-array Y-indices once so the per-frame fast path only overwrites
+   the handful of floats that actually change, with zero allocation.
+3. The camera view/MVP matrices were being recomputed and reallocated
+   (`mat4LookAt`/`mat4Multiply`, each returning a fresh `Float32Array(16)`)
+   every single frame even though the camera and model are both entirely
+   fixed (a static oblique overview, no whole-scene rotation) -- moved
+   outside `renderFrame()` to compute once.
+
+   After all three fixes, direct puppeteer profiling (`advanceFrame()`
+   timing, isolated from Node-side page.evaluate() round-trip overhead)
+   confirmed per-frame JS/GPU-upload cost had dropped to ~1-2ms -- yet
+   `validate.js`'s speed test, which times each frame via a SEPARATE
+   Node-side `page.evaluate()` call, still failed consistently (worst-
+   frame spikes of 1200-2700ms, occasionally blowing the 2000ms hard cap
+   outright). A direct comparison against an already-shipped, passing
+   WebGL engine (`rosenspikes.html`) profiled the identical way showed
+   the SAME underlying Chrome/swiftshader driver artifact ("GPU stall due
+   to ReadPixels", a real logged driver message) at a much SMALLER
+   magnitude (281-334ms vs 1200-2700ms) -- ruling out plain sandbox noise
+   as the sole explanation, since the artifact scaled with something
+   about this engine specifically. The real remaining cause: this engine
+   is a full-bleed, edge-to-edge column field (the house-style "fills the
+   frame" requirement applied literally, with far less black background
+   than a sparser engine like `rosenspikes.html`'s scattered hex spikes),
+   so multisample antialiasing was multiplying fragment-shading cost
+   across nearly every pixel in the frame under software (swiftshader)
+   rendering. Disabling antialiasing (`antialias: false`, with a code
+   comment explaining why -- this pool's other WebGL engines keep it on)
+   was the fix that actually resolved it: `avgMsPerFrame` dropped from a
+   consistently-failing 76-133ms (budget 100ms) to a comfortably-passing
+   39-88ms across the full 16-seed battery, with worst-frame spikes down
+   to 826-1634ms, comfortably clear of the 2000ms cap on every seed.
+
+**The full 16-seed battery then surfaced a second, genuinely different
+failure**, unrelated to speed: seed 1 failed `compositionDrift` at 0.0114
+(need >= 0.015) -- "the composition never develops... the arrangement
+itself is frozen and merely spinning/scrolling in place". This was a
+real, if narrow, finding: the rank-phased height wave IS genuine per-
+column motion (confirmed by `unitMotionNonRigidFrac` already reading
+1.0), but at its original +-22% amplitude, viewed from this engine's
+oblique overview camera, the resulting silhouette/edge-structure change
+was too subtle to clear the rotation-invariant `compositionDrift`
+descriptor's threshold on this one seed's specific column arrangement.
+Fixed by raising the wave amplitude to +-30% (both duplicated occurrences
+of the height formula, in the one-time static-build branch and the
+per-frame fast-path branch, kept in sync) -- re-verified across the full
+16-seed battery afterward with no regression to any other check,
+including the previously-comfortable seeds.
+
+**Verified** (final design): `validateEngine()` **16/16** across seeds
+1-15 plus the CLI's actual default seed 12345 (see `geodome.html`'s
+write-up for why that seed matters), confirmed in two full passes -- once
+immediately after the antialiasing fix (which alone already cleared the
+speed gate on all 16) and once after the amplitude fix (which cleared the
+one remaining compositionDrift failure with no regression elsewhere).
+Final margins comfortable throughout: `avgSat` 51.0-70.2 (vs the 22
+minimum), zero near-white pixels on every seed, `projectedRise` -105.5 to
++37.0 (vs the 50 threshold -- only positive rise is gated, a large dip is
+fine), `compositionDrift` 0.0162-0.0454 (vs the 0.015 minimum, no seed
+left near the line), `unitMotionNonRigidFrac` 0.882-1.0 (vs the 0.40
+minimum), `fastMotion` always comfortably above its per-frame floor,
+`avgMsPerFrame` 39.4-88.2ms giving `projectedHourRenderMin` 56.7-127.0min
+(comfortably inside the CI budget). Visual spot-checks across
+2/25/50/75/95% of a 43.5s cycle at 2 seeds, actually rendering PNGs and
+looking at them, not just reading validator output: a vivid, bold,
+immediately-legible field of columnar-basalt-like polygonal prisms with
+clearly distinct top-cap vs. side-wall shading, genuine visible per-column
+height variation between checkpoints, no gaps or clipping at any tested
+fraction, and two visually distinct palette combinations (blue/pink/
+purple; green/cyan/blue) across the two spot-checked seeds.
+
+**Novelty gate**: measured against all 54 existing engines (the committed
+fingerprint cache was badly stale -- 27 of 55 entries -- so the whole pool
+was fingerprinted fresh alongside the candidate, per this pool's
+established practice; the refreshed cache was not committed, per this
+routine's "touch only the new engine + log + CLAUDE.md" constraint, with
+the same `ENGINE_SUBJECTS` exception this pool's `tensegritychain.html`
+write-up already established). Nearest neighbour is `taniko` at distance
+**1.032** -- comfortably clear of the 0.60 threshold and well above this
+pool's own historical median pair distance, not a thin-margin case.
+`columnarbasalt` also forms its own singleton archetype group at the
+pool's perceptual-grouping threshold (0.55).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

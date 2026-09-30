@@ -527,5 +527,33 @@
     ],
     "nearestNeighbour": "stripweave",
     "nearestDistance": 1.275
+  },
+  {
+    "date": "2026-09-29",
+    "inspirationSource": "Columnar basalt jointing (Giant's Causeway) -- category \"random natural structure\". Real fracture-mechanics physics: as lava cools from the top down, thermal-contraction cracks initially form 90-degree T-junctions, then mechanically relax toward 120-degree Y-junctions (the angle that best dissipates stress), producing a near-hexagonal (statistically 4-9 sided) polygon tiling with essentially no gaps -- the same physical principle behind mudcrack networks and drying-paint craquelure, just at basalt scale. Sources: physicsworld.com, smithsonianmag.com, en.wikipedia.org/wiki/Giant%27s_Causeway.",
+    "idea": "A field of solid polygonal PRISMS (columns) of varying height, packed EDGE-TO-EDGE with no gaps at all, viewed at an oblique elevated angle looking down across the column tops -- the pool's only engine that takes an existing, already offline-verified 2D partition construction (voronoimosaic.html's proven half-plane-intersection Voronoi cell algorithm, reused verbatim) and EXTRUDES it into a real lit 3D scene. A genuinely different composition from every other real-WebGL engine in the pool: not sparse orbiting solids, not a grid of spinning cubes, not lit tori, not one continuous convex dome mesh, not a connected strut framework, not a concave excavation or niche-cell lattice, not independently-growing spikes, not a floating tensegrity chain -- a dense field of individually-heighted, gap-free polygonal columns.",
+    "engineName": "columnarbasalt",
+    "outcome": "shipped",
+    "reason": "The Voronoi cell footprint construction (clipHalfPlane/intersectEdge/voronoiCell) was reused verbatim from the already offline-verified voronoimosaic.html rather than re-derived. The top-cap triangle fan's vertex winding was verified by HAND ALGEBRA (not rendering, since the render/validate toolchain was transiently unavailable when this was first drafted): an explicit cross-product computation on sample coordinates caught and fixed a real downward-facing-normal bug before any frame was ever rendered, later confirmed correct once rendering resumed. Colour is tied to each column's fixed footprint centroid angle (rotation-axis-invariant); height follows a rank-fraction-phased travelling wave (the doylespiral.html/rosenspikes.html/frostgrowth.html technique, exactly zero-sum by discrete-Fourier orthogonality regardless of the Voronoi cells' non-uniform spatial distribution), deliberately with NO whole-scene rotation (per truchet.html's lesson). A persistent validate.js speed-budget failure survived several real fixes (a redundant per-frame GPU re-upload of the static colour buffer; per-frame array allocation in the position-writing hot path, replaced with precomputed per-cell Y-index lists so only the changed height coordinate is touched each frame; a redundant per-frame recomputation/reallocation of the fully-static camera view/MVP matrices) before the real remaining cause was found: this engine is a full-bleed, edge-to-edge column field (the house-style \"fills the frame\" requirement applied literally, with far less black background than sparser WebGL engines like rosenspikes.html), so multisample antialiasing was multiplying fragment-shading cost across nearly the whole frame under software (swiftshader) rendering. Disabling antialiasing (antialias: false) was the fix that actually resolved it: avgMsPerFrame dropped from a consistently-failing 76-133ms (often exceeding the 100ms budget, with worst-frame spikes up to 2688ms blowing the 2000ms single-frame cap) to a comfortably-passing 39-88ms across the full seed battery. The full 16-seed battery then surfaced a second, genuinely different failure: seed 1 failed compositionDrift at 0.0114 (need >= 0.015) -- the height-breathing wave's amplitude (+-22%) was too subtle from this camera's oblique angle to register enough rotation-invariant structural change over the 300s test window, even though it is real, non-rigid, per-column motion. Fixed by raising the wave amplitude to +-30%, re-verified across all 16 seeds with no regression to any other check.",
+    "seedsVerified": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      12345
+    ],
+    "nearestNeighbour": "taniko",
+    "nearestDistance": 1.032
   }
 ]

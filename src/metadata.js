@@ -37,6 +37,7 @@ const ENGINE_SUBJECTS = {
   automaton: 'Fractal Cell Growth',
   cascade: 'Cascading Blocks',
   chladni: 'Cymatic Wave Patterns',
+  columnarbasalt: 'Basalt Column Field',
   composer: 'Geometric Composition',
   dendrite: 'Fractal Branches',
   doylespiral: 'Doyle Spiral Circles',
