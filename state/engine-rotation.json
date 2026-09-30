@@ -1,7 +1,7 @@
 {
   "last3D": "rosenspikes",
   "last2D": "dragonfold",
-  "lastMandala": null,
+  "lastMandala": "ziggurat",
   "last3DArchetype": "rosenspikes",
   "last2DArchetype": "dragonfold",
   "last3DByArchetype": {
@@ -27,5 +27,5 @@
     "doylespiral": "doylespiral",
     "dragonfold": "dragonfold"
   },
-  "updatedAt": "2026-09-29T15:37:42.226Z"
+  "updatedAt": "2026-09-30T15:48:11.371Z"
 }
