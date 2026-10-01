@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generative Art Screensaver</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: black; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        // Seeded PRNG (Mulberry32)
+        window.mulberry32 = function(a) {
+            return function() {
+                a |= 0; a = a + 0x6D2B79F5 | 0;
+                var t = Math.imul(a ^ a >>> 15, 1 | a);
+                t = t + Math.imul(t ^ t >>> 7, 61 | t) | 0;
+                return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            }
+        }
+
+        // URL parameters and defaults
+        const urlParams = new URLSearchParams(window.location.search);
+        const seed = parseInt(urlParams.get('seed')) || 12345;
+        const width = parseInt(urlParams.get('width')) || 1920;
+        const height = parseInt(urlParams.get('height')) || 1080;
+        const fps = parseInt(urlParams.get('fps')) || 24;
+        const duration = parseInt(urlParams.get('duration')) || 3600;
+        const speed = parseFloat(urlParams.get('speed')) || 1.0;
+        const density = parseFloat(urlParams.get('density')) || 1.0;
+        const cycleSec = parseFloat(urlParams.get('cycleSec')) || 90;
+
+        const TOTAL_FRAMES = Math.round(duration * fps);
+        const dt = 1 / fps;
+
+        let rand = window.mulberry32(seed);
+
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = width;
+        canvas.height = height;
+
+        window.currentFrame = 0;
+        window.READY = false;
+        window.TOTAL_FRAMES = TOTAL_FRAMES;
+
+        // --- Core Engine Logic ---
+
+        const TWO_PI = Math.PI * 2;
+        const CENTER_X = width / 2;
+        const CENTER_Y = height / 2;
+        const MAX_DIM = Math.max(width, height);
+        const MIN_DIM = Math.min(width, height);
+
+        // Palette generation based on seed
+        let baseHues = [];
+        let paletteShiftRate;
+        const generatePalette = () => {
+            baseHues = [];
+            let startHue = rand() * 360;
+            const numHues = Math.floor(rand() * 3) + 3; // 3 to 5 hues
+            const hueSpread = (rand() * 30 + 40); // 40-70 degrees spread
+
+            for (let i = 0; i < numHues; i++) {
+                baseHues.push((startHue + i * hueSpread) % 360);
+            }
+            paletteShiftRate = (rand() * 0.05 + 0.02) * (rand() < 0.5 ? 1 : -1); // 0.02 to 0.07 deg/sec
+        };
+
+        let elements = [];
+        const NUM_LAYERS = Math.floor(rand() * 3 + 3); // 3 to 5 layers
+        const MAX_ELEMENTS_PER_LAYER = Math.floor(rand() * 20 + 10) * density; // 10-30 elements per layer
+        const MAX_SEGMENTS = Math.floor(rand() * 5 + 3); // 3-7 segments per shape
+        const MIN_RADIUS_FACTOR = rand() * 0.1 + 0.05; // 5-15% of MIN_DIM
+        const MAX_RADIUS_FACTOR = rand() * 0.2 + 0.15; // 15-35% of MIN_DIM
+
+        const WAVE_SPEED = (rand() * 0.6 + 0.3) * speed; // 0.3 - 0.9 units/sec
+        const WAVE_MAGNITUDE_SCALE = rand() * 0.1 + 0.05; // 5-15% of element size
+        const SPIN_RATE = (rand() * 0.5 + 0.3) * speed; // 0.3 - 0.8 rad/sec
+
+        class ShapeElement {
+            constructor(layerIndex) {
+                this.layerIndex = layerIndex;
+                this.reset();
+            }
+
+            reset() {
+                this.x = rand() * width;
+                this.y = rand() * height;
+                this.radius = (rand() * (MAX_RADIUS_FACTOR - MIN_RADIUS_FACTOR) + MIN_RADIUS_FACTOR) * MIN_DIM;
+                this.segments = Math.floor(rand() * MAX_SEGMENTS) + 3;
+                this.rotation = rand() * TWO_PI;
+                this.spinRate = (rand() * 0.4 + 0.2) * speed * (rand() < 0.5 ? 1 : -1); // 0.2-0.6 rad/sec
+                this.orbitalRadius = rand() * (MAX_DIM * 0.4 - MAX_DIM * 0.1) + MAX_DIM * 0.1; // 10-40% of MAX_DIM
+                this.orbitalAngle = rand() * TWO_PI;
+                this.orbitalSpeed = (rand() * 0.1 + 0.05) * speed * (rand() < 0.5 ? 1 : -1); // 0.05-0.15 rad/sec for orbital motion
+                this.hueOffset = rand() * 360;
+                this.targetX = rand() * width;
+                this.targetY = rand() * height;
+                this.morphSpeed = (rand() * 0.05 + 0.02) * speed; // 0.02-0.07 units/sec
+                this.age = 0;
+                this.lifetime = rand() * cycleSec * 0.5 + cycleSec * 0.2; // 20-70% of cycleSec
+            }
+
+            update(time, dt) {
+                this.rotation += this.spinRate * dt;
+                this.orbitalAngle += this.orbitalSpeed * dt;
+
+                // Morphing towards target
+                const dx = this.targetX - this.x;
+                const dy = this.targetY - this.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist < 10) { // Reached target, pick new one
+                    this.targetX = rand() * width;
+                    this.targetY = rand() * height;
+                } else {
+                    this.x += dx / dist * this.morphSpeed * dt;
+                    this.y += dy / dist * this.morphSpeed * dt;
+                }
+
+                this.age += dt;
+                if (this.age > this.lifetime) {
+                    this.reset();
+                }
+            }
+
+            draw(ctx, currentHue) {
+                const globalTime = window.currentFrame * dt * speed;
+                const baseHue = (currentHue + this.hueOffset) % 360;
+                const saturation = rand() * 20 + 75; // 75-95% saturation
+                const lightness = rand() * 10 + 50; // 50-60% lightness
+
+                const globalRotation = globalTime * SPIN_RATE; // Overall pattern rotation
+
+                // Apply orbital motion around center
+                const orbX = CENTER_X + Math.cos(this.orbitalAngle + globalRotation) * this.orbitalRadius;
+                const orbY = CENTER_Y + Math.sin(this.orbitalAngle + globalRotation) * this.orbitalRadius;
+
+                // Combine morphing with orbital for position
+                const finalX = this.x * 0.5 + orbX * 0.5;
+                const finalY = this.y * 0.5 + orbY * 0.5;
+
+
+                ctx.save();
+                ctx.translate(finalX, finalY);
+                ctx.rotate(this.rotation + globalRotation);
+
+                // Traveling wave modulation for scale
+                const wavePhaseX = Math.sin(finalX / 100 + globalTime * WAVE_SPEED);
+                const wavePhaseY = Math.cos(finalY / 100 + globalTime * WAVE_SPEED);
+                const waveScale = 1 + (wavePhaseX + wavePhaseY) * WAVE_MAGNITUDE_SCALE;
+                const currentRadius = this.radius * waveScale;
+
+                // Draw glow
+                const glowColor = `hsla(${baseHue}, ${saturation}%, ${lightness}%, 0.08)`;
+                const coreColor = `hsla(${baseHue}, ${saturation}%, ${lightness + 10}%, 0.8)`; // Slightly brighter core
+
+                ctx.lineWidth = currentRadius * 0.15; // Thicker for glow
+                ctx.strokeStyle = glowColor;
+                ctx.shadowBlur = currentRadius * 0.1;
+                ctx.shadowColor = `hsl(${baseHue}, ${saturation}%, ${lightness}%)`;
+
+                ctx.beginPath();
+                for (let i = 0; i < this.segments; i++) {
+                    const angle = TWO_PI * i / this.segments;
+                    const x = Math.cos(angle) * currentRadius;
+                    const y = Math.sin(angle) * currentRadius;
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.closePath();
+                ctx.stroke();
+
+                // Draw core
+                ctx.shadowBlur = 0; // Disable shadow for core stroke
+                ctx.lineWidth = currentRadius * 0.02; // Thinner for core
+                ctx.strokeStyle = coreColor;
+                ctx.stroke();
+
+                ctx.restore();
+            }
+        }
+
+        const initScene = () => {
+            generatePalette();
+            elements = [];
+            for (let i = 0; i < NUM_LAYERS; i++) {
+                elements.push([]);
+                for (let j = 0; j < MAX_ELEMENTS_PER_LAYER; j++) {
+                    elements[i].push(new ShapeElement(i));
+                }
+            }
+        };
+
+        const cycleResetFrame = Math.round(cycleSec * fps);
+
+        // Animation function
+        window.advanceFrame = function() {
+            const time = window.currentFrame * dt;
+
+            // Mandatory hard reset
+            if (window.currentFrame > 0 && window.currentFrame % cycleResetFrame === 0) {
+                ctx.clearRect(0, 0, width, height); // Full clear
+                // Re-initialize scene to ensure visual change and reset light accumulation risk
+                // However, for a clearing engine, a full reset of elements might make it less "evolving"
+                // Instead, elements have their own lifetimes and reset, ensuring continuous change
+                // We'll just clear and let the elements naturally evolve and replace themselves.
+                // Re-generate palette on cycle reset to ensure color evolution.
+                generatePalette(); 
+            } else {
+                // Clear the canvas each frame to prevent accumulation and allow fresh drawing
+                ctx.clearRect(0, 0, width, height);
+            }
+
+            // Update palette hue shift
+            let currentPaletteHueShift = time * paletteShiftRate * 10; // Faster shift for visual dynamism
+            
+            for (let i = 0; i < NUM_LAYERS; i++) {
+                const baseHue = baseHues[i % baseHues.length];
+                const layerHue = (baseHue + currentPaletteHueShift) % 360;
+                
+                elements[i].forEach(el => {
+                    el.update(time, dt * speed);
+                    el.draw(ctx, layerHue);
+                });
+            }
+
+            window.currentFrame++;
+        };
+
+        window.advanceFrames = function(n) {
+            for (let i = 0; i < n; i++) {
+                window.advanceFrame();
+            }
+        };
+
+        // Initialize and set READY
+        initScene();
+        window.READY = true;
+
+    </script>
+</body>
+</html>
