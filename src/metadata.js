@@ -63,6 +63,7 @@ const ENGINE_SUBJECTS = {
   quasicrystal: 'Penrose Tiling',
   reactiondiffusion: 'Reaction Diffusion Patterns',
   rosenspikes: 'Ferrofluid Spikes',
+  schlieren: 'Liquid Crystal Schlieren Texture',
   solids3d: 'Floating 3D Solids',
   spaceframe: 'Octet Space Frame',
   spinbounce: 'Bouncing Balls',

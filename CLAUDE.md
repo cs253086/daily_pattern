@@ -6123,6 +6123,153 @@ pool's own historical median pair distance, not a thin-margin case.
 `columnarbasalt` also forms its own singleton archetype group at the
 pool's perceptual-grouping threshold (0.55).
 
+## Nematic liquid-crystal schlieren-texture engine (`schlieren.html`) — 2026-10-02
+
+Daily creative-research routine. Category was "obscure mathematical object /
+crystal system / physical phenomenon" -- tied as the pool's most under-used
+category recently alongside "a random featured image" (4 prior uses each);
+picked since it was last used 2026-09-26 (`rosenspikes.html`) vs 2026-09-27
+for the other, per the `herringbone.html` precedent of varying categories
+rather than defaulting to a heavily-used one. An open WebSearch for an
+unusual physical pattern-formation phenomenon surfaced nematic liquid
+crystal **schlieren texture** -- the real optical pattern seen between
+crossed polarizers: dark "brushes" radiating from point DISCLINATIONS
+(topological defects in the molecular orientation field), 4|s| brushes per
+defect of strength s (s = +-1/2, +-1 are the physically observed
+strengths). Sources (search snippets): https://www.personal.kent.edu/
+~bisenyuk/liquidcrystals/textures1.html, https://doitpoms.ac.uk/tlplib/
+liquid_crystals/observing_defects.php.
+
+**A genuinely different construction PRINCIPLE from every other engine in
+the pool**: not a closed-form wave-interference field sampled for its
+zero-crossing (`chladni.html`) or ranked maxima (`phasespikes.html`) or two
+rotating lattices (`moire.html`) -- a harmonic SINGULARITY/VORTEX
+superposition. The nematic director's orientation angle `theta(x,y)` is the
+sum of each point-defect's own contribution, `theta(x,y) = SUM_i s_i *
+atan2(y-y_i, x-x_i)` -- exactly the mathematics of superposing point
+vortices in 2D potential flow (`atan2` is the harmonic conjugate of
+`log|z-z_i|`), chosen because theta must be harmonic (minimising Frank
+elastic energy in the one-constant approximation gives Laplace's equation)
+with the correct winding number (`2*pi*s_i`) around each defect.
+
+**VERIFIED OFFLINE before writing any rendering code**, the same discipline
+this pool's `quasicrystal.html`/`geodome.html`/`hilbertweave.html`/
+`spaceframe.html` already established for a construction that could still
+"look plausible" even if subtly wrong: a standalone script confirmed (a)
+the winding number around an isolated defect matched `2*pi*s_i` (within
+1e-3) for integer strengths; (b) the rendered crossed-polarizer intensity
+`I = sin^2(2*theta - 2*P)` (P = polarizer angle) shows exactly `4*|s|` dark
+brushes per isolated defect -- 4 for `|s|=1`, 2 for `|s|=0.5` -- matching
+the physically documented brush count exactly; (c) `I` is perfectly
+continuous (floating-point noise only, 1e-5 to 1e-7) across an individual
+defect's own `atan2` branch-cut ray, confirming the `sin^2` doubling
+genuinely erases that coordinate-system artifact rather than leaving a
+visible seam; (d) as the shared polarizer angle `P(t)` increases uniformly,
+a defect's brush pattern rotates at angular rate exactly `1/s_i` (measured:
+`dAngle/dP` = 1.000 for s=1, 2.000 for s=0.5, matching the analytic
+dark-brush-condition derivation exactly).
+
+**Motion**: a single shared, continuously-accumulated polarizer angle `P(t)`
+(`P += rate*dt` every frame, never reset -- only `rate`'s magnitude/sign
+reconfigures at `cycleSec` boundaries, so `P` stays perfectly continuous
+across any reconfigure) is the primary driver. Because different-strength
+defects' brushes rotate at different rates (`1/s_i`, verified above), one
+global parameter produces genuinely differentiated, non-rigid motion across
+the frame for free -- unlike most engines in this pool, which had to bolt
+on independent per-element wobble/pulse mechanisms by hand. Each defect's
+rest position also slowly orbits its own small circle (guaranteed-minimum-
+magnitude amplitude/rate, random sign, reconfigured at cycle boundaries)
+for additional evolution and, as it turned out, additional unit-motion
+robustness (see below).
+
+**The first render looked like soft organic blobs**, directly against the
+house style's "crisp, defined shapes... not soft organic blobs" rule
+(confirmed by rendering and looking, per the standing visual-requirements
+rule, not assumed) -- the raw `sin^2` formula shades gently near each zero,
+and the smooth colour gradient between brushes read as a lava-lamp blob
+field even after the brightness mapping was sharpened. Fixed with two
+composition-level changes: (1) a smoothstep of `|sin(phase)|` against a
+threshold turns only a thin band near each brush dark, with everything else
+on a flat, vivid lit plateau; (2) posterising the hue into discrete WEDGES
+(not a continuous blend across `phaseWrap`) turns the same phase field into
+a crisp pinwheel of flat colour sectors radiating from each defect (`theta`
+increases roughly linearly with angle around an isolated defect, so
+discrete theta bands are literally pie slices) -- matching the house
+style's "defined shapes... lattices" rule while keeping the exact same
+physical brush positions/count.
+
+**That design then failed `validateEngine()` 4/16**, two distinct failure
+classes, fixed in three rounds:
+
+1. Two seeds showed a real brightness-trend whiteout (up to +86 luma
+   projected). Root cause: a FIXED `|sin(phase)|` threshold let the
+   dark-brush band's AREA genuinely swing as the polarizer angle `P` swept
+   through this multi-defect field's non-uniformly-distributed phase
+   density (level contours are far denser near a defect than far from one,
+   so which specific contour currently reads as "dark" changes how much
+   total area it covers). Fixed with chladni.html's proven rank-select
+   percentile technique: a histogram-based threshold recomputed fresh every
+   frame holds the dark-band area EXACTLY constant, regardless of which
+   contour it currently traces.
+2. That fix alone made ONE seed WORSE, not better (+64 to +226 luma
+   projected) -- a second, independent instance of the identical bug class,
+   this time in the HUE mapping: different `HUE_BANDS` have different
+   inherent luma at the same lightness/saturation (the well-documented
+   "hue affects luma" trap this pool's `quasicrystal.html`/
+   `kaleidoscope.html`/`geodome.html` all hit before), and a plain linear
+   `phaseWrap -> band` mapping let each band's AREA swing too as `P` swept.
+   Fixed the same way: hue bands are now assigned by RANK (an independent
+   percentile partition into exactly equal-sized groups every frame), not
+   by raw `phaseWrap` value -- this fully eliminated the whiteout failures
+   (16/16 passed that check afterward).
+3. Two (later, after further changes, a shifting one) seeds failed the
+   mandatory unit-motion gate: a lucky same-strength defect draw let ONE
+   rigid rotation explain 61-69% of the frame's visible motion (need
+   <=60%). First fix -- guarantee at least one magnitude-1 and one
+   magnitude-2 defect (`|1/s|`) are always present -- helped most seeds but
+   not all: dumping the actual failing seed's defect list showed 4 of 5
+   defects had landed on the SAME magnitude group (three at rate +2, one at
+   -2, only one at rate 1), so "at least one of each" wasn't enough to stop
+   that one group from dominating. Fixed with a near-even SHUFFLE across
+   all defects (half get magnitude 1, half get magnitude 0.5, sign
+   independently randomised), plus a substantially strengthened,
+   magnitude-independent defect-position orbit drift as a second,
+   guaranteed motion source -- resolved the remaining failures.
+
+**Verified** (final design): `validateEngine()` **16/16** across seeds 1-15
+plus the CLI's actual default seed 12345 (see `geodome.html`'s write-up for
+why that seed matters). Margins comfortable throughout: `avgSat` 69.8-97.1
+(vs the 22 minimum), zero near-white pixels on every seed, `projectedRise`
+-18.9 to +17.8 (vs the 50 threshold), `compositionDrift` 0.033-0.106 (vs
+the 0.015 minimum), `unitMotionNonRigidFrac` 0.445-0.96 (vs the 0.40
+minimum), `projectedHourRenderMin` 43.5-50.5min (comfortably inside the CI
+budget). Visual spot-checks across 2/25/50/75/95/105% of a 36s cycle at
+multiple seeds, actually rendering PNGs and looking at them: vivid, bold,
+immediately-recognisable crisp colour pinwheels with dark radiating brush
+lines, smooth continuous evolution across the cycle-boundary reconfigure
+with no jarring jump, and genuinely distinct defect-count/palette
+combinations across seeds.
+
+**Novelty gate**: measured against all 56 existing engines (the committed
+fingerprint cache was badly stale, so the whole pool was fingerprinted
+fresh alongside the candidate, per this pool's established practice; the
+refreshed cache was not committed, per this routine's "touch only the new
+engine + log + CLAUDE.md" constraint). First measured at **0.631** vs
+`auto-2026-08-27-field-of-small-lit-3d-solids-drifting-th` -- a per-feature
+z-score diagnostic showed the collision driven almost entirely by
+periodicity/mirror/orientation features (`periodX`/`periodY`, `mirrorLR`/
+`mirrorUD`, `orient0-7`), which CLAUDE.md already documents as NOT
+rotation-invariant -- this engine never rotated its overall field at all,
+so those features were pinned at whatever one fixed defect layout happened
+to produce. Tried adding a slow whole-field rotation specifically to shift
+those features (kept deliberately slow, a full rotation taking 35-65s, so
+as not to dilute the already-comfortable unit-motion margin) -- this
+measured WORSE (0.610, against a DIFFERENT neighbour), confirming once more
+this pool's repeated lesson that not every lever moves novelty distance in
+the expected direction. Reverted and shipped at the original design's
+measured distance, **0.631** -- a clean pass above the 0.60 minimum, not a
+razor-thin one.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

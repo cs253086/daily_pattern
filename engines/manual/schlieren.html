@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Schlieren Disclinations — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "obscure mathematical object / crystal
+// system / physical phenomenon" -- the pool's most under-used category
+// recently alongside "a random featured image", tied at 4 prior uses each;
+// picked this one since it was last used 2026-09-26, vs. 2026-09-27 for the
+// featured-image category). An open WebSearch for an unusual physical
+// pattern-formation phenomenon surfaced nematic LIQUID CRYSTAL "SCHLIEREN
+// TEXTURE" -- the real optical pattern seen when a nematic liquid crystal
+// sample is viewed between crossed polarizers: dark "brushes" radiating
+// from point DISCLINATIONS (defects in the molecular orientation field),
+// 4|s| brushes per defect of topological strength s (s = +/-1/2, +/-1 are
+// the physically observed strengths). Search sources (snippets only):
+// https://www.personal.kent.edu/~bisenyuk/liquidcrystals/textures1.html,
+// https://doitpoms.ac.uk/tlplib/liquid_crystals/observing_defects.php.
+//
+// A genuinely different construction PRINCIPLE from every other engine in
+// the pool: not a closed-form WAVE-INTERFERENCE field sampled for its
+// zero-crossing (chladni.html) or ranked maxima (phasespikes.html) or two
+// rotating lattices (moire.html) -- this is a harmonic SINGULARITY/VORTEX
+// superposition: the nematic director's orientation angle theta(x,y) at
+// any point is the sum of each point-defect's own contribution,
+// theta(x,y) = SUM_i s_i * atan2(y-y_i, x-x_i) -- exactly the same
+// mathematics as superposing point vortices in 2D potential flow (atan2 is
+// the harmonic conjugate of log|z-z_i|, i.e. Im(log(z-z_i))), chosen
+// because theta must be a HARMONIC function (minimising Frank elastic
+// energy in the one-constant approximation gives Laplace's equation) with
+// the correct winding number (2*pi*s_i) around each defect -- a
+// structurally different generative principle from every tiling,
+// substitution, growth, sieve, or partition engine already shipped. Not a
+// discrete cellular-automaton rule, not particle-based accretion, not a
+// continuous PDE simulation (reactiondiffusion.html) -- a pure closed-form
+// singularity field, re-evaluated fresh every frame with no history.
+//
+// VERIFIED OFFLINE before writing any rendering code (the same discipline
+// this pool's quasicrystal.html/geodome.html/hilbertweave.html/
+// spaceframe.html already established for a construction that could still
+// "look plausible" even if subtly wrong): a standalone script confirmed
+// (a) the winding number of theta around an isolated defect matches
+// 2*pi*s_i to within 1e-3 for s in {1, -1} (half-integer defects are only
+// single-valued mod pi, as physically expected for a director LINE field,
+// which is why the raw atan2 winding check needs theta mod pi for those --
+// confirmed separately via brush counting below); (b) the actual RENDERED
+// quantity I = sin^2(2*theta - 2*P) (crossed-polarizer intensity, P = the
+// polarizer angle) shows the physically documented 4*|s| dark brushes per
+// isolated defect, exactly (4 for |s|=1, 2 for |s|=0.5), confirmed by
+// counting dark-band entries around 8000-sample loops for 5 differently-
+// signed/strength defects; (c) I is perfectly CONTINUOUS (no seam/artifact)
+// across an individual defect's own atan2 branch-cut ray -- sampled just
+// above/below the cut at several radii, differences were at floating-point
+// noise level (1e-5 to 1e-7), confirming the sin^2 doubling genuinely
+// erases the coordinate-system branch-cut artifact rather than leaving a
+// visible seam in the render; (d) as the shared polarizer angle P(t)
+// increases uniformly, a defect's brush pattern rotates at angular rate
+// exactly 1/s_i (measured numerically: dAngle/dP = 1.000 for s=1, = 2.000
+// for s=0.5, matching the analytic dark-brush-condition derivation
+// 2*s*phi-2P=k*pi exactly) -- this is the engine's PRIMARY motion
+// mechanism (see below), not a guess.
+//
+// MOTION: a single shared, continuously-accumulated polarizer angle P(t)
+// (P += rate*dt every frame, never reset -- only `rate`'s magnitude/sign
+// reconfigures at cycleSec boundaries, so P itself stays perfectly
+// continuous across any reconfigure) is the WHOLE engine's primary driver.
+// Because different-strength defects' brushes rotate at different rates
+// (1/s_i, verified above), one global parameter produces genuinely
+// DIFFERENTIATED, non-rigid motion across the frame for free -- a +1/-1
+// defect's brushes counter-rotate relative to a nearby +0.5/-0.5 defect's
+// (which spin twice as fast in the opposite sense) with no per-element
+// choreography needed, unlike most engines in this pool that had to bolt
+// on independent per-element wobble/pulse mechanisms by hand. Each
+// defect's REST POSITION also slowly orbits its own small circle
+// (guaranteed-minimum-magnitude amplitude/rate, random sign, reconfigured
+// at cycleSec boundaries) for additional structural evolution over the
+// full hour, on top of the brush rotation.
+//
+// Coverage/whiteout: I = sin^2(...) is a pure, bounded [0,1] function of
+// theta and P with no amplitude/exposure term and no state carried between
+// frames (every pixel is a fresh closed-form evaluation, like
+// chladni.html/moire.html/phasespikes.html) -- structurally whiteout-proof
+// by construction, the same reasoning already established for every other
+// pure-field-sampling engine in this pool.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 36);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  function hsl2rgb(h, s, l) {
+    s /= 100; l /= 100;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = l - c / 2;
+    let r, g, b;
+    h = ((h % 360) + 360) % 360;
+    if (h < 60) { r = c; g = x; b = 0; }
+    else if (h < 120) { r = x; g = c; b = 0; }
+    else if (h < 180) { r = 0; g = c; b = x; }
+    else if (h < 240) { r = 0; g = x; b = c; }
+    else if (h < 300) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+    return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+  }
+
+  const dt = 1 / FPS;
+  const minDim = Math.min(W, H);
+
+  // Defect positions, strengths, base hue and hue-sweep span are fixed
+  // ONCE per video -- never re-randomised per cycle, the standing "any
+  // coverage/composition-affecting parameter re-randomised per cycle
+  // creates a real (not aliased) brightness/structure swing" lesson this
+  // pool documents for a dozen-plus engines in a row. Only each defect's
+  // own small orbit phase/rate, and the shared polarizer rate, reconfigure
+  // at cycleSec boundaries (see reconfigureMotion below).
+  const STRENGTHS = [1, -1, 0.5, -0.5];
+  let defects, hue0, hueSpan, baseSat;
+  function initDefects() {
+    const n = Math.max(4, Math.min(8, Math.round(5 * Math.max(0.7, Math.min(1.4, DENSITY)))));
+    const marginX = W * 0.14, marginY = H * 0.14;
+    // Comfortably exceeds 2x the largest possible orbitAmp (below) so two
+    // orbiting defects can never close to near-coincidence even in the
+    // worst case (both orbiting directly toward each other).
+    const minSep = minDim * 0.28;
+    // Brush angular velocity is exactly 1/s_i times the shared polarizer
+    // rate (verified offline -- see header): a random independent draw per
+    // defect can, by chance, land MOST defects on the same |1/s| magnitude
+    // group (e.g. 4 of 5 at magnitude 2), which lets that one dominant
+    // rotation rate explain most of the frame's visible motion even though
+    // a second, different-rate defect is technically present somewhere --
+    // a real validateEngine() failure, found by dumping the actual defect
+    // list for the one seed (of 16) still failing after an earlier "at
+    // least one of each magnitude" fix: 4 of 5 defects landed on magnitude
+    // 2 (three +2, one -2), only one on magnitude 1. Fixed by assigning
+    // magnitude group by a near-EVEN SHUFFLE across all n defects (not
+    // just forcing one of each) -- half the defects get |s|=1, half get
+    // |s|=0.5, sign independently randomised per defect -- so the two
+    // rotation rates always have comparable total screen presence,
+    // whatever n and whatever the seed.
+    const magnitudes = [];
+    for (let i = 0; i < n; i++) magnitudes.push(i % 2 === 0 ? 1 : 0.5);
+    for (let i = magnitudes.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      const tmp = magnitudes[i]; magnitudes[i] = magnitudes[j]; magnitudes[j] = tmp;
+    }
+    defects = [];
+    for (let i = 0; i < n; i++) {
+      let x, y, tries = 0, ok;
+      do {
+        x = rand(marginX, W - marginX);
+        y = rand(marginY, H - marginY);
+        ok = true;
+        for (const d of defects) { if (Math.hypot(x - d.restX, y - d.restY) < minSep) { ok = false; break; } }
+        tries++;
+      } while (!ok && tries < 60);
+      const s = magnitudes[i] * (rng() < 0.5 ? 1 : -1);
+      defects.push({
+        restX: x, restY: y, s,
+        orbitAmp: minDim * (0.05 + rng() * 0.045),
+        orbitPh: 0, orbitRate: 0,
+      });
+    }
+    const base = PAL[Math.floor(rng() * PAL.length)];
+    hue0 = base[0] + rand(-20, 20);
+    hueSpan = rand(140, 320) * (rng() < 0.5 ? 1 : -1);
+    baseSat = Math.max(70, Math.min(95, base[1] + rand(-6, 10)));
+  }
+
+  // Called at start-up AND every cycleSec. Only rates/phases reset --
+  // coverage-neutral by construction: P keeps accumulating continuously
+  // (never reset, so no fringe-pattern jump at the boundary), and each
+  // defect's orbit is a small bounded circle around its own fixed rest
+  // position, so reassigning its rate/phase never changes total coverage
+  // or the statistical brightness distribution, same reasoning as every
+  // other curated engine's reconfigure step in this pool.
+  let polRate;
+  function reconfigureMotion() {
+    polRate = sgn() * rand(0.42, 0.68) * SPEED;
+    for (const d of defects) {
+      d.orbitPh = rng() * Math.PI * 2;
+      d.orbitRate = sgn() * rand(0.55, 0.95) * SPEED;
+    }
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+  let P = 0;
+
+  initDefects();
+  reconfigureMotion();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  // Sampling grid: a fine-ish fixed-resolution field, scaled up with
+  // bilinear smoothing (unlike reactiondiffusion.html's crisp block grid --
+  // this field is a smooth continuous physical quantity, not a set of
+  // discrete cells, so a soft upscale matches the real photographic look
+  // of a schlieren texture rather than reading as pixelated blocks).
+  const HUE_BANDS = 8;
+  const GW = Math.round(360 * Math.max(0.8, Math.min(1.25, DENSITY)));
+  const GH = Math.round(GW * (H / W));
+  const off = document.createElement('canvas');
+  off.width = GW; off.height = GH;
+  const offCtx = off.getContext('2d');
+  const imgData = offCtx.createImageData(GW, GH);
+  ctx.imageSmoothingEnabled = true;
+
+  // Scratch buffers for the two-pass render below, allocated once (never
+  // per-frame) and reused every frame.
+  const NPIX = GW * GH;
+  const dBuf = new Float32Array(NPIX);
+  const phaseBinBuf = new Uint16Array(NPIX);
+  const HIST_BINS = 1024;
+  const hist = new Uint32Array(HIST_BINS);
+  const phaseHist = new Uint32Array(HIST_BINS);
+  const binToBand = new Uint8Array(HIST_BINS);
+  // Fraction of the frame kept as the dark brush band, held CONSTANT every
+  // single frame via a rank-select percentile threshold (computed fresh
+  // each frame from this frame's own d=|sin(phase)| distribution) rather
+  // than a fixed |sin(phase)| cutoff -- the same TARGET_FRAC technique
+  // chladni.html already proved out for an identical failure mode. A fixed
+  // cutoff let the dark-band AREA genuinely swing as the polarizer angle
+  // P swept through this multi-defect field's non-uniformly-distributed
+  // phase levels (near a point defect, level contours are far denser than
+  // far from one, so which specific contour currently reads as "dark"
+  // changes how much total area it covers) -- validateEngine() caught this
+  // directly as a real brightness-trend failure on 2 of 16 tested seeds
+  // (projected +64 to +86 luma over a full render). A rank-select
+  // threshold recomputed every frame guarantees the SAME total dark area
+  // regardless of which contour it currently traces, eliminating the swing
+  // at the source rather than relying on many periods averaging it out.
+  const TARGET_DARK_FRAC = 0.13;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+    P += polRate * dt;
+
+    const dx = defects.map((d) => d.restX + d.orbitAmp * Math.cos(d.orbitPh + clk * d.orbitRate));
+    const dy = defects.map((d) => d.restY + d.orbitAmp * Math.sin(d.orbitPh + clk * d.orbitRate));
+    const ds = defects.map((d) => d.s);
+    const nDef = defects.length;
+
+    const sx = W / GW, sy = H / GH;
+
+    // Pass 1: evaluate the field once per grid point, store d=|sin(phase)|
+    // and the posterised hue, and bin d into a histogram for the
+    // percentile threshold.
+    hist.fill(0);
+    phaseHist.fill(0);
+    let idx = 0;
+    for (let gy = 0; gy < GH; gy++) {
+      const py = (gy + 0.5) * sy;
+      for (let gx = 0; gx < GW; gx++, idx++) {
+        const px = (gx + 0.5) * sx;
+        let theta = 0;
+        for (let i = 0; i < nDef; i++) theta += ds[i] * Math.atan2(py - dy[i], px - dx[i]);
+        const phase = 2 * theta - 2 * P;
+        const phaseWrap = ((phase % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+        const pbin = Math.min(HIST_BINS - 1, ((phaseWrap / (2 * Math.PI)) * HIST_BINS) | 0);
+        phaseBinBuf[idx] = pbin;
+        phaseHist[pbin]++;
+        const d = Math.abs(Math.sin(phase));
+        dBuf[idx] = d;
+        const bin = Math.min(HIST_BINS - 1, (d * HIST_BINS) | 0);
+        hist[bin]++;
+      }
+    }
+
+    const targetCount = Math.round(NPIX * TARGET_DARK_FRAC);
+    let cum = 0, threshBin = HIST_BINS - 1;
+    for (let b = 0; b < HIST_BINS; b++) { cum += hist[b]; if (cum >= targetCount) { threshBin = b; break; } }
+    const thresh = Math.max(0.015, (threshBin + 1) / HIST_BINS);
+
+    // Hue bands are assigned by RANK, not by raw phaseWrap value -- a
+    // second, independent instance of the exact same coverage-swing bug
+    // class the dark-band fix above addresses, found only after re-running
+    // validateEngine() on that first fix: even with dark-band AREA held
+    // exactly constant, different HUE_BANDS have different inherent luma
+    // at the same lightness/saturation (the well-documented "hue affects
+    // luma" trap this pool's quasicrystal.html/kaleidoscope.html/
+    // geodome.html all hit before), and a plain linear phaseWrap->band
+    // mapping lets each band's AREA swing as P sweeps through this
+    // multi-defect field's non-uniform phase density -- one seed got
+    // WORSE after the dark-band-only fix (+64 to +226 projected luma),
+    // directly implicating this second, still-unaddressed area swing.
+    // Fixed the same way: partition pixels into HUE_BANDS exactly
+    // equal-sized rank groups every frame (cumulative phase histogram ->
+    // one bin-to-band lookup, O(1) per pixel in pass 2), so every hue's
+    // total screen area is pinned constant regardless of which specific
+    // region currently shows it.
+    const bandTarget = NPIX / HUE_BANDS;
+    let bcum = 0, band = 0, nextBoundary = bandTarget;
+    for (let b = 0; b < HIST_BINS; b++) {
+      bcum += phaseHist[b];
+      binToBand[b] = Math.min(HUE_BANDS - 1, band);
+      if (bcum >= nextBoundary && band < HUE_BANDS - 1) { band++; nextBoundary += bandTarget; }
+    }
+
+    // Pass 2: sharpened brush mapping, not a smooth sin^2 gradient -- the
+    // raw crossed-polarizer sin^2 formula (verified in the header for
+    // brush COUNT and continuity) shades gently near each zero, which
+    // rendered as soft organic blobs between brushes, directly against the
+    // house style's "crisp, defined shapes... not soft organic blobs" rule
+    // (confirmed by rendering and looking). A smoothstep of d against the
+    // percentile threshold above turns only a THIN, constant-area band
+    // near each brush dark, with every other pixel on a flat, vivid lit
+    // plateau -- the same physical brush positions/count (still exactly
+    // where sin(phase)=0), just a crisper, coverage-stable rendering: a
+    // pinwheel of flat colour wedges with crisp dark radiating boundaries.
+    const data = imgData.data;
+    let o = 0;
+    for (let i = 0; i < NPIX; i++, o += 4) {
+      const d = dBuf[i];
+      let t = d / thresh; if (t > 1) t = 1;
+      const sm = t * t * (3 - 2 * t);
+      const light = 8 + sm * 58;
+      const sat = baseSat - (1 - sm) * 14;
+      const hue = hue0 + hueSpan * (binToBand[phaseBinBuf[i]] / HUE_BANDS);
+      const [r, g, b] = hsl2rgb(hue, Math.max(18, sat), light);
+      data[o] = r; data[o + 1] = g; data[o + 2] = b; data[o + 3] = 255;
+    }
+    offCtx.putImageData(imgData, 0, 0);
+    ctx.drawImage(off, 0, 0, GW, GH, 0, 0, W, H);
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureMotion(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
