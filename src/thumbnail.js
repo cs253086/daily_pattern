@@ -10,7 +10,9 @@
 //      most vivid one (colourful, high-contrast, well-filled, not blown out);
 //   2. shifts the image right so a centred pattern clears the text area;
 //   3. writes big, high-contrast text on a dark left-side scrim: the
-//      duration ("1 HOUR") and the pattern name.
+//      pattern name, plus an optional yellow headline above it. The
+//      "1 HOUR" headline was dropped on 2026-10-02 (owner request); the
+//      title already carries the duration.
 // Everything runs in headless Chromium's canvas (no ffmpeg filters -- see
 // CLAUDE.md's reverted bloom attempt for why this project avoids complex
 // ffmpeg filter graphs). Any failure is non-fatal: the caller keeps the
@@ -101,7 +103,8 @@ function drawInPage({ dataUrl, W, H, headline, subline }) {
 
       // Pattern name: wrap into at most 3 lines, shrinking the font if needed.
       const words = String(subline || '').toUpperCase().split(/\s+/).filter(Boolean);
-      let subSize = Math.round(H * 0.105);
+      // With no headline the name is the only text, so it starts bigger.
+      let subSize = Math.round(H * (headline ? 0.105 : 0.14));
       let lines = [];
       for (; subSize >= H * 0.06; subSize -= 4) {
         ctx.font = `bold ${subSize}px ${family}`;
@@ -116,21 +119,24 @@ function drawInPage({ dataUrl, W, H, headline, subline }) {
         if (lines.length <= 3 && lines.every((l) => ctx.measureText(l).width <= maxW)) break;
       }
 
-      const headSize = Math.round(H * 0.2);
+      const headSize = headline ? Math.round(H * 0.2) : 0;
+      const gap = headline ? Math.round(H * 0.03) : 0;
       const lineH = Math.round(subSize * 1.12);
-      const blockH = headSize + Math.round(H * 0.03) + lines.length * lineH;
+      const blockH = headSize + gap + lines.length * lineH;
       let y = Math.round((H - blockH) / 2) + headSize;
 
       ctx.lineJoin = 'round';
       ctx.textBaseline = 'alphabetic';
-      ctx.font = `bold ${headSize}px ${family}`;
-      ctx.lineWidth = Math.round(headSize * 0.1);
       ctx.strokeStyle = '#000';
-      ctx.strokeText(headline, x, y);
-      ctx.fillStyle = '#FFE14D';
-      ctx.fillText(headline, x, y);
+      if (headline) {
+        ctx.font = `bold ${headSize}px ${family}`;
+        ctx.lineWidth = Math.round(headSize * 0.1);
+        ctx.strokeText(headline, x, y);
+        ctx.fillStyle = '#FFE14D';
+        ctx.fillText(headline, x, y);
+      }
 
-      y += Math.round(H * 0.03);
+      y += gap;
       ctx.font = `bold ${subSize}px ${family}`;
       ctx.lineWidth = Math.round(subSize * 0.14);
       for (const l of lines) {

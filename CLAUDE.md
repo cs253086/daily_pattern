@@ -5538,9 +5538,11 @@ changing anything:
   - `src/thumbnail.js` (new): `render()` now also extracts 8 candidate
     frames from the headline scene (`thumb-cand-N.jpg`); `composeThumbnail()`
     scores them in headless Chromium (saturation x luma contrast, penalised
-    for mostly-empty or blown-out frames), keeps the best, and draws "1
-    HOUR" (yellow) + the pattern name (white, black outline) on a dark left
-    scrim. The frame is shifted right only when its own left edge is dark;
+    for mostly-empty or blown-out frames), keeps the best, and draws the
+    pattern name (white, black outline) on a dark left scrim. A yellow "1
+    HOUR" headline above it was removed on 2026-10-02 at the owner's
+    request (the title already says 1 Hour); `headline` is still an
+    optional argument. The frame is shifted right only when its own left edge is dark;
     shifting a full-bleed pattern left a hard black band (seen on the
     Doyle spiral and Voronoi samples before the fix). Canvas, not ffmpeg,
     because of this repo's ffmpeg filter-graph history. Non-fatal; the plain

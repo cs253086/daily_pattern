@@ -806,7 +806,8 @@ async function main() {
       const t = await composeThumbnail({
         candidates: renderResult.thumbnailCandidates,
         outPath: renderResult.thumbnail,
-        headline: String(metadata.durationLabel || '').toUpperCase(),
+        // No duration text on the thumbnail (owner request 2026-10-02);
+        // the title already says "1 Hour". Just the pattern name.
         subline: metadata.subject,
       });
       console.log(`[index] thumbnail: picked ${path.basename(t.picked)} of ${t.scores.length} candidates, added text`);
