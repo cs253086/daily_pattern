@@ -6275,60 +6275,71 @@ razor-thin one.
 ## Daily growth automation — 2026-10-02
 
 Owner: "Reach the number subscribers to 500. Keep researching it everyday
-using the research bot until the objective is done," then confirmed the
-daily research routine should keep shipping a new pattern engine every day
-AND do subscriber-growth analysis/action, every day, same firing.
+using the research bot until the objective is done." First asked for this
+to be merged into the existing daily pattern-engine trigger; then, when
+offered that as a design choice, said instead: "can we have a separate
+research bot only for subscriber?" — so this is its own trigger, not a
+phase bolted onto the engine-of-the-day one.
 
-**The existing "Daily creative pattern research" trigger now has a second
-phase** (full prompt is on the trigger itself, `trig_01VGwVbq4nd6SW5XHYrRuSdB`
-— read it with `get_trigger` rather than trusting a stale copy here). Phase A
-is the original engine-of-the-day routine, unchanged. Phase B, appended:
+**A second, independent daily trigger**, `trig_01MzFMv1sC8AAo9UwZkKRNoB`
+("Daily subscriber-growth research"), fires at 07:15 UTC — offset from the
+pattern-engine trigger's ~06:00-06:22 UTC real firing time so the two never
+race each other on `main`. Full prompt is on the trigger itself (read it
+with `get_trigger` rather than trusting a stale copy here); it spawns a
+fresh session every firing (no persistent conversation memory — all
+continuity comes from the state files below), and is explicitly scoped
+away from the engine-of-the-day trigger's files (`engines/manual/*.html`,
+`src/generate.js`, `src/validate.js`, `src/render.js`'s core rendering,
+`state/creative-research-log.json`, `.github/workflows/*` are all off
+limits to it).
 
-1. **Read `state/subscriber-updates.json`** for the latest known subscriber
-   count. The production YouTube token is upload-only (no Data API read
-   scope — the same gap documented in "Subscriber growth" above for
-   playlists), so the bot cannot fetch this itself. The owner pastes Studio
-   numbers into a conversation from time to time, and whichever session is
-   handling that conversation appends an entry (`{date, subscribers,
-   source: "owner-reported", notes}`) to this file. The automation reads
-   whatever is most recent; a stale or missing count is not a blocker, just
-   a known gap to log.
-2. **If the latest known count is >= 500**, log that the goal is reached in
-   `state/growth-log.json` (`goalReached: true`) and stop proposing new
-   growth changes — Phase A (new pattern engine) keeps running regardless,
-   since the owner asked for that to continue either way.
-3. **Otherwise, consider ONE small, reversible growth change today** —
-   title/description/tag wording, which engines get featured and how often,
-   thumbnail composition, Short strategy, or similar — informed by
-   `state/growth-log.json`'s history (never repeat something already tried)
-   and, periodically, fresh research into what works in this niche (the
-   2026-09-14 "what actually makes pattern/screensaver videos attractive"
-   research above is the template: WebSearch, synthesize, cite sources).
-   Skipping is fine and expected when nothing clearly actionable turns up
-   that day — same ethos as Phase A's "shipping nothing beats shipping a
-   near-duplicate."
-4. **Guardrails on any growth change**, stricter than Phase A's engine work
-   since this touches the pipeline's actual code, not an isolated engine
-   file: limited to `src/metadata.js`, `src/thumbnail.js`, and the
-   growth-related parts of `src/index.js` (title/tag/feature-weighting
-   logic already following the `TITLE_STYLE`/`THUMB_TEXT`/`FEATURE_MANDALA`
-   pattern) — never `src/render.js`, `src/validate.js`, `src/generate.js`,
-   or `.github/workflows/*`. Any new behavior needs an env-var escape hatch,
+Each firing:
+1. **Reads `state/subscriber-updates.json`** for the latest known
+   subscriber count. The production YouTube token is upload-only (no Data
+   API read scope — the same gap documented in "Subscriber growth" above
+   for playlists), so the bot cannot fetch this itself. The owner pastes
+   Studio numbers into a conversation from time to time, and whichever
+   session is handling that conversation appends an entry (`{date,
+   subscribers, source: "owner-reported", notes}`) to this file. A stale
+   or missing count is not a blocker, just a known gap the firing logs.
+2. **If the latest known count is >= 500**, logs the goal as reached in
+   `state/growth-log.json` (`goalReached: true`) and stops proposing
+   growth changes. (The separate pattern-engine trigger is unaffected
+   either way — the owner asked for that to keep running regardless.)
+3. **Otherwise, looks for ONE small, reversible growth change** —
+   title/description/tag wording, which engines get featured and how
+   often, thumbnail composition, Short strategy, or similar — informed by
+   `state/growth-log.json`'s history (never repeats something already
+   tried) and, periodically, fresh research into what works in this niche
+   (the 2026-09-14 "what actually makes pattern/screensaver videos
+   attractive" research above is the template: WebSearch, synthesize, cite
+   sources). Skipping is fine and expected when nothing clearly actionable
+   turns up — shipping a change on a hunch, with no clear rationale, is
+   worse than no change, since it pollutes the log's ability to show what
+   actually moved the number.
+4. **Guardrails on any growth change**: limited to `src/metadata.js`,
+   `src/thumbnail.js`, and only the growth-related parts of `src/index.js`
+   (title/tag/feature-weighting logic following the existing
+   `TITLE_STYLE`/`THUMB_TEXT`/`FEATURE_MANDALA` env-flag pattern) — never
+   `src/render.js`'s core rendering, `src/validate.js`, `src/generate.js`,
+   `src/upload.js`'s core upload mechanics, any engine file, or
+   `.github/workflows/*`. Any new behavior needs an env-var escape hatch,
    the same convention every existing growth change above already uses.
-   Verify with a real `DRY_RUN=1` run before pushing (plus whatever
-   engine-level checks apply if the change touches engine selection).
-   One change per day, so cause and effect stay legible in the log.
-5. **Append to `state/growth-log.json`** either way: date, the latest known
-   subscriber count, what changed (or that nothing did, and why), files
-   touched, how it was verified, and `goalReached`. Add a dated CLAUDE.md
-   subsection under "Subscriber growth" in the same style as the existing
-   entries when something ships.
+   Verified with a real `DRY_RUN=1` run before pushing (plus whatever
+   rotation/weighting checks apply if the change touches engine selection).
+   One change per firing, so cause and effect stay legible in the log.
+5. **Appends to `state/growth-log.json`** either way: date, the latest
+   known subscriber count, what changed (or that nothing did, and why),
+   files touched, how it was verified, and `goalReached`. Adds a dated
+   CLAUDE.md subsection under "Subscriber growth" in the same style as the
+   existing entries when something ships.
 6. Something that can only be done by hand in YouTube Studio (the Shorts
-   "related video" link, end screens, replying to comments, cross-promotion)
-   gets logged as a note for the owner, not attempted.
+   "related video" link, end screens, replying to comments, cross-
+   promotion, re-minting the OAuth token) gets logged as a note for the
+   owner, not attempted.
 
-**Honest limit**: without the subscriber count being kept current, the bot
-is working half-blind — it can make the videos more findable and more
+**Honest limit**: without the subscriber count being kept current, this
+bot is working half-blind — it can make the videos more findable and more
 appealing, but it cannot confirm whether a given change actually moved the
 number, and it cannot promise a date for reaching 500 (that's ultimately
 YouTube's recommendation algorithm's call, not this pipeline's). The owner
