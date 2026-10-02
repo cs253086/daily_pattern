@@ -1,0 +1,14 @@
+[
+  {
+    "date": "2026-09-25",
+    "subscribers": 14,
+    "source": "owner-reported",
+    "notes": "Owner stated goal: grow from 14 to 500 subscribers. This is the baseline."
+  },
+  {
+    "date": "2026-09-27",
+    "subscribers": null,
+    "source": "owner-reported",
+    "notes": "Owner's Studio screenshot for Aug 31 - Sep 27 window: 5.2K views, 181.7 watch hours, +4 subscribers gained IN THAT WINDOW (not a running total). Approximate running total by this date: roughly 18 (14 baseline + 4), but not confirmed directly -- do not treat as exact."
+  }
+]

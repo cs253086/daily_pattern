@@ -6272,6 +6272,70 @@ the expected direction. Reverted and shipped at the original design's
 measured distance, **0.631** -- a clean pass above the 0.60 minimum, not a
 razor-thin one.
 
+## Daily growth automation — 2026-10-02
+
+Owner: "Reach the number subscribers to 500. Keep researching it everyday
+using the research bot until the objective is done," then confirmed the
+daily research routine should keep shipping a new pattern engine every day
+AND do subscriber-growth analysis/action, every day, same firing.
+
+**The existing "Daily creative pattern research" trigger now has a second
+phase** (full prompt is on the trigger itself, `trig_01VGwVbq4nd6SW5XHYrRuSdB`
+— read it with `get_trigger` rather than trusting a stale copy here). Phase A
+is the original engine-of-the-day routine, unchanged. Phase B, appended:
+
+1. **Read `state/subscriber-updates.json`** for the latest known subscriber
+   count. The production YouTube token is upload-only (no Data API read
+   scope — the same gap documented in "Subscriber growth" above for
+   playlists), so the bot cannot fetch this itself. The owner pastes Studio
+   numbers into a conversation from time to time, and whichever session is
+   handling that conversation appends an entry (`{date, subscribers,
+   source: "owner-reported", notes}`) to this file. The automation reads
+   whatever is most recent; a stale or missing count is not a blocker, just
+   a known gap to log.
+2. **If the latest known count is >= 500**, log that the goal is reached in
+   `state/growth-log.json` (`goalReached: true`) and stop proposing new
+   growth changes — Phase A (new pattern engine) keeps running regardless,
+   since the owner asked for that to continue either way.
+3. **Otherwise, consider ONE small, reversible growth change today** —
+   title/description/tag wording, which engines get featured and how often,
+   thumbnail composition, Short strategy, or similar — informed by
+   `state/growth-log.json`'s history (never repeat something already tried)
+   and, periodically, fresh research into what works in this niche (the
+   2026-09-14 "what actually makes pattern/screensaver videos attractive"
+   research above is the template: WebSearch, synthesize, cite sources).
+   Skipping is fine and expected when nothing clearly actionable turns up
+   that day — same ethos as Phase A's "shipping nothing beats shipping a
+   near-duplicate."
+4. **Guardrails on any growth change**, stricter than Phase A's engine work
+   since this touches the pipeline's actual code, not an isolated engine
+   file: limited to `src/metadata.js`, `src/thumbnail.js`, and the
+   growth-related parts of `src/index.js` (title/tag/feature-weighting
+   logic already following the `TITLE_STYLE`/`THUMB_TEXT`/`FEATURE_MANDALA`
+   pattern) — never `src/render.js`, `src/validate.js`, `src/generate.js`,
+   or `.github/workflows/*`. Any new behavior needs an env-var escape hatch,
+   the same convention every existing growth change above already uses.
+   Verify with a real `DRY_RUN=1` run before pushing (plus whatever
+   engine-level checks apply if the change touches engine selection).
+   One change per day, so cause and effect stay legible in the log.
+5. **Append to `state/growth-log.json`** either way: date, the latest known
+   subscriber count, what changed (or that nothing did, and why), files
+   touched, how it was verified, and `goalReached`. Add a dated CLAUDE.md
+   subsection under "Subscriber growth" in the same style as the existing
+   entries when something ships.
+6. Something that can only be done by hand in YouTube Studio (the Shorts
+   "related video" link, end screens, replying to comments, cross-promotion)
+   gets logged as a note for the owner, not attempted.
+
+**Honest limit**: without the subscriber count being kept current, the bot
+is working half-blind — it can make the videos more findable and more
+appealing, but it cannot confirm whether a given change actually moved the
+number, and it cannot promise a date for reaching 500 (that's ultimately
+YouTube's recommendation algorithm's call, not this pipeline's). The owner
+updating `state/subscriber-updates.json` (or just pasting Studio numbers
+into a conversation) on any cadence they're comfortable with is what keeps
+this loop honest rather than guessing.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
