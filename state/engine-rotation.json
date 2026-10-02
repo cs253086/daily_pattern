@@ -1,9 +1,9 @@
 {
   "last3D": "rosenspikes",
-  "last2D": "dragonfold",
+  "last2D": "frostgrowth",
   "lastMandala": "ziggurat",
   "last3DArchetype": "rosenspikes",
-  "last2DArchetype": "dragonfold",
+  "last2DArchetype": "frostgrowth",
   "last3DByArchetype": {
     "geodome": "geodome",
     "hoppercrystal": "hoppercrystal",
@@ -25,7 +25,8 @@
     "composer": "composer",
     "dendrite": "dendrite",
     "doylespiral": "doylespiral",
-    "dragonfold": "dragonfold"
+    "dragonfold": "dragonfold",
+    "frostgrowth": "frostgrowth"
   },
-  "updatedAt": "2026-09-30T15:48:11.371Z"
+  "updatedAt": "2026-10-02T15:39:12.787Z"
 }
