@@ -1,8 +1,8 @@
 {
-  "last3D": "rosenspikes",
+  "last3D": "spaceframe",
   "last2D": "frostgrowth",
   "lastMandala": "ziggurat",
-  "last3DArchetype": "rosenspikes",
+  "last3DArchetype": "spaceframe",
   "last2DArchetype": "frostgrowth",
   "last3DByArchetype": {
     "geodome": "geodome",
@@ -28,5 +28,5 @@
     "dragonfold": "dragonfold",
     "frostgrowth": "frostgrowth"
   },
-  "updatedAt": "2026-10-02T15:39:12.787Z"
+  "updatedAt": "2026-10-03T14:14:37.080Z"
 }
