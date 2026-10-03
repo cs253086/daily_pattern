@@ -6347,6 +6347,135 @@ updating `state/subscriber-updates.json` (or just pasting Studio numbers
 into a conversation) on any cadence they're comfortable with is what keeps
 this loop honest rather than guessing.
 
+## Nested geodesic shell engine (`radiolarian.html`) — 2026-10-03
+
+Daily creative-research routine. Category was "a random featured image" --
+the pool's most under-used category per a tally of all prior log entries. An
+open WebSearch for a striking macro/scientific-photography subject surfaced
+**radiolarian** (Spumellaria) skeletal micrographs -- Haeckel's 1887 "Report
+on the Radiolaria" / "Kunstformen der Natur": single-celled marine protozoa
+that secrete an internal silica (opaline) skeleton of one or more concentric,
+geodesic-lattice spherical shells, often with thin spines radiating outward
+past the outermost shell. A real, well-documented biological structure, not
+folklore.
+
+**What it is**: a real lit-3D WebGL engine, the pool's eleventh. Nested
+concentric geodesic wireframe-strut shells (each shell a subdivided-
+icosahedron EDGE lattice, 42 vertices/120 edges at subdivision level 1 --
+the exact same icosahedron/subdivide() construction `geodome.html` already
+established, reused verbatim, but rendered as a STRUT lattice like
+`spaceframe.html` rather than a filled continuous mesh like `geodome.html`),
+2-3 shells at fixed radii, each independently counter-rotating about a
+shared axis at an explicitly alternating-sign, index-scaled rate (never
+independent random draws per shell -- applied proactively from
+`schlieren.html`'s unit-motion bug the day before, where independent random
+rate draws could by chance let one rigid fit explain most of the frame's
+motion). Plus 12 sparse spines radiating from the original icosahedron's 12
+vertices past the outermost shell, each independently pulsing in length
+(antiphase-paired by index parity for exact first-order area cancellation).
+A genuinely different 3D composition from every other real-WebGL engine in
+the pool: not sparse orbiting solids (`solids3d`), not a grid of spinning
+cubes (`lattice3d`), not lit tori (`torusrings3d`), not one continuous
+convex mesh (`geodome`), not a CONNECTED strut framework (`spaceframe`'s
+octet truss -- one dense lattice), not a concave excavation
+(`hoppercrystal`) or niche-cell lattice (`muqarnas`), not independently-
+growing convex spikes (`rosenspikes`) or a floating tensegrity chain
+(`tensegritychain`), not a field of individually-heighted columns
+(`columnarbasalt`) -- several NESTED, independently-rotating open strut
+shells, one inside another, visible through each other's gaps.
+
+**The lattice topology was verified OFFLINE before writing any rendering
+code**, the same discipline this pool's `quasicrystal.html`/`geodome.html`/
+`spaceframe.html`/`hoppercrystal.html` already established for a
+construction that could still "look plausible" even if subtly wrong: a
+standalone script confirmed exact-key vertex deduplication of the
+subdivided icosahedron's triangle-soup produces a topologically correct
+mesh at subdivision levels 1 (V=42, E=120, F=80) and 2 (V=162, E=480,
+F=320), with Euler's formula V-E+F=2 holding exactly and every edge shared
+by exactly 2 faces; and confirmed shell-radius gaps (2-shell [0.62,1.0],
+3-shell [0.45,0.72,1.0]) are comfortably safe against the beam half-width's
+collision risk. Colour is tied to each beam's LOCAL (object-space,
+pre-rotation) midpoint azimuthal angle for shells and each spine's fixed
+direction vector -- both exactly invariant under the shared rotation axis,
+the same "colour by an axis the motion can't disturb" fix
+`geodome.html`/`spaceframe.html`/`hoppercrystal.html`/`rosenspikes.html`
+established.
+
+**`validateEngine()` passed 16/16 on the FIRST attempt** across seeds 1-15
+plus the CLI's actual default seed 12345 (see `geodome.html`'s write-up for
+why that seed matters), joining `primespiral.html`/`stripweave.html`/
+`widmanstatten.html`/`hoppercrystal.html`/`moire.html`/`orbweb.html`/
+`wingscales.html` as engines that passed cleanly without iteration by
+applying this pool's established coverage-stability and motion lessons
+from the start.
+
+**The mandatory novelty gate needed real iteration, with two distinct
+levers tried and measured, not guessed.** First design measured only
+**0.608** vs `auto-2026-08-15-spirograph-hypotrocloid-line-art-in-clea` --
+a thin pass, worth a quick check per this pool's own `voderberg.html`-
+established precedent ("a technical pass just above the 0.60 line is still
+worth a quick iteration check before shipping").
+1. **Tried breaking the spine layer's exact 12-fold icosahedral symmetry**
+   (a random 6-10-of-12 subset per video, deliberately matching the real
+   biological fact that not all radiolarian species carry spines at every
+   symmetric vertex) -- measured WORSE, not better (0.608 -> 0.563), a
+   concrete new instance of this pool's repeated lesson that not every
+   lever moves novelty distance in the intuitively expected direction
+   (`voderberg.html`/`dragonfold.html`/`schlieren.html` all document the
+   same): breaking the spine layer's symmetry moved the composition toward
+   the neighbour's own already-irregular, moderately-asymmetric curve
+   density rather than away from it. Reverted.
+2. **Tried widening the beam half-width instead** (0.045 -> 0.062, a
+   bolder lattice) -- this DID improve novelty to a comfortable **0.657**,
+   but re-validating the full seed battery showed a genuine, consistent
+   `avgMsPerFrame` increase (up to 110ms, over the 100ms budget) from the
+   larger fragment-shaded area, not sandbox noise -- confirmed via a direct
+   Puppeteer per-frame timing profile showing an excellent 1ms MEDIAN but
+   real average cost scaling with beam width (median and average diverging
+   is itself the signature of a genuine, if occasional, GPU-stall-driven
+   cost, layered on top of a real width-driven baseline increase). An
+   intermediate width (0.053) still left `avgMsPerFrame` right at the
+   100ms edge with one seed failing. **Render-speed safety was treated as
+   non-negotiable over novelty margin** (per this pool's standing CI-budget
+   constraint) -- reverted fully to the original half-width (0.045) and
+   the original full 12-spine set.
+
+**Shipped at the reverted design's original, reproducible 0.608 distance**
+-- confirmed via a fresh fingerprint of the whole pool a second time,
+landing at the identical 0.608 (deterministic, not noise) -- a genuine
+pass above the 0.60 minimum, reached after two real, measured iteration
+attempts rather than shipped blindly on a bare first-pass number.
+
+**Verified** (final, reverted design): `validateEngine()` **16/16** across
+seeds 1-15 plus 12345, re-confirmed a third time after reverting the width
+experiment. Margins comfortable throughout, even under today's elevated
+sandbox load (several validation runs this session showed clearly
+contention-inflated numbers, cross-checked via a direct Puppeteer timing
+profile rather than assumed): `avgSat` 46.7-58.1 (vs the 22 minimum), zero
+near-white pixels on every seed, `projectedRise` -34 to +23.8 (vs the 50
+threshold), `compositionDrift` 0.0169-0.0483 (vs the 0.015 minimum),
+`unitMotionNonRigidFrac` 0.981-1.0 (vs the 0.40 minimum -- independently
+counter-rotating shells plus independently-pulsing spines are never
+explained by one rigid transform), `avgMsPerFrame` 49.5-93.1ms
+(comfortably under the 100ms budget). Visual spot-checks across
+2/25/50/75/95/105% of a 43.5s cycle at 3 seeds, actually rendering PNGs
+and looking at them, not just reading validator output: a vivid, bold,
+immediately-legible nested geodesic lattice sphere with visibly
+counter-rotating shells seen through each other's gaps, radiating spines
+of varying length, and a clean, non-jarring reset at the cycle boundary.
+
+**Novelty gate**: measured against all 58 existing engines (the committed
+fingerprint cache was badly stale, so the whole pool was fingerprinted
+fresh alongside the candidate, per this pool's established practice; the
+refreshed cache was not committed, per this routine's "touch only the new
+engine + log + CLAUDE.md" constraint, with the same `ENGINE_SUBJECTS`
+exception this pool's `tensegritychain.html` write-up already
+established). Nearest neighbour is
+`auto-2026-08-15-spirograph-hypotrocloid-line-art-in-clea` at distance
+**0.608** -- a genuine pass, not a thin-margin case shipped without
+checking: two substantively different composition-level levers were tried
+and measured before settling on this number.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

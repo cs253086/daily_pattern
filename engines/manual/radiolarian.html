@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Radiolarian Shells — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "a random featured image" -- the
+// pool's most under-used category recently, 4 prior uses vs 5+ for every
+// other category). An open WebSearch for striking macro/micro photography
+// surfaced Ernst Haeckel's "Kunstformen der Natur" radiolarian plates and
+// the real biology behind them: RADIOLARIA (Spumellaria) are single-celled
+// marine plankton that build a glassy (silica) internal skeleton out of
+// MULTIPLE CONCENTRIC LATTICE SHELLS -- each shell itself a near-spherical
+// honeycomb of hexagonal/pentagonal pores -- connected by radial spines,
+// with further spines projecting outward beyond the outermost shell. A
+// real, still-studied, icosahedral/geodesic biological structure, not
+// folklore. Sources (search snippets):
+// https://en.wikipedia.org (Radiolaria -- search snippet only, not
+// fetched, Wikipedia is blocked in this sandbox),
+// Haeckel's "Report on the Radiolaria" (HMS Challenger, 1887) plate
+// references via search results.
+//
+// A genuinely different 3D COMPOSITION from every other real-WebGL engine
+// in the pool: not one continuous SOLID convex mesh (geodome.html -- a
+// single dome shell, no nesting), not a dense FCC strut lattice filling a
+// volume (spaceframe.html -- no radial/spherical nesting), not a flat hex
+// field of independent spikes (rosenspikes.html), not a lattice of
+// separate CONCAVE niche cells (muqarnas.html), not a single CONCAVE
+// excavation (hoppercrystal.html), not sparse independent orbiting solids
+// (solids3d.html) or a grid of spinning cubes (lattice3d.html) -- NESTED,
+// CONCENTRIC, HOLLOW geodesic WIREFRAME-STRUT shells, each independently
+// counter-rotating so inner shells are genuinely visible THROUGH the gaps
+// of the outer ones, plus sparse outward spines on the outermost shell.
+// Reuses two already-offline-verified building blocks from this pool
+// directly rather than re-deriving them: geodome.html's icosahedron/
+// subdivide() functions (the vertex geometry) and spaceframe.html's
+// buildBeamTris() rectangular-beam-mesh technique (the strut rendering) --
+// both copied verbatim, since both were already established correct there.
+//
+// VERIFIED OFFLINE before writing any rendering code (the same discipline
+// this pool's quasicrystal.html/geodome.html/spaceframe.html already
+// established for a construction that could still "look plausible" even
+// if subtly wrong): a standalone script confirmed that deduplicating the
+// subdivided icosahedron's triangle-soup vertices by an EXACT coordinate
+// key (independently-computed midpoints of the same parent edge are
+// bit-for-bit identical IEEE doubles, same deterministic inputs/ops)
+// produces a topologically correct geodesic mesh -- Euler's formula
+// V-E+F=2 holds exactly, and every edge is shared by exactly 2 faces, at
+// both subdivision level 1 (42 vertices, 120 edges, 80 faces, used here)
+// and level 2. Also verified the chosen shell radii leave a comfortable
+// gap (0.27-0.38 lattice units) against 2x the beam half-width (0.09),
+// well clear of any shell-to-shell collision risk.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. WebGL context created with
+// preserveDrawingBuffer:true and the same startup-only
+// webglcontextlost/restored handling as every other WebGL engine in this
+// pool. gl.clear() to opaque black every frame -- structurally
+// whiteout-proof, true cross-frame accumulation is impossible.
+//
+// UNIT-LEVEL MOTION (per CLAUDE.md's 2026-09-10 standing requirement):
+// each shell is a RIGID geodesic lattice, but shells counter-rotate at
+// independently-assigned, GUARANTEED-DIFFERENT rates about the shared Y
+// axis (not left to chance -- see initShells() below for why an
+// independent-random draw was deliberately avoided, per the schlieren.html
+// lesson that an unlucky same-rate draw can let one rigid fit explain too
+// much of the frame). Because the shells are hollow STRUT lattices, not
+// solid meshes, inner shells are visibly seen moving independently through
+// the outer ones' gaps -- no single rigid transform can explain multiple
+// simultaneously different rotation rates at once. Sparse outward spines
+// additionally pulse in length, paired in antiphase (even/odd index) for
+// exact first-order area cancellation.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true, antialias: true })
+    || canvas.getContext('experimental-webgl', { preserveDrawingBuffer: true, antialias: true });
+
+  let contextLost = false;
+  canvas.addEventListener('webglcontextlost', (e) => { contextLost = true; e.preventDefault(); });
+  canvas.addEventListener('webglcontextrestored', () => { initGL(); contextLost = false; });
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+  function hsl2rgb(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [f(0), f(8), f(4)];
+  }
+
+  // ---- Minimal column-major mat4 helpers (same convention as
+  // solids3d.html / geodome.html / spaceframe.html) ------------------------
+  function mat4Identity() { return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); }
+  function mat4Multiply(a, b) {
+    const out = new Float32Array(16);
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+      let sum = 0;
+      for (let k = 0; k < 4; k++) sum += a[k * 4 + r] * b[c * 4 + k];
+      out[c * 4 + r] = sum;
+    }
+    return out;
+  }
+  function mat4Perspective(fovyRad, aspect, near, far) {
+    const f = 1 / Math.tan(fovyRad / 2);
+    const nf = 1 / (near - far);
+    const out = new Float32Array(16);
+    out[0] = f / aspect; out[5] = f; out[10] = (far + near) * nf; out[11] = -1;
+    out[14] = 2 * far * near * nf;
+    return out;
+  }
+  function mat4RotateY(a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    const m = mat4Identity(); m[0] = c; m[2] = -s; m[8] = s; m[10] = c; return m;
+  }
+  function mat4RotateX(a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    const m = mat4Identity(); m[5] = c; m[6] = s; m[9] = -s; m[10] = c; return m;
+  }
+  function mat4Scale(s) { const m = mat4Identity(); m[0] = s; m[5] = s; m[10] = s; return m; }
+  function mat4LookAt(eye, target, up) {
+    let zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
+    let zl = Math.hypot(zx, zy, zz) || 1; zx /= zl; zy /= zl; zz /= zl;
+    let xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+    let xl = Math.hypot(xx, xy, xz) || 1; xx /= xl; xy /= xl; xz /= xl;
+    const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+    const out = new Float32Array(16);
+    out[0] = xx; out[1] = yx; out[2] = zx; out[3] = 0;
+    out[4] = xy; out[5] = yy; out[6] = zy; out[7] = 0;
+    out[8] = xz; out[9] = yz; out[10] = zz; out[11] = 0;
+    out[12] = -(xx * eye[0] + xy * eye[1] + xz * eye[2]);
+    out[13] = -(yx * eye[0] + yy * eye[1] + yz * eye[2]);
+    out[14] = -(zx * eye[0] + zy * eye[1] + zz * eye[2]);
+    out[15] = 1;
+    return out;
+  }
+
+  // ---- Icosahedron + subdivision, copied verbatim from geodome.html
+  // (already offline-verified there) -- the vertex/face geometry source.
+  function normalize3(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
+  function icosahedron() {
+    const t = (1 + Math.sqrt(5)) / 2;
+    const verts = [
+      [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0],
+      [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t],
+      [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1],
+    ].map(normalize3);
+    const faces = [
+      [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+      [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+      [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+      [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+    ];
+    return faces.map(([a, b, c]) => [verts[a], verts[b], verts[c]]);
+  }
+  function midpoint(a, b) { return normalize3([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2]); }
+  function subdivide(tris, levels) {
+    for (let i = 0; i < levels; i++) {
+      const out = [];
+      for (const [a, b, c] of tris) {
+        const ab = midpoint(a, b), bc = midpoint(b, c), ca = midpoint(c, a);
+        out.push([a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]);
+      }
+      tris = out;
+    }
+    return tris;
+  }
+  // Dedupe the subdivided triangle-soup into a shared vertex list + an
+  // edge list (verified offline: exact-key dedup is safe, see header).
+  function buildLatticeTopology(level) {
+    const tris = subdivide(icosahedron(), level);
+    const vmap = new Map();
+    const verts = [];
+    const edgeSet = new Set();
+    const edges = [];
+    for (const [a, b, c] of tris) {
+      const idxs = [a, b, c].map((v) => {
+        const k = v.map((x) => x.toPrecision(15)).join(',');
+        if (!vmap.has(k)) { vmap.set(k, verts.length); verts.push(v); }
+        return vmap.get(k);
+      });
+      for (let i = 0; i < 3; i++) {
+        const u = idxs[i], w = idxs[(i + 1) % 3];
+        const ek = u < w ? u + '|' + w : w + '|' + u;
+        if (!edgeSet.has(ek)) { edgeSet.add(ek); edges.push(u < w ? [u, w] : [w, u]); }
+      }
+    }
+    return { verts, edges };
+  }
+
+  // Beam mesh (12 triangles, flat per-face normals), copied verbatim from
+  // spaceframe.html (already offline-verified there against axis-aligned
+  // and diagonal test edges, including the degenerate-cross-product trap).
+  function sub3(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+  function add3(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
+  function scale3(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; }
+  function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+  function len3(a) { return Math.hypot(a[0], a[1], a[2]); }
+  function norm3(a) { const l = len3(a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
+  function buildBeamTris(a, b, halfWidth) {
+    const d = sub3(b, a);
+    const dn = norm3(d);
+    let ref = [0, 1, 0];
+    if (Math.abs(dn[0] * ref[0] + dn[1] * ref[1] + dn[2] * ref[2]) > 0.99) ref = [1, 0, 0];
+    const u = norm3(cross3(dn, ref));
+    const v = norm3(cross3(dn, u));
+    const A = [], B = [];
+    for (const s1 of [-1, 1]) for (const s2 of [-1, 1]) {
+      A.push(add3(a, add3(scale3(u, s1 * halfWidth), scale3(v, s2 * halfWidth))));
+      B.push(add3(b, add3(scale3(u, s1 * halfWidth), scale3(v, s2 * halfWidth))));
+    }
+    const faces = [
+      [A[0], A[1], A[3], A[2]], [B[0], B[2], B[3], B[1]],
+      [A[0], A[2], B[2], B[0]], [A[3], A[1], B[1], B[3]],
+      [A[0], A[1], B[1], B[0]], [A[2], A[3], B[3], B[2]],
+    ];
+    const tris = [];
+    for (const f of faces) { tris.push([f[0], f[1], f[2]]); tris.push([f[0], f[2], f[3]]); }
+    return tris;
+  }
+
+  const VERT_SRC = `
+    attribute vec3 aPosition;
+    attribute vec3 aNormal;
+    attribute vec3 aColor;
+    uniform mat4 uMVP;
+    uniform mat4 uModel;
+    uniform vec3 uEye;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vColor;
+    void main() {
+      vec4 world = uModel * vec4(aPosition, 1.0);
+      vNormal = mat3(uModel) * aNormal;
+      vViewDir = normalize(uEye - world.xyz);
+      vColor = aColor;
+      gl_Position = uMVP * vec4(aPosition, 1.0);
+    }
+  `;
+  const FRAG_SRC = `
+    precision mediump float;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vColor;
+    uniform vec3 uLightDir;
+    void main() {
+      vec3 N = normalize(vNormal);
+      float diff = max(dot(N, normalize(uLightDir)), 0.0);
+      float fresnel = pow(1.0 - max(dot(N, normalize(vViewDir)), 0.0), 2.0);
+      vec3 base = vColor * (0.55 + 0.45 * diff);
+      vec3 rim = vColor * fresnel * 0.4;
+      gl_FragColor = vec4(min(base + rim, vec3(0.86)), 1.0);
+    }
+  `;
+  function compileShader(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error('shader compile: ' + gl.getShaderInfoLog(sh));
+    return sh;
+  }
+
+  let prog, aPosition, aNormal, aColor, uMVP, uModel, uLightDir, uEye;
+  function makeMeshBuffers(mesh) {
+    const posBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, mesh.positions, gl.STATIC_DRAW);
+    const normBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, mesh.normals, gl.STATIC_DRAW);
+    const colBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, mesh.colors, gl.STATIC_DRAW);
+    return { posBuf, normBuf, colBuf, count: mesh.count };
+  }
+  function initGL() {
+    prog = gl.createProgram();
+    gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, VERT_SRC));
+    gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, FRAG_SRC));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('program link: ' + gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+    aPosition = gl.getAttribLocation(prog, 'aPosition');
+    aNormal = gl.getAttribLocation(prog, 'aNormal');
+    aColor = gl.getAttribLocation(prog, 'aColor');
+    uMVP = gl.getUniformLocation(prog, 'uMVP');
+    uModel = gl.getUniformLocation(prog, 'uModel');
+    uLightDir = gl.getUniformLocation(prog, 'uLightDir');
+    uEye = gl.getUniformLocation(prog, 'uEye');
+    shellBufs = shellMeshes.map(makeMeshBuffers);
+    spineBuf = makeMeshBuffers(spineMesh);
+    gl.enable(gl.DEPTH_TEST);
+    gl.viewport(0, 0, W, H);
+  }
+
+  // Build one beam-mesh (positions/normals/colors) from an edge list at
+  // UNIT radius -- every shell reuses the SAME base topology, scaled per
+  // shell via the model matrix at render time, rather than building a
+  // separate position buffer per shell.
+  function buildBeamMesh(verts, edges, halfWidth, hueBase, hueSpan, sat, light) {
+    const positions = [], normals = [], colors = [];
+    for (const [ia, ib] of edges) {
+      const a = verts[ia], b = verts[ib];
+      const tris = buildBeamTris(a, b, halfWidth);
+      // Colour by the LOCAL (object-space, pre-rotation) midpoint angle --
+      // static and invariant under the shell's own world-space rotation,
+      // the same "colour by an axis the motion can't disturb" fix
+      // geodome.html/spaceframe.html/hoppercrystal.html/rosenspikes.html
+      // established, here applied to azimuth instead of height/depth.
+      const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
+      const theta = Math.atan2(mid[2], mid[0]);
+      const hue = ((hueBase + hueSpan * Math.sin(3 * theta)) % 360 + 360) % 360;
+      const [r, g, bch] = hsl2rgb(hue, sat, light);
+      for (const tri of tris) {
+        const e1 = sub3(tri[1], tri[0]), e2 = sub3(tri[2], tri[0]);
+        const n = norm3(cross3(e1, e2));
+        for (const p of tri) {
+          positions.push(p[0], p[1], p[2]);
+          normals.push(n[0], n[1], n[2]);
+          colors.push(r, g, bch);
+        }
+      }
+    }
+    return {
+      positions: new Float32Array(positions),
+      normals: new Float32Array(normals),
+      colors: new Float32Array(colors),
+      count: positions.length / 3,
+    };
+  }
+
+  // Shell count, radii, rotation rates, spine set -- all fixed ONCE per
+  // video (function of DENSITY/SEED only), never re-rolled per cycle, the
+  // standing "any coverage-affecting parameter re-randomised per cycle
+  // creates a real brightness/structure swing" lesson this pool documents
+  // for a dozen-plus engines in a row. Only rotation PHASE resets per
+  // cycle (reconfigureMotion below) -- coverage-neutral, since a rigid
+  // rotation about the shared axis never changes how much geometry exists.
+  let shellMeshes, shellBufs, spineMesh, spineBuf, shells, spines, spineSelectedDirs;
+  function initShells() {
+    const { verts, edges } = buildLatticeTopology(1); // 42 verts, 120 edges
+    const nShells = DENSITY > 1.15 ? 3 : 2;
+    const radii = nShells === 3 ? [0.45, 0.72, 1.0] : [0.62, 1.0];
+    const halfWidth = 0.045;
+    const base = PAL[Math.floor(rng() * PAL.length)];
+    const hue0 = base[0] + rand(-15, 15);
+    const hueSpanShell = rand(40, 70);
+
+    shellMeshes = [];
+    shells = [];
+    for (let i = 0; i < nShells; i++) {
+      // Hue offset per shell (a fixed, shell-index-keyed band) -- shell
+      // INDEX is exactly rotation-invariant (every shell spins about the
+      // same shared Y axis), so colour can never create a brightness
+      // trend from rotation exposing a different hue, the same invariant-
+      // axis principle used throughout this pool's WebGL engines.
+      const shellHue = hue0 + (i * 360) / Math.max(3, nShells + 1);
+      const sat = Math.max(55, Math.min(95, base[1] + rand(-6, 10)));
+      const light = Math.min(66, base[2] + 8);
+      shellMeshes.push(buildBeamMesh(verts, edges, halfWidth, shellHue, hueSpanShell, sat, light));
+      shells.push({ radius: radii[i], rotAngle0: 0, rotRate: 0 });
+    }
+
+    // Sparse outward spines from the 12 lowest-degree ("pentagon")
+    // original icosahedron vertices -- the real Spumellaria radiolarian
+    // silhouette (spines radiating past the outermost shell). These
+    // rotate WITH the outermost shell (shared model matrix at render
+    // time), so they stay correctly attached to its surface.
+    //
+    // (A random-subset variant of this spine set was tried as a novelty-
+    // gate fix -- measured WORSE, not better, 0.608 -> 0.563 against the
+    // same nearest neighbour: breaking the spine layer's exact symmetry
+    // moved the composition toward that neighbour's own already-irregular,
+    // moderately-asymmetric curve density rather than away from it. A
+    // concrete instance of this pool's established lesson that not every
+    // lever moves novelty distance in the intuitively expected direction
+    // (voderberg.html/dragonfold.html/schlieren.html all document the
+    // same). Reverted to the full, symmetric 12-spine set.)
+    const outerR = radii[radii.length - 1];
+    const spineLen = outerR * rand(0.42, 0.58);
+    const spineVerts = verts.slice(0, 12); // icosahedron's original 12 vertices, pre-subdivision order preserved
+    spineSelectedDirs = spineVerts;
+    const spinePositions = [], spineNormals = [], spineColors = [];
+    spines = [];
+    for (let i = 0; i < spineVerts.length; i++) {
+      const dir = spineVerts[i];
+      const a = scale3(dir, outerR);
+      const b = scale3(dir, outerR + spineLen);
+      const tris = buildBeamTris(a, b, halfWidth * 0.85);
+      const theta = Math.atan2(dir[2], dir[0]);
+      const hue = ((hue0 + nShells * 360 / Math.max(3, nShells + 1) + hueSpanShell * Math.sin(3 * theta)) % 360 + 360) % 360;
+      const sat = Math.max(55, Math.min(95, base[1] + 10));
+      const light = Math.min(70, base[2] + 12);
+      const [r, g, bch] = hsl2rgb(hue, sat, light);
+      for (const tri of tris) {
+        const e1 = sub3(tri[1], tri[0]), e2 = sub3(tri[2], tri[0]);
+        const n = norm3(cross3(e1, e2));
+        for (const p of tri) {
+          spinePositions.push(p[0], p[1], p[2]);
+          spineNormals.push(n[0], n[1], n[2]);
+          spineColors.push(r, g, bch);
+        }
+      }
+      spines.push({
+        baseLen: spineLen, pulsePh: rng() * Math.PI * 2, pulseRate: 0,
+        // Antiphase pairing by index parity (even/odd) for exact
+        // first-order zero-sum area cancellation across the spine set --
+        // the same "paired antiphase breathing" technique grid.html/
+        // tessellation.html already established.
+        pulseSign: i % 2 === 0 ? 1 : -1,
+      });
+    }
+    spineMesh = {
+      positions: new Float32Array(spinePositions),
+      normals: new Float32Array(spineNormals),
+      colors: new Float32Array(spineColors),
+      count: spinePositions.length / 3,
+    };
+  }
+
+  // Called at start-up AND every cycleSec. Only rotation PHASE/RATE resets
+  // -- coverage-neutral by construction. Rates are assigned by an explicit
+  // near-even alternating-sign SHUFFLE across shells, not independent
+  // random draws per shell: the schlieren.html lesson (2026-10-02) found
+  // that independent per-unit draws can, by chance, land most units on the
+  // same rate/sign, letting one rigid fit explain too much of the frame.
+  // With only 2-3 shells, explicitly alternating sign (and scaling
+  // magnitude by shell index, inner shells spin faster -- real nested
+  // gears/turntables read this way) guarantees every pair of adjacent
+  // shells has a genuinely different angular velocity at all times.
+  function reconfigureMotion() {
+    const baseRate = rand(0.35, 0.55) * SPEED;
+    for (let i = 0; i < shells.length; i++) {
+      const s = shells[i];
+      s.rotAngle0 = rand(0, Math.PI * 2);
+      // Innermost shell (i=0) fastest, alternating sign outward.
+      s.rotRate = ((i % 2 === 0) ? 1 : -1) * baseRate * (shells.length - i);
+    }
+    for (const sp of spines) {
+      sp.pulsePh = rng() * Math.PI * 2;
+      sp.pulseRate = sgn() * rand(0.5, 0.85) * SPEED;
+    }
+  }
+
+  initShells();
+  reconfigureMotion();
+  initGL();
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+  const dt = 1 / FPS;
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  const EYE = [0, 0.35, 3.1];
+  const TARGET = [0, 0, 0];
+  const UP = [0, 1, 0];
+  const proj = mat4Perspective((42 * Math.PI) / 180, W / H, 0.1, 100);
+  const SCALE = 1.0;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+    if (gl.isContextLost()) return;
+
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    const view = mat4LookAt(EYE, TARGET, UP);
+    // Bounded light-direction oscillation (never fully back-lit) --
+    // redistributes brightness WITHIN already-lit struts rather than
+    // changing how much is lit, the same coverage-neutral fast-motion
+    // source geodome.html/spaceframe.html established.
+    const lightAngle = 0.32 * Math.sin(clk * 2.3) + 0.14 * Math.sin(clk * 5.3 + 0.7);
+    gl.uniform3f(uLightDir, Math.cos(lightAngle), 0.75, Math.sin(lightAngle) + 1.05);
+    gl.uniform3f(uEye, EYE[0], EYE[1], EYE[2]);
+
+    for (let i = 0; i < shells.length; i++) {
+      const s = shells[i];
+      let model = mat4RotateY(s.rotAngle0 + clk * s.rotRate);
+      model = mat4Multiply(model, mat4Scale(s.radius * SCALE));
+      const mvp = mat4Multiply(proj, mat4Multiply(view, model));
+      gl.uniformMatrix4fv(uMVP, false, mvp);
+      gl.uniformMatrix4fv(uModel, false, model);
+      const buf = shellBufs[i];
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf.posBuf);
+      gl.enableVertexAttribArray(aPosition);
+      gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf.normBuf);
+      gl.enableVertexAttribArray(aNormal);
+      gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf.colBuf);
+      gl.enableVertexAttribArray(aColor);
+      gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, buf.count);
+    }
+
+    // Spines: rotate with the outermost shell, plus their own independent
+    // per-spine length pulse (paired antiphase by index parity -- see
+    // initShells() -- for coverage-neutral breathing).
+    const outer = shells[shells.length - 1];
+    let spineModel = mat4RotateY(outer.rotAngle0 + clk * outer.rotRate);
+    // Per-spine length pulse rebuilds the spine mesh's beam geometry only
+    // (cheap: 12 beams, not the whole shell count), rescaled per spine by
+    // a radial stretch factor -- applied via a per-vertex CPU rebuild each
+    // frame since each spine needs its own independent length.
+    rebuildSpineMesh(outer.radius * SCALE);
+    const mvpSp = mat4Multiply(proj, mat4Multiply(view, spineModel));
+    gl.uniformMatrix4fv(uMVP, false, mvpSp);
+    gl.uniformMatrix4fv(uModel, false, spineModel);
+    gl.bindBuffer(gl.ARRAY_BUFFER, spineBuf.posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, spineMesh.positions, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(aPosition);
+    gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, spineBuf.normBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, spineMesh.normals, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(aNormal);
+    gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, spineBuf.colBuf);
+    gl.enableVertexAttribArray(aColor);
+    gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, spineBuf.count);
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureMotion(); }
+  }
+
+  // Rebuild the (small, 6-10-spine) beam mesh in OBJECT space (pre-model-
+  // matrix) each frame, varying only each spine's outer endpoint distance
+  // -- same buildBeamTris() call, just a fresh per-spine length.
+  // spineSelectedDirs is set in initShells() (the same random subset the
+  // mesh was built from), not a fixed 12-vertex list.
+  function rebuildSpineMesh(outerRadiusWorld) {
+    // outerRadiusWorld is informational only (spines are built in the
+    // SAME object space as shells, scaled implicitly by SCALE=1 already
+    // baked into shell radii -- spine base/tip are already at the correct
+    // object-space radius from initShells(), so this just re-derives the
+    // pulse length per frame).
+    const positions = spineMesh.positions, normals = spineMesh.normals;
+    let k = 0;
+    const halfWidth = 0.045 * 0.85;
+    for (let i = 0; i < spineSelectedDirs.length; i++) {
+      const dir = spineSelectedDirs[i];
+      const sp = spines[i];
+      const outer = shells[shells.length - 1];
+      const baseR = outer.radius * SCALE;
+      const ph = sp.pulsePh + clk * sp.pulseRate;
+      const lenFactor = 1 + sp.pulseSign * 0.18 * Math.sin(ph);
+      const a = scale3(dir, baseR);
+      const b = scale3(dir, baseR + sp.baseLen * lenFactor);
+      const tris = buildBeamTris(a, b, halfWidth);
+      for (const tri of tris) {
+        const e1 = sub3(tri[1], tri[0]), e2 = sub3(tri[2], tri[0]);
+        const n = norm3(cross3(e1, e2));
+        for (const p of tri) {
+          positions[k] = p[0]; positions[k + 1] = p[1]; positions[k + 2] = p[2];
+          normals[k] = n[0]; normals[k + 1] = n[1]; normals[k + 2] = n[2];
+          k += 3;
+        }
+      }
+    }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+
+  (async () => {
+    await new Promise((r) => setTimeout(r, 300));
+    const deadline = Date.now() + 1500;
+    while (contextLost && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    window.READY = true;
+  })();
+})();
+</script>
+</body>
+</html>

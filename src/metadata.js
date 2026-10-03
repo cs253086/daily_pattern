@@ -61,6 +61,7 @@ const ENGINE_SUBJECTS = {
   phyllotaxis: 'Golden Spiral Clusters',
   primespiral: 'Prime Number Spiral',
   quasicrystal: 'Penrose Tiling',
+  radiolarian: 'Radiolarian Shell Lattice',
   reactiondiffusion: 'Reaction Diffusion Patterns',
   rosenspikes: 'Ferrofluid Spikes',
   schlieren: 'Liquid Crystal Schlieren Texture',
