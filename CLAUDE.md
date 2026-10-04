@@ -6476,6 +6476,164 @@ established). Nearest neighbour is
 checking: two substantively different composition-level levers were tried
 and measured before settling on this number.
 
+## Diagrid tower-lattice engine (`diagrid.html`) — 2026-10-04
+
+Daily creative-research routine. Category was "random architectural or
+typographic movement" (used before for `ziggurat.html`/Art Deco,
+`geodome.html`/geodesic domes, `spaceframe.html`/octet trusses,
+`tensegritychain.html`/Snelson's floating compression). An open WebSearch
+surfaced the **diagrid** structural system used in real tall buildings
+(Hearst Tower NYC, 30 St Mary Axe "the Gherkin" London, Foster+Partners/
+ARUP) -- a load-bearing framing system that eliminates vertical columns
+entirely: a triangulated lattice of diagonal members wraps the building's
+perimeter as a repeating diamond/zigzag module, and because the lattice is
+triangulated, every diagonal carries BOTH gravity and lateral (wind/
+seismic) load purely as an axial force, suppressing the shear-racking a
+plain rectangular frame would need extra bracing to resist.
+
+**What it is**: a real lit-3D WebGL engine, the pool's twelfth. A single
+CONTINUOUS diagonal-lattice SKIN wrapped around the surface of one tapered/
+bulging solid-of-revolution form -- a genuinely different 3D composition
+from every other real-WebGL engine in the pool: not sparse orbiting solids
+(`solids3d.html`), not a grid of individually-spinning cubes
+(`lattice3d.html`), not lit tori (`torusrings3d.html`), not one continuous
+CONVEX mesh (`geodome.html`), not a CONNECTED strut framework of many
+separate beams meeting at interior lattice joints (`spaceframe.html`'s
+octet truss -- a dense 3D volume), not a concave excavation
+(`hoppercrystal.html`), not a lattice of concave niche cells
+(`muqarnas.html`), not independently-growing convex spikes
+(`rosenspikes.html`), not a floating tensegrity chain
+(`tensegritychain.html`), not a field of individually-heighted columns
+(`columnarbasalt.html`), not nested concentric shells (`radiolarian.html`)
+-- a 2D triangulated MEMBRANE cladding a 3D volume, not a 3D space-filling
+lattice of discrete interior struts, exactly matching the real structural
+principle.
+
+**GEOMETRY, verified OFFLINE before writing any rendering code** (the same
+discipline this pool's `quasicrystal.html`/`geodome.html`/`spaceframe.html`
+already established for a construction that could still "look plausible"
+even if subtly wrong): nodes are laid out on a grid of (i,j) -- i the
+angular index, j the height-row index -- with alternating half-sector theta
+offset on odd rows (the classic diagrid "brick" zigzag offset) and radius
+following a tapered/bulging profile. Edges connect ONLY node(i,j)->
+node(i,j+1) and node(i,j)->node(i+1,j+1) -- pure diagonal triangulation, no
+horizontal or vertical members at all, matching the real diagrid's
+"diagonals carry everything" principle exactly. A standalone script
+confirmed, across 5 swept profile/density configs: zero invalid or
+duplicate edges, every non-cap node has in-degree exactly 2 (so the skin
+has no gaps -- every diamond module is closed), and minimum strut length
+clears the beam-collision safety margin by 2-2.4x in every tested config.
+
+**PROPORTIONS, not the camera, were tuned to fill a 16:9 frame** -- the
+same lesson `tensegritychain.html`'s write-up documents (a literal
+skyscraper's 5:1+ height:width ratio does not read boldly in landscape no
+matter how the camera is angled). This tower is deliberately squatter
+(height:max-radius roughly 2:1-2.4:1) than a real skyscraper while keeping
+the real structural principle completely intact.
+
+**UNIT-LEVEL MOTION**: each horizontal ring breathes radially in/out
+together (y held exactly fixed per node, the "identity first" lesson
+keeping the tapered-tower silhouette intact at every instant), phased by
+each ring's CUMULATIVE-CIRCUMFERENCE rank fraction -- not raw row index,
+since this tower's rings do NOT hold equal circumference per row (the
+radius profile tapers) -- the same fix `doylespiral.html`/
+`rosenspikes.html`/`columnarbasalt.html` already established for a
+non-uniformly-distributed point/ring set. Deliberately NO whole-object
+rotation at all (per `truchet.html`'s lesson: a reflexive whole-field
+rotation only dilutes the mandatory unit-motion signal unless `fastMotion`
+genuinely needs it as a second source) -- verified the ring-breathing wave
+alone clears `fastMotion` with comfortable margin before deciding rotation
+was unnecessary.
+
+**Two real rounds of iteration, both driven by measurement, not guessing:**
+
+1. **First `validateEngine()` battery (seeds 1-15+12345) passed only
+   12/16**: 4 seeds failed `fastMotion`/`compositionDrift` on thin margins.
+   Root-caused to the ring-breathing wave's amplitude (`rand(0.1,0.16)`)
+   and rate (`rand(0.9,1.4)`) being too subtle/slow overall. Verified a
+   larger amplitude's collision safety OFFLINE first (simulating the
+   actual rank-fraction-phased wave over a full phase cycle across 4
+   swept configs, confirming safety up to `ringAmp=0.28` with comfortable
+   margin), then boosted `ringAmp` to `rand(0.18,0.26)` and `waveRate` to
+   `rand(1.3,1.9)` -- re-validated 15/16, all 4 previously-failing seeds
+   now passing comfortably, leaving one seed (9) at `avgMsPerFrame`
+   103.4ms, just over the 100ms budget.
+2. **Seed 9's speed failure was investigated rather than assumed to be
+   noise.** An isolated 2-run re-check gave one pass and one fail
+   (92.3ms/106ms) -- initially looked like this pool's established
+   sandbox-contention-noise pattern (`automaton.html`/`columnarbasalt.html`)
+   -- but a direct check confirmed N/M (and hence triangle count) are
+   IDENTICAL across every seed, since `DENSITY` defaults to 1 regardless
+   of seed: there was no per-seed geometry difference to explain the
+   variance, pointing instead at a genuinely marginal baseline render
+   cost, not mere noise. Fixed at the source rather than accepted (per
+   this pool's `radiolarian.html` precedent of treating render-speed
+   safety as non-negotiable over a thin pass): rewrote the per-frame hot
+   path (`deformLattice`'s beam-mesh rebuild, run every single frame since
+   ring-breathing changes every strut's position) from an
+   array-allocating implementation (the original `buildBeamTris` calling
+   `sub3`/`add3`/`scale3`/`cross3`/`norm3`, each allocating small
+   `[x,y,z]` arrays -- thousands of allocations per frame across 234
+   edges x ~20 vector ops, driving heavy GC pressure under swiftshader)
+   to an allocation-free version (`writeBeamInto`/`writeTri`) that writes
+   directly into the flat `Float32Array`s with plain scalar arithmetic --
+   mathematically identical corner-point and triangle-winding order, a
+   pure performance change. Re-rendered a frame and confirmed the lattice
+   geometry is visually unchanged. Re-validated the full 16-seed battery:
+   **16/16 passed**, `avgMsPerFrame` 65.8-93.7ms (seed 9 now 86.9ms,
+   comfortably clear, confirming the fix was real and not
+   noise-dependent).
+
+**Verified** (final design): `validateEngine()` **16/16** across seeds
+1-15 plus the CLI's actual default seed 12345 (see `geodome.html`'s
+write-up for why that seed matters), confirmed across three full
+batteries (pre-fix 12/16, post-amplitude-fix 15/16, post-speed-fix
+16/16). Final margins comfortable throughout: `avgSat` 46.6-59.7 (vs the
+22 minimum), zero near-white pixels on every seed, `projectedRise` -39.9
+to +34.7 (vs the 50 threshold), `compositionDrift` 0.026-0.041 (vs the
+0.015 minimum), `unitMotionNonRigidFrac` exactly 1.0 on every seed (vs
+the 0.40 minimum -- independent ring-to-ring breathing is never explained
+by one rigid transform), `fastMotion` always comfortably above its
+per-frame floor, `avgMsPerFrame` 65.8-93.7ms giving `projectedHourRenderMin`
+94.7-134.9min (comfortably inside the CI budget). Visual spot-checks at
+multiple seeds, actually rendering PNGs and looking at them, not just
+reading validator output: a vivid, bold, immediately-legible diagonal
+zigzag diamond lattice skin on a tapered/bulging tower form, clean
+geometry with no gaps or collisions, genuine independent ring-to-ring
+breathing motion visible between checkpoints.
+
+**Novelty gate**: measured against all 59 existing engines (the committed
+fingerprint cache was badly stale, so the whole pool was fingerprinted
+fresh alongside the candidate, per this pool's established practice; the
+refreshed cache was not committed, per this routine's "touch only the new
+engine + log + CLAUDE.md" constraint, with the same `ENGINE_SUBJECTS`
+exception this pool's `tensegritychain.html` write-up already
+established). Nearest neighbour is `geodome` at distance **0.6479** -- a
+genuine pass, modestly thin by this pool's standards (most pairs land at
+0.7+) but clear of the 0.60 threshold; both are real-WebGL
+solid-of-revolution-adjacent forms (a tapered lattice skin vs. a
+continuous dome mesh), so some residual structural similarity in a
+colour-blind, composition-based descriptor is unsurprising even though the
+two read as visually distinct (open diamond-lattice skin with real black
+negative space through every module, vs. `geodome.html`'s fully filled
+continuous surface).
+
+**Also, this session surfaced a real background-execution reliability
+issue in this sandbox worth remembering**: a `run_in_background` Bash call
+whose inner command itself used a trailing `&` (double-backgrounding)
+produced a task-notification claiming completion almost immediately,
+while the actual work kept running orphaned in the background -- a second,
+unrelated validation attempt was then launched that collided with the
+still-running first one, both writing to the same output file
+concurrently and contending for CPU, which was the real cause of what
+first looked like a 35-minute hang with zero output. A single, cleanly
+single-backgrounded command (no inner `&`) run after explicitly killing
+every leftover `chrome`/`validate_batch`/`novelty` process worked
+reliably thereafter. Lesson for next time: never add a trailing `&` inside
+a command already passed with `run_in_background: true`, and when a
+background task's output looks suspiciously stalled, check `ps aux` for a
+duplicate/orphaned process before assuming the current one is hung.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

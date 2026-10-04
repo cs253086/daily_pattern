@@ -40,6 +40,7 @@ const ENGINE_SUBJECTS = {
   columnarbasalt: 'Basalt Column Field',
   composer: 'Geometric Composition',
   dendrite: 'Fractal Branches',
+  diagrid: 'Diagrid Tower Lattice',
   doylespiral: 'Doyle Spiral Circles',
   dragonfold: 'Dragon Curve Fractal',
   frostgrowth: 'Frost Crystal Growth',
