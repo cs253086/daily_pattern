@@ -1,7 +1,7 @@
 {
   "last3D": "spaceframe",
   "last2D": "frostgrowth",
-  "lastMandala": "ziggurat",
+  "lastMandala": "arcrings",
   "last3DArchetype": "spaceframe",
   "last2DArchetype": "frostgrowth",
   "last3DByArchetype": {
@@ -28,5 +28,5 @@
     "dragonfold": "dragonfold",
     "frostgrowth": "frostgrowth"
   },
-  "updatedAt": "2026-10-03T14:14:37.080Z"
+  "updatedAt": "2026-10-04T14:44:51.115Z"
 }
