@@ -1,8 +1,8 @@
 {
-  "last3D": "spaceframe",
+  "last3D": "tensegritychain",
   "last2D": "frostgrowth",
   "lastMandala": "arcrings",
-  "last3DArchetype": "spaceframe",
+  "last3DArchetype": "tensegritychain",
   "last2DArchetype": "frostgrowth",
   "last3DByArchetype": {
     "geodome": "geodome",
@@ -12,7 +12,8 @@
     "discrete-3d-solids": "solids3d",
     "auto-2026-09-13-llanberis-lake-north-wales": "auto-2026-09-13-llanberis-lake-north-wales",
     "muqarnas": "muqarnas",
-    "rosenspikes": "rosenspikes"
+    "rosenspikes": "rosenspikes",
+    "tensegritychain": "tensegritychain"
   },
   "last2DByArchetype": {
     "arcrings": "arcrings",
@@ -28,5 +29,5 @@
     "dragonfold": "dragonfold",
     "frostgrowth": "frostgrowth"
   },
-  "updatedAt": "2026-10-04T14:44:51.115Z"
+  "updatedAt": "2026-10-05T18:13:46.590Z"
 }
