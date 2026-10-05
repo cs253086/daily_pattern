@@ -635,5 +635,33 @@
     ],
     "nearestNeighbour": "geodome",
     "nearestDistance": 0.6479
+  },
+  {
+    "date": "2026-10-05",
+    "inspirationSource": "The Scottish tartan sett -- category \"traditional textile/tiling/ornament tradition from a randomly chosen culture\" (least-recently-used among the tied-least-frequent categories per a tally of all prior log entries, continuing the herringbone.html precedent of varying categories). Delegated an open WebSearch explicitly excluding the five textile techniques already shipped (Kente strip-weaving, twill/herringbone's modular-shift grid, ikat's per-thread positional misalignment, taniko's static charted shapes, tablet weaving's per-unit rotation state), which surfaced the tartan sett's real generative rule: a single 1D sequence of coloured stripe widths, mirrored at a pivot without doubling it (a palindrome), applied IDENTICALLY to both the warp and weft of a 2/2 twill weave -- where the two axes' colours agree you get a solid block, where they differ the twill interlace alternates which thread shows every 2 threads, producing a genuine optical colour blend (the 'overcheck') rather than either pure colour. Sources: Scottish Register of Tartans threadcount/sett definition (https://www.tartanregister.gov.uk/threadcount), its mirroring help page (https://clan.com/help/tartan-designer-arrange-pattern/tartan-designer-tartan-mirroring), a worked warp/weft colour-blend example (https://itn-web.it.liu.se/~stegu76/TNM084-2011/SL-tartan).",
+    "idea": "A two-axis sequence-intersection + colour-interleave rule: the SAME palindromic sett sequence drives both horizontal and vertical stripe colour, with solid blocks where the two axes agree and a 2/2 twill diagonal interleave where they don't -- a genuinely different construction from every textile engine already in the pool, none of which have any colour-CROSSING logic between two independent axes at all. Rendered via a small offscreen colour-LUT (one pixel per nominal thread width) scaled up with image smoothing off for a crisp, bold, blocky weave. Unit-level motion: every stripe BOUNDARY wobbles independently (its own phase + guaranteed-minimum rate), redistributing width between neighbouring stripes -- coverage-neutral by an EXACT per-colour-group zero-sum construction (each colour's own total width, not just the grand total, is invariant at every instant, closing a real brightness-drift bug a global-only zero-sum left open), plus a second independent motion source: each unordered colour PAIR's twill-diagonal crossing drifts at its own rate (exactly 50/50 coverage-neutral under any additive phase shift, by construction), so different crossing regions move at different, sometimes opposite, rates -- no single rigid transform explains the frame.",
+    "engineName": "tartansett",
+    "outcome": "shipped",
+    "reason": "Built engines/manual/tartansett.html, reusing herringbone.html's boilerplate (params, Mulberry32, palette table, hsl2rgb) as the template, with a new small offscreen-canvas colour-LUT render path (one LUT pixel per thread, drawImage-scaled up with imageSmoothingEnabled=false). The palindrome construction (half-sett + mirror(half-sett minus its last element)) and the 2/2 twill crossing rule's exact 50/50 coverage split under any phase offset were both VERIFIED OFFLINE before writing any rendering code, the same discipline this pool's quasicrystal.html/geodome.html/diagrid.html already established. First validateEngine() battery found two real bugs via seed failures, not reasoning: (1) seed 1 failed the brightness-trend check (projectedRise 54.6 vs the 50 threshold) because the original boundary-wobble construction only kept the TOTAL sett period constant (a global mean-subtraction), which does not stop width redistributing FROM a stripe of one colour TO a stripe of a different colour -- a real, not aliased, luma shift since different colours have different luma. Fixed by subtracting the mean WITHIN EACH COLOUR GROUP instead of globally, so every individual colour's own total width (not just the grand total) is exactly invariant -- verified offline afterward (colour-area error ~7e-15, floating-point noise only) across 7 swept configs including both few-colours/large-groups and many-colours/many-singletons cases. (2) seed 9 failed with 'image lacks spatial structure' (peak std 4.92, an order of magnitude below every other seed's 20-40 range): independent per-stripe colour draws had, by ordinary chance, clumped onto 1-2 of the palette's 5 colours, degenerating the canvas toward near-solid. Fixed by cycling through a freshly-shuffled full pass of the palette before repeating (guarantees every colour is used at least once per halfLen-length pass) instead of drawing each stripe's colour fully independently. A second validateEngine() round surfaced a THIRD bug, this time from the fix meant to strengthen weak fastMotion margins: a single shared global twill-diagonal drift (added as a second motion source) made 3 of 6 seeds fail the mandatory unit-motion gate at only 38-39% non-rigid (need >=40%) -- colour-crossing regions cover most of the canvas, so one uniform diagonal shift across most of the frame was well explained by a single rigid translation despite solid blocks being technically untouched by it. Fixed by giving every unordered COLOUR PAIR its own independent drift rate/phase instead of one shared global rate (the same lever moire.html's counter-rotating lattices already proved effective for) -- different crossing regions now drift at different, sometimes opposite, rates, which no single rigid transform can reproduce, while the exact 50/50 coverage-neutrality proof carries over unchanged per pair.",
+    "seedsVerified": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      12345
+    ],
+    "nearestNeighbour": "herringbone",
+    "nearestDistance": 0.8743
   }
 ]

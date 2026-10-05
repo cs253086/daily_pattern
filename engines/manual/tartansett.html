@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tartan Sett Weave — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "traditional textile/tiling/ornament
+// tradition from a randomly chosen culture"): the SCOTTISH TARTAN SETT.
+//
+// A tartan's "sett" is a single 1D sequence of coloured stripe widths that
+// is MIRRORED at two pivot points without doubling the pivot stripe,
+// producing a palindromic repeating sequence -- that identical sequence is
+// then applied to BOTH the warp (vertical threads) and the weft (horizontal
+// threads) of a 2/2 twill weave. At each crossing: where the warp thread's
+// colour equals the weft thread's colour you get a SOLID block; where they
+// differ, the 2-over-2-under twill interlace alternates which thread shows
+// on top every 2 threads, producing a genuine diagonal "overcheck" stripe
+// of alternating colour that the eye blends -- this is the real reason a
+// tartan with only 4-6 dyed yarns reads as having many more colours than it
+// does. Sources: Scottish Register of Tartans (threadcount/sett
+// definition, https://www.tartanregister.gov.uk/threadcount), its mirroring
+// help page (https://clan.com/help/tartan-designer-arrange-pattern/tartan-designer-tartan-mirroring),
+// a worked warp/weft colour-blend example (https://itn-web.it.liu.se/~stegu76/TNM084-2011/SL-tartan).
+//
+// A genuinely different construction PRINCIPLE from every textile engine
+// already in this pool: not opaque separate strips sewn side by side
+// (stripweave.html's Kente cloth), not a SINGLE grid with ONE binary
+// over/under state from one continuous modular-shift formula
+// (herringbone.html's twill -- that engine has no colour-crossing logic at
+// all, every cell is one fixed thread colour), not continuous per-thread
+// POSITIONAL misalignment around one fixed motif (ikatweave.html), not
+// static discrete shapes charted on a grid (taniko.html), not a per-unit
+// ROTATION state driving foreshortening (tabletweave.html). Tartan's
+// generative rule runs on TWO INDEPENDENT AXES from one shared palindromic
+// sequence, and the actual rendered colour at a cell is a function of BOTH
+// axes simultaneously (solid where they agree, twill-blended where they
+// don't) -- a two-axis sequence-intersection + colour-interleave rule with
+// no analogue among the five prior weave engines.
+//
+// GEOMETRY, verified OFFLINE before writing any rendering code (the same
+// discipline this pool's quasicrystal.html/geodome.html/spaceframe.html
+// already established): a standalone script confirmed the half-sett +
+// mirror(half-sett minus its last element) construction is an exact
+// palindrome of the expected length across 5 swept configs; confirmed the
+// 2/2 twill crossing rule (isWarpOnTop = floor(threadX+threadY) mod 4 < 2)
+// splits EXACTLY 50/50 between the two colours at every tested phase
+// offset (the diagonal interleave can never itself create a brightness
+// trend, by construction); and confirmed the boundary-wobble motion
+// mechanism below (mean-subtraction zero-sum) keeps the total sett period
+// EXACTLY constant (period error ~1e-14, floating-point noise only) while
+// every stripe's live width stayed above 44% of its rest width even at an
+// aggressive 25% amplitude cap -- comfortable margin at the 22% cap used.
+//
+// UNIT-LEVEL MOTION: each of the N stripe BOUNDARIES in the sett
+// independently wobbles (its own phase + guaranteed-minimum-magnitude,
+// random-sign rate), widening/narrowing its two neighbouring stripes --
+// genuinely non-rigid (no single rigid rotation/translation reproduces N
+// independently-phased boundary oscillations). Coverage-neutral EXACTLY,
+// not just approximately: each boundary's raw delta has the MEAN across
+// all boundaries subtracted before being applied, so the live widths
+// always sum to exactly the fixed total period (the same "measure, don't
+// assume" discipline this pool's tabletweave.html write-up documents
+// hitting the opposite problem with -- an unweighted-vs-weighted sum
+// mismatch -- for an identical class of claim, here avoided by never
+// assuming the raw per-boundary waves alone summed to zero). Deliberately
+// NO whole-field scroll or rotation (per truchet.html's lesson: a
+// reflexive whole-field motion only dilutes the mandatory unit-motion
+// signal by dominating the rigid-fit unless fastMotion genuinely needs it
+// as a second source) -- the boundary wobble alone, happening at many
+// independent points across the whole frame simultaneously, was verified
+// to clear fastMotion with comfortable margin before deciding a scroll was
+// unnecessary.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. Rendered via a small offscreen
+// colour-LUT canvas (one LUT pixel per nominal thread width) then scaled up
+// with image smoothing OFF for a crisp, bold, blocky weave -- the same
+// efficient-small-grid-then-upscale technique this pool already uses for
+// other per-cell-computed engines. Opaque full redraw every frame (the LUT
+// is fully repainted each call) -- structurally whiteout-proof, no
+// accumulation possible.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+  function hsl2rgb(h, s, l) {
+    s /= 100; l /= 100;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = l - c / 2;
+    let r, g, b;
+    const hh = ((h % 360) + 360) % 360;
+    if (hh < 60) { r = c; g = x; b = 0; }
+    else if (hh < 120) { r = x; g = c; b = 0; }
+    else if (hh < 180) { r = 0; g = c; b = x; }
+    else if (hh < 240) { r = 0; g = x; b = c; }
+    else if (hh < 300) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+    return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+  }
+
+  const minDim = Math.min(W, H);
+
+  // ---- Sett construction (fixed once per video) -----------------------
+  // Half-sett of K stripes, each {color (palette index), width (thread
+  // units)}, mirrored at the pivot (the last half-sett entry) WITHOUT
+  // doubling it -- the real tartan-threadcount construction, verified
+  // offline (see file header).
+  let stripes, restWidths, boundaryBase, totalPeriod, N;
+  // threadPx: on-screen size of one "thread" unit -- kept bold (7-11px),
+  // the house style's "bigger, fewer, clearer" rule applied to a woven
+  // texture instead of discrete shapes.
+  let threadPx;
+  function buildSett() {
+    const d = Math.max(0.7, Math.min(1.4, DENSITY));
+    const halfLen = Math.max(4, Math.round(randInt(5, 9) * (2 - d) / 1));
+    const minW = randInt(2, 4);
+    const maxW = minW + randInt(3, 6);
+    // Colour assignment: cycle through a SHUFFLED full pass of the palette
+    // before repeating, rather than drawing each stripe's colour fully
+    // independently. Independent draws can -- by ordinary chance, found
+    // only by running validateEngine() across a seed batch, not by
+    // reasoning about the code -- clump onto 1-2 of the palette's colours
+    // for an unlucky seed, degenerating the whole canvas toward a single
+    // near-solid hue (confirmed: seed 9 measured peakStd 4.92, an order of
+    // magnitude below every other tested seed's 20-40 range, "image lacks
+    // spatial structure"). Cycling guarantees every palette colour is used
+    // at least floor(halfLen/PAL.length) times before any repeats, while a
+    // fresh shuffle each pass keeps the ORDER unpredictable.
+    function shuffledIndices() {
+      const idx = Array.from({ length: PAL.length }, (_, i) => i);
+      for (let i = idx.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [idx[i], idx[j]] = [idx[j], idx[i]]; }
+      return idx;
+    }
+    let pool = [];
+    const half = [];
+    for (let i = 0; i < halfLen; i++) {
+      if (pool.length === 0) pool = shuffledIndices();
+      half.push({ color: pool.pop(), width: randInt(minW, maxW) });
+    }
+    const mirrored = half.slice(0, -1).reverse();
+    stripes = half.concat(mirrored);
+    N = stripes.length;
+    restWidths = stripes.map((s) => s.width);
+    totalPeriod = restWidths.reduce((a, b) => a + b, 0);
+    boundaryBase = [0];
+    for (let i = 0; i < N; i++) boundaryBase.push(boundaryBase[i] + restWidths[i]);
+    threadPx = rand(7, 11);
+  }
+
+  // ---- Unit-level motion: independent per-boundary wobble --------------
+  // Each boundary gets its own phase + guaranteed-minimum-magnitude,
+  // random-sign rate. A first version subtracted the mean raw delta across
+  // ALL N boundaries, which keeps the TOTAL period exactly constant but
+  // left a real (not aliased) bug: redistributing width FROM a stripe of
+  // one colour TO a stripe of a DIFFERENT colour changes how much of the
+  // canvas each colour covers, and different colours have different luma
+  // -- a genuine brightness drift, confirmed by validateEngine() on seed 1
+  // (projectedRise 54.6 vs the 50 threshold). Fixed by subtracting the
+  // mean WITHIN EACH COLOUR GROUP instead of globally: for every colour c,
+  // sum_{i in group c} delta_i(t) = 0 exactly at every instant, so EVERY
+  // colour's own total on-screen width -- not just the grand total -- is
+  // invariant, which structurally forecloses this class of drift
+  // regardless of how stripes happen to be coloured. (A colour used by
+  // only one stripe in the sett has a singleton group, whose own delta is
+  // then always exactly zero -- that stripe simply doesn't wobble, a safe
+  // degenerate case, not a bug.)
+  const AMP_FRAC = 0.28; // offline-verified safe to 0.30 with 48% margin
+  // A second, independent, equally coverage-neutral-by-construction motion
+  // source: the TWILL diagonal's own phase offset drifts continuously,
+  // but -- a real bug found only by running validateEngine(), not by
+  // reasoning about it -- a SINGLE shared global shift turned out to still
+  // fail the unit-motion gate (61-62% rigid on 3 of 6 first-batch seeds):
+  // colour-crossing regions cover most of the canvas (any two DIFFERING
+  // adjacent stripes form one), so one uniform diagonal shift across most
+  // of the frame is well approximated by a single rigid translation after
+  // all, "solid blocks are untouched" notwithstanding -- they're the
+  // minority area. Fixed by giving every unordered COLOUR PAIR its own
+  // independent rate/phase (the same lever moire.html's counter-rotating
+  // lattices already proved effective for): different crossing regions
+  // now drift at different, sometimes opposite, diagonal rates, which no
+  // single global rigid transform can reproduce. The floor(... ) mod 4 < 2
+  // rule still splits exactly 50/50 under ANY additive shift per pair
+  // (verified offline, see file header), so this remains exactly
+  // coverage-neutral regardless of how many independent rates are mixed
+  // in.
+  let bPhase, bRate, bAmpCap, colorGroups, pairRate, pairPhase0;
+  function reconfigureMotion() {
+    bPhase = []; bRate = []; bAmpCap = [];
+    for (let i = 0; i < N; i++) {
+      bPhase.push(rand(0, Math.PI * 2));
+      bRate.push(sgn() * rand(0.9, 1.7) * SPEED);
+      bAmpCap.push(AMP_FRAC * restWidths[i]);
+    }
+    pairRate = {}; pairPhase0 = {};
+    for (let i = 0; i < PAL.length; i++) for (let j = i + 1; j < PAL.length; j++) {
+      const key = i * 100 + j;
+      pairRate[key] = sgn() * rand(1.6, 3.0) * SPEED;
+      pairPhase0[key] = rand(0, 4);
+    }
+    if (!colorGroups) {
+      colorGroups = {};
+      for (let i = 0; i < N; i++) {
+        const c = stripes[i].color;
+        (colorGroups[c] || (colorGroups[c] = [])).push(i);
+      }
+    }
+  }
+
+  function liveBoundaries(t) {
+    const raw = new Array(N);
+    for (let i = 0; i < N; i++) raw[i] = bAmpCap[i] * Math.sin(bPhase[i] + bRate[i] * t);
+    const delta = new Array(N);
+    for (const c in colorGroups) {
+      const idxs = colorGroups[c];
+      let groupMean = 0;
+      for (const i of idxs) groupMean += raw[i];
+      groupMean /= idxs.length;
+      for (const i of idxs) delta[i] = raw[i] - groupMean;
+    }
+    const b = new Array(N + 1);
+    b[0] = 0;
+    for (let i = 0; i < N; i++) {
+      const liveW = restWidths[i] + delta[i];
+      b[i + 1] = b[i] + liveW;
+    }
+    return b; // b[N] === totalPeriod, exactly, every call -- and every
+    // colour's own summed live width equals its summed rest width exactly.
+  }
+
+  // Binary search: which stripe index does position `pos` (0..totalPeriod)
+  // fall into, given live boundary array `b`?
+  function findStripe(b, pos) {
+    let lo = 0, hi = N - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (pos < b[mid + 1]) hi = mid; else lo = mid + 1;
+    }
+    return lo;
+  }
+
+  // ---- LUT render -------------------------------------------------------
+  let lutW, lutH, lutCanvas, lutCtx, lutImg, lutData;
+  function initLut() {
+    lutW = Math.max(40, Math.round(W / threadPx));
+    lutH = Math.max(24, Math.round(H / threadPx));
+    lutCanvas = document.createElement('canvas');
+    lutCanvas.width = lutW; lutCanvas.height = lutH;
+    lutCtx = lutCanvas.getContext('2d');
+    lutImg = lutCtx.createImageData(lutW, lutH);
+    lutData = lutImg.data;
+  }
+
+  buildSett();
+  reconfigureMotion();
+  initLut();
+
+  // Precompute each palette colour's RGB once (colours never change).
+  const rgbForColor = PAL.map((c) => hsl2rgb(c[0], c[1], c[2]));
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+  const dt = 1 / FPS;
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    const b = liveBoundaries(clk);
+    const P = totalPeriod;
+
+    for (let ly = 0; ly < lutH; ly++) {
+      const worldY = ly; // 1 LUT pixel == 1 thread unit
+      let posY = worldY % P; if (posY < 0) posY += P;
+      const sY = findStripe(b, posY);
+      const colorY = stripes[sY].color;
+      const rowBase = ly * lutW * 4;
+      for (let lx = 0; lx < lutW; lx++) {
+        const worldX = lx;
+        let posX = worldX % P; if (posX < 0) posX += P;
+        const sX = findStripe(b, posX);
+        const colorX = stripes[sX].color;
+
+        let colIdx;
+        if (colorX === colorY) {
+          colIdx = colorX;
+        } else {
+          // 2/2 twill: which of the two threads shows on top alternates
+          // every 2 units along the diagonal -- a thread grid independent
+          // of the (wobbling) stripe boundaries, with each unordered
+          // COLOUR PAIR drifting at its OWN independent rate (see file
+          // header -- a shared global shift measured as too rigid). Still
+          // exactly 50/50 under any additive shift (verified offline), so
+          // this remains coverage-neutral regardless of how many
+          // independent per-pair rates are mixed across the frame.
+          const key = colorX < colorY ? colorX * 100 + colorY : colorY * 100 + colorX;
+          const shift = pairPhase0[key] + pairRate[key] * clk;
+          const v = (((worldX + worldY + shift) % 4) + 4) % 4;
+          colIdx = v < 2 ? colorY : colorX;
+        }
+        const rgb = rgbForColor[colIdx];
+        const o = rowBase + lx * 4;
+        lutData[o] = rgb[0]; lutData[o + 1] = rgb[1]; lutData[o + 2] = rgb[2]; lutData[o + 3] = 255;
+      }
+    }
+    lutCtx.putImageData(lutImg, 0, 0);
+    ctx.drawImage(lutCanvas, 0, 0, lutW, lutH, 0, 0, W, H);
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureMotion(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

@@ -6634,6 +6634,156 @@ a command already passed with `run_in_background: true`, and when a
 background task's output looks suspiciously stalled, check `ps aux` for a
 duplicate/orphaned process before assuming the current one is hung.
 
+## Tartan sett weave engine (`tartansett.html`) — 2026-10-05
+
+Daily creative-research routine. Category was "traditional textile/tiling/
+ornament tradition from a randomly chosen culture" -- picked as the
+least-recently-used among three tied-least-frequent categories (textile,
+natural structure, obscure math/crystal, all at 5 uses; architectural and
+featured-image at 6; Wikipedia at 8), per the `herringbone.html` precedent
+of varying categories rather than defaulting to a heavily-used one. A
+delegated open WebSearch, explicitly told to avoid anything structurally
+close to the five textile engines already shipped (Kente strip-weaving,
+twill/herringbone's single modular-shift grid, ikat's per-thread
+positional misalignment, taniko's static charted shapes, tablet weaving's
+per-unit rotation state), surfaced the **Scottish tartan sett**: a single
+1D sequence of coloured stripe widths, mirrored at a pivot WITHOUT
+doubling it (a true palindrome -- the real "threadcount" construction),
+applied IDENTICALLY to both the warp and weft of a 2/2 twill weave. Where
+the two axes' colours agree you get a solid block; where they differ, the
+twill interlace alternates which thread shows every 2 threads, producing
+a genuine optical colour blend (the "overcheck") -- why a tartan dyed
+with only 4-6 yarns reads as having many more colours than it does.
+Sources:
+[Scottish Register of Tartans, threadcount/sett definition](https://www.tartanregister.gov.uk/threadcount),
+[its mirroring help page](https://clan.com/help/tartan-designer-arrange-pattern/tartan-designer-tartan-mirroring),
+[a worked warp/weft colour-blend example](https://itn-web.it.liu.se/~stegu76/TNM084-2011/SL-tartan).
+Two other real candidates were researched and rejected as too structurally
+close to what's already shipped: macrame (knot/braid-crossing sequences,
+too close in spirit to the existing interlacing weaves) and Ghiordes vs.
+Senneh pile-rug knots (still "static motifs charted on a grid," taniko's
+own archetype).
+
+**What it is**: a genuinely different construction PRINCIPLE from every
+textile engine already in the pool: not opaque separate strips sewn side
+by side (`stripweave.html`'s Kente cloth), not a SINGLE grid with ONE
+binary over/under state from one continuous modular-shift formula
+(`herringbone.html` -- that engine has no colour-crossing logic at all,
+every cell is one fixed thread colour), not continuous per-thread
+POSITIONAL misalignment around one fixed motif (`ikatweave.html`), not
+static discrete shapes charted on a grid (`taniko.html`), not a per-unit
+ROTATION state driving foreshortening (`tabletweave.html`). Tartan's
+generative rule runs on TWO INDEPENDENT AXES from one shared palindromic
+sequence, and the rendered colour at a cell is a function of BOTH axes
+simultaneously (solid where they agree, twill-blended where they don't)
+-- a two-axis sequence-intersection + colour-interleave rule with no
+analogue among the five prior weave engines. Rendered via a small
+offscreen colour-LUT canvas (one LUT pixel per nominal thread width,
+7-11px on screen) scaled up with image smoothing OFF for a crisp, bold,
+blocky weave, the same efficient-small-grid-then-upscale technique this
+pool already uses for other per-cell-computed engines.
+
+**GEOMETRY verified OFFLINE before writing any rendering code** (the same
+discipline this pool's `quasicrystal.html`/`geodome.html`/`diagrid.html`
+already established): a standalone script confirmed the half-sett +
+mirror(half-sett minus its last element) construction is an exact
+palindrome of the expected length across 5 swept configs, and confirmed
+the 2/2 twill crossing rule (`floor(threadX+threadY) mod 4 < 2`) splits
+EXACTLY 50/50 between the two colours at every tested phase offset -- the
+diagonal interleave can never itself create a brightness trend, by
+construction, regardless of how far any phase shift has drifted.
+
+**Three real bugs, all found only by running `validateEngine()` across a
+seed battery, not by reasoning about the code:**
+
+1. **Seed 1 failed the brightness-trend check** (`projectedRise` 54.6 vs
+   the 50 threshold). The original unit-motion design (independent
+   per-boundary wobble with a GLOBAL mean subtraction across all N
+   boundaries) keeps the TOTAL sett period exactly constant, but that
+   alone does not stop width redistributing FROM a stripe of one colour
+   TO a stripe of a DIFFERENT colour -- a real, not aliased, luma shift,
+   since different colours carry different luma and a colour-area
+   redistribution is a genuine brightness change, the same underlying
+   mechanism `voronoimosaic.html`/`liesegang.html` already document for
+   a non-uniform area swing between differently-coloured regions. Fixed
+   by subtracting the mean WITHIN EACH COLOUR GROUP instead of globally:
+   for every colour, the sum of deltas across its own stripes is exactly
+   zero at every instant, so EVERY colour's own total on-screen width --
+   not just the grand total -- is invariant. Verified offline afterward
+   (not just assumed): colour-area error ~7e-15 (floating-point noise
+   only) across 7 swept configs including both few-colours/large-groups
+   and many-colours/many-singleton-groups cases, with worst-case live
+   stripe width still comfortably >50% of rest width at the amplitude
+   used. (A colour used by only one stripe in the sett has a singleton
+   group, whose delta is then always exactly zero -- that stripe simply
+   doesn't wobble, a safe degenerate case, not a bug.)
+2. **Seed 9 failed with "image lacks spatial structure"** (peak std 4.92,
+   an order of magnitude below every other tested seed's 20-40 range).
+   Independent per-stripe colour draws had, by ordinary chance, clumped
+   onto 1-2 of the palette's 5 colours, degenerating the whole canvas
+   toward near-solid. Fixed by cycling through a freshly-shuffled full
+   pass of the palette before repeating, instead of drawing each stripe's
+   colour fully independently -- guarantees every palette colour is used
+   at least once per full pass while keeping the order unpredictable.
+3. **A fix for weak `fastMotion` margins then broke the mandatory
+   unit-motion gate**, a new instance of this pool's established
+   "a fix for one gate can break another" lesson (`voronoimosaic.html`).
+   Boundary wobble alone left seeds 5/11/12 reading as too static
+   (`fastMotion` 1.97-2.98 against floors of 2.87-4.04). Adding a second
+   motion source -- the twill diagonal's crossing phase drifting via one
+   SHARED global rate -- fixed `fastMotion` comfortably everywhere, but
+   then made 3 of 6 re-tested seeds fail the unit-motion gate at only
+   38-39% non-rigid (need >=40%): colour-crossing regions cover most of
+   the canvas (any two differing adjacent stripes form one), so one
+   uniform diagonal shift across most of the frame turned out to be well
+   explained by a single rigid translation after all, "solid blocks are
+   untouched by it" notwithstanding -- they're the minority area. Fixed
+   by giving every unordered COLOUR PAIR its own independent drift
+   rate/phase instead of one shared global rate -- the same lever
+   `moire.html`'s counter-rotating lattices already proved effective for
+   an identical class of problem. Different crossing regions now drift at
+   different, sometimes opposite, rates, which no single rigid transform
+   can reproduce, while the exact 50/50 coverage-neutrality proof carries
+   over unchanged per pair (verified: still exactly 50/50 under any
+   additive phase shift, since the proof never depended on the shift
+   being the same everywhere).
+
+**Verified** (final design): `validateEngine()` **16/16** across seeds
+1-15 plus the CLI's actual default seed 12345 (see `geodome.html`'s
+write-up for why that seed matters), across three full batteries (first
+draft 4/6 on the initial chunk with the brightness/structure bugs, second
+draft 3/6 after the colour-group and shuffle fixes revealed the
+unit-motion regression, final design 16/16). Margins comfortable
+throughout: `avgSat` 78.9-91.0 (vs the 22 minimum), zero near-white
+pixels on every seed, `projectedRise` -62.8 to +27.7 (vs the 50
+threshold), `compositionDrift` 0.0202-0.0609 (vs the 0.015 minimum),
+`unitMotionNonRigidFrac` 0.73-1.0 (vs the 0.40 minimum, no thin-margin
+seeds remaining), `fastMotion` always comfortably above its per-frame
+floor, `avgMsPerFrame` 4.3-15.1ms giving `projectedHourRenderMin`
+6.3-21.7min -- among the cheapest engines in the whole pool to render
+(a small LUT plus one `drawImage` upscale per frame). Visual spot-checks
+across 2/25/50/75/95/105% of a 43.5s cycle at 3 seeds, actually rendering
+PNGs and looking at them, not just reading validator output: a vivid,
+bold, immediately-recognisable tartan plaid with clean solid colour
+blocks, crisp diagonal twill ribbing at every colour crossing, genuinely
+varying stripe widths between checkpoints, and no artifacts at the cycle
+boundary.
+
+**Novelty gate**: measured against all 60 existing engines (the committed
+fingerprint cache was badly stale, so the whole pool was fingerprinted
+fresh alongside the candidate, per this pool's established practice; the
+refreshed cache was not committed, per this routine's "touch only the new
+engine + log + CLAUDE.md" constraint, with the same `ENGINE_SUBJECTS`
+exception this pool's `tensegritychain.html` write-up already
+established). Nearest neighbour is `herringbone` at distance **0.8743**
+-- comfortably clear of the 0.60 threshold, well above the thin-margin
+territory (0.61-0.65) that warranted extra iteration for other engines'
+first drafts, and above this pool's own historical median pair distance.
+Unsurprising that the pool's other grid-based twill weave is the nearest
+match, but the margin confirms the two-axis colour-crossing structure
+reads as genuinely distinct from `herringbone.html`'s single-axis binary
+state.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
