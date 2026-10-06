@@ -1,9 +1,9 @@
 {
   "last3D": "tensegritychain",
-  "last2D": "frostgrowth",
+  "last2D": "geometric",
   "lastMandala": "arcrings",
   "last3DArchetype": "tensegritychain",
-  "last2DArchetype": "frostgrowth",
+  "last2DArchetype": "geometric",
   "last3DByArchetype": {
     "geodome": "geodome",
     "hoppercrystal": "hoppercrystal",
@@ -27,7 +27,8 @@
     "dendrite": "dendrite",
     "doylespiral": "doylespiral",
     "dragonfold": "dragonfold",
-    "frostgrowth": "frostgrowth"
+    "frostgrowth": "frostgrowth",
+    "geometric": "geometric"
   },
-  "updatedAt": "2026-10-05T18:13:46.590Z"
+  "updatedAt": "2026-10-06T15:49:55.620Z"
 }
