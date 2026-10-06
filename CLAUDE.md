@@ -6347,6 +6347,32 @@ updating `state/subscriber-updates.json` (or just pasting Studio numbers
 into a conversation) on any cadence they're comfortable with is what keeps
 this loop honest rather than guessing.
 
+**A likely root cause for the "reports success but never pushes" bug,
+found while fixing it — 2026-10-06.** `trig_01MzFMv1sC8AAo9UwZkKRNoB` (the
+original fresh-session-per-fire growth bot, which the prior entry's
+investigation found had fired at least 4 times without ever pushing) was
+replaced with a persistent-session design matching the engine-of-the-day
+trigger. On this redesigned bot's very first real firing, after doing a
+plain `git clone https://github.com/...` of this repo (the natural first
+step for a brand-new session with nothing checked out), `git push` failed
+outright: `access denied by the git proxy: ... is not in this session's
+authorized repository set`. The fix was calling the `add_repo` tool
+(`access: "push"`) and `register_repo_root` on the *existing* clone before
+retrying — after that, the identical `git push` succeeded immediately.
+**A session that clones a repo directly with git, rather than attaching it
+through the repo-management tool first, can commit locally with no error
+at all, and only discovers it can't push when it actually tries** — and if
+that failure is swallowed, retried silently, or the turn otherwise doesn't
+surface it loudly, a session could plausibly reach its own "done, report
+success" step having never gotten a commit onto `origin/main`, which
+matches the prior entry's symptom exactly (SUCCEEDED status, zero commits).
+Unconfirmed as *the* cause of the original bug (that session's actual
+transcript was never available to inspect), but a real, reproduced failure
+mode worth checking first in any future "reports success, nothing lands on
+main" investigation for a bot in this environment: **before trusting a
+push, confirm the repo was attached with push access** (`add_repo` with
+`access: "push"`), not just plain-cloned.
+
 ## Nested geodesic shell engine (`radiolarian.html`) — 2026-10-03
 
 Daily creative-research routine. Category was "a random featured image" --
