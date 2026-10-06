@@ -138,11 +138,40 @@ export function resolveConfig(cli = {}) {
     // shortWindow); an explicit value is an absolute offset in seconds.
     shortStart: pick(cli, 'shortStart', 'SHORT_START', '', (v) => String(v)),
     shortDuration: pick(cli, 'shortDuration', 'SHORT_DURATION', 15, num),
-    // short aspect ratio: 'fill' = scale-and-crop to vertical 9:16 (best for
-    // centered generative art); 'pad' = letterbox the source inside 9:16;
-    // 'none' = keep the source aspect (no crop). YouTube Shorts strongly
-    // prefer 9:16, so default is 'fill'.
-    shortFit: pick(cli, 'shortFit', 'SHORT_FIT', 'fill'),
+    // short aspect ratio: 'fill' = scale-and-crop to vertical 9:16; 'pad' =
+    // letterbox the source inside 9:16 (shows the whole frame); 'none' =
+    // keep the source aspect (no crop).
+    //
+    // Default changed to 'pad' on 2026-10-06 (owner screenshot: a Short cut
+    // with 'fill' showed only a few crossing beams of tensegritychain.html's
+    // full-width lattice, "doesn't show the whole beauty"). The 'fill'
+    // comment's old claim ("best for centered generative art") was asserted,
+    // never measured: every curated engine renders full-bleed across the
+    // whole 16:9 frame (the house style's own "bigger, fewer, clearer,
+    // fills the frame" rule, reinforced repeatedly in this file's engine
+    // write-ups -- tensegritychain.html's own entry explicitly sized itself
+    // to fill 16:9 rather than "occupying a thin vertical strip"), so
+    // 'fill''s scale-to-cover math keeps only `shortWidth/(shortHeight *
+    // 16/9)` =~31.6% of the source WIDTH (scale height 9:16->1920, which
+    // stretches width to ~3413px, then crop to 1080) -- the opposite of
+    // centered-and-whole, it's a tight zoom into one off-center slice
+    // whenever the subject isn't a small centred mandala. 'pad' keeps the
+    // entire composition visible, letterboxed, at the cost of the pattern
+    // itself occupying a shorter vertical band (~608 of 1920px here) with
+    // black bars above/below -- a straightforward tradeoff, not a free
+    // win, but it directly fixes the "whole beauty" complaint and the old
+    // default actively worked against the house style's own "fills the
+    // frame" composition choice for 15s of the one piece of footage new
+    // viewers land on first. A blurred-background fill (video in the
+    // centre, a blurred zoomed copy behind it, no black bars) was
+    // considered and rejected for now: it needs an ffmpeg split+gblur
+    // filter graph feeding the same `-c:v libx264` encode this project's
+    // own 2026-09-14 bloom-filter writeup documents corrupting output with
+    // a reproducible colour tint for an unidentified reason -- not worth
+    // the risk to re-attempt without the dedicated isolated verification
+    // that investigation called for. SHORT_FIT=fill restores the old
+    // default if preferred.
+    shortFit: pick(cli, 'shortFit', 'SHORT_FIT', 'pad'),
     shortWidth: pick(cli, 'shortWidth', 'SHORT_WIDTH', 1080, num),
     shortHeight: pick(cli, 'shortHeight', 'SHORT_HEIGHT', 1920, num),
 

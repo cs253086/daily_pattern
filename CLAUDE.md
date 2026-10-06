@@ -6784,6 +6784,62 @@ match, but the margin confirms the two-axis colour-crossing structure
 reads as genuinely distinct from `herringbone.html`'s single-axis binary
 state.
 
+## Short aspect-ratio fix: 'fill' default was cropping away most of every Short — 2026-10-06
+
+User, with a screenshot of a `tensegritychain.html` Short: "short video only
+shows parts of the pattern video like this . so, it doesnt show the whole
+beauty." The screenshot showed only a few crossing beams filling the frame
+-- not the recognisable lattice the long video and thumbnail show.
+
+**Root cause, confirmed by the actual arithmetic, not assumed.**
+`src/render.js`'s `shortFit` default was `'fill'`: scale-to-cover the
+1920x1080 (16:9) source onto a 1080x1920 (9:16) target, then centre-crop.
+Scaling by height (1080 -> 1920) stretches width to ~3413px; cropping that
+to the 1080px target keeps only `shortWidth / (shortHeight * 16/9)` ≈
+**31.6% of the source's width**. The old code comment justifying `'fill'`
+("best for centered generative art") was asserted, never measured --
+every curated engine (including `tensegritychain.html` itself, whose own
+write-up above explicitly sized it to fill the 16:9 frame rather than
+"occupying a thin vertical strip") renders full-bleed across the whole
+frame per the house style's own "fills the frame" rule, so a tight
+31.6%-width crop is the opposite of showing the composition -- it zooms
+into one arbitrary off-centre slice.
+
+**Fix**: changed `shortFit`'s default from `'fill'` to `'pad'`
+(`SHORT_FIT=fill` restores the old behaviour) in `resolveConfig()`. `'pad'`
+scale-to-fits the whole 16:9 frame inside the 9:16 target and letterboxes
+with black bars above/below -- the entire composition stays visible, at
+the cost of the pattern occupying a shorter vertical band (~608 of
+1920px) instead of the full height. A straightforward tradeoff, not a
+free win, but it directly answers "doesn't show the whole beauty" and
+removes a default that was actively working against this project's own
+full-bleed composition rule for the one piece of footage (a 15s Short)
+most new viewers see first.
+
+**A blurred-background fill (video centred, a blurred zoomed copy behind
+it, no black bars) was considered and rejected.** It needs an ffmpeg
+`split`+`gblur` filter graph feeding the same `-c:v libx264` encode this
+project's own 2026-09-14 bloom-filter investigation (see "Research: what
+actually makes pattern/screensaver videos attractive" above) already
+found corrupts output with a reproducible, root-cause-unidentified purple
+colour tint across extensive bisection -- not worth re-attempting without
+the dedicated isolated verification that investigation called for and
+never completed.
+
+**Verified end to end with a real ffmpeg (installed in this sandbox for
+this), not just read from the code**: ran the real production render path
+on the exact engine from the complaint (`DRY_RUN=1 DURATION=20
+SCENE_SEC=0 ENGINE=engines/manual/tensegritychain.html SEED=20261006 node
+src/index.js`), confirmed the job log line `fit=pad`, extracted real
+frames from the resulting `short.mp4` and looked at them: the full
+lattice -- every strut, every colour band -- is visible letterboxed in the
+frame, not cropped. Re-ran the identical render with `SHORT_FIT=fill` for
+a direct side-by-side and confirmed the OLD default reproduces the exact
+reported bug: a tight zoom showing only a handful of crossing beams, no
+sense of the whole structure. `state/*.json` rotation-cursor drift from
+both dry runs was reverted per this project's standing convention before
+committing.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
