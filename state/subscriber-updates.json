@@ -10,5 +10,11 @@
     "subscribers": null,
     "source": "owner-reported",
     "notes": "Owner's Studio screenshot for Aug 31 - Sep 27 window: 5.2K views, 181.7 watch hours, +4 subscribers gained IN THAT WINDOW (not a running total). Approximate running total by this date: roughly 18 (14 baseline + 4), but not confirmed directly -- do not treat as exact."
+  },
+  {
+    "date": "2026-10-06",
+    "subscribers": 16,
+    "source": "owner-reported",
+    "notes": "Owner, verbatim: \"the number of subscription stays 16. so...\" -- a real confirmed count, and a complaint that it's stagnant (barely above the 14 baseline from 2026-09-25, 11 days earlier). Also the first direct evidence that the daily subscriber-growth-research trigger (trig_01MzFMv1sC8AAo9UwZkKRNoB, created 2026-10-02) has produced no effect: it has fired at least 4 times since creation but never pushed a growth-log.json entry or a code change -- see the same date's growth-log.json entry for the investigation."
   }
 ]
