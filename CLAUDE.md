@@ -6840,6 +6840,179 @@ sense of the whole structure. `state/*.json` rotation-cursor drift from
 both dry runs was reverted per this project's standing convention before
 committing.
 
+## Foam coarsening engine (`foamcoarsen.html`) — 2026-10-06
+
+Daily creative-research routine. Category was "random natural structure" --
+the pool's most under-used category per a tally of all prior log entries. A
+delegated open WebSearch, explicitly scoped to exclude every already-
+shipped structural technique in the pool, surfaced **2D foam coarsening**:
+the von Neumann-Mullins law governing how a real 2D soap froth ages at
+mechanical equilibrium -- a cell's own rate of area change depends ONLY on
+its number of sides n (n<6 shrinks, n>6 grows, n=6 neutral), and as cells
+shrink/grow the network's TOPOLOGY itself keeps rearranging through two
+named discrete events: a T1 transition (a shrinking edge "flips",
+swapping which cells are neighbours) and a T2 transition (a cell whose
+area hits zero vanishes, its neighbours absorbing the freed area). Real,
+still-studied physics. Sources:
+[arXiv: Scaling state of dry 2D froths](https://arxiv.org/pdf/cond-mat/0502287),
+[par.nsf.gov: foam-coarsening PRE preprint](https://par.nsf.gov/servlets/purl/10562600),
+[RSC Soft Matter, open access](https://pubs.rsc.org/en/content/articlehtml/2024/sm/d4sm00555d).
+
+**A genuinely different construction PRINCIPLE from every partition-type
+engine already in the pool**: `columnarbasalt.html`'s Voronoi,
+`quasicrystal.html`'s substitution tiling, and `widmanstatten.html`'s
+overlaid bands all compute a tessellation ONCE and only transform it
+rigidly/continuously afterward -- the TOPOLOGY (how many sides each cell
+has, who is adjacent to whom) is frozen at construction time. Here the
+topology itself is the thing that evolves, through genuinely discrete
+rewiring events.
+
+**Implemented without hand-coded T1 edge-flip graph surgery** -- a large,
+bug-prone piece of computational geometry (correctly identifying the 4
+surrounding faces of a collapsing edge in a plain vertex/edge/face
+structure, and reassigning them without corrupting the mesh, carries real
+risk of a silent error that only manifests thousands of frames later).
+Instead: a POWER (Laguerre) VORONOI diagram recomputed from scratch every
+single frame from a live weighted seed set, reusing `voronoimosaic.html`'s
+own proven half-plane-intersection clipping code verbatim, just with each
+seed carrying a scalar WEIGHT in the bisector constant. This is a
+well-established, legitimate materials-science grain-growth/foam
+simulation technique (a "radical"/Laguerre tessellation), not an ad hoc
+shortcut -- T1-like neighbour swaps fall out of the SAME proven clipping
+algorithm recomputing from a moved/reweighted seed set each frame, with
+zero explicit edge-flip bookkeeping anywhere in the file. T2 (cell death)
+and its reverse (division/"birth") are each implicit in the live seed-set
+recompute too: killing a cell is just removing its seed (neighbours'
+bisectors absorb the freed area automatically); dividing an oversized cell
+is adding a new seed with a weight modestly BELOW the parent's own live
+weight (not an absolute constant -- an early design used a fixed very-low
+birth weight and the new seed was instantly re-eclipsed by its
+still-larger parent, a runaway birth-then-immediate-death loop firing on
+nearly every frame).
+
+**VERIFIED OFFLINE before writing any rendering code**, the same
+discipline this pool's `quasicrystal.html`/`geodome.html`/
+`spaceframe.html` already established: a standalone script confirmed (a)
+the power diagram always tiles its bounding box exactly (floating-point
+noise only, ~1e-16 relative error) for any weight configuration; (b) a
+seed's own weight monotonically and substantially controls its cell's
+relative area; (c) a tuned weight-update rule plus death/birth bookkeeping
+stays stable (no NaN, no runaway cell count, no permanently-orphaned
+zero-area seeds) across a simulated 900-second run -- 20x longer than
+`validate.js`'s own 300s test window.
+
+**The mandatory novelty gate FAILED outright on the first design** (one
+full-canvas power diagram): nearest neighbour `voronoimosaic` at distance
+**0.3958**, well below the 0.60 minimum. A per-feature z-score diagnostic
+(the same technique `phyllotaxis.html`/`hilbertweave.html`'s own novelty
+iterations already used) showed exactly why: `fingerprint.js`'s
+`coverage`/`blobCount`/`blobSizeCV`/`largestBlobFrac` features were
+EXACTLY identical (diff=0.00) between the two engines -- both are
+full-bleed tessellations with no black background, the IDENTICAL failure
+signature `reactiondiffusion.html`'s own write-up documents against
+widmanstatten/voronoimosaic/stripweave (a colour-blind, composition-based
+descriptor can't see past "fully lit, no black" regardless of how
+different the underlying construction technique is). Fixed by applying
+that engine's own proven fix directly: rendering the same underlying
+simulation through several independent circular "foam patch" windows (a
+near-regular jittered grid, the `dendrite.html`/`hilbertweave.html`/
+`phyllotaxis.html` multi-instance technique) with TRUE BLACK negative
+space between them, instead of filling the whole canvas -- the underlying
+power-Voronoi/von-Neumann mechanism is completely unchanged, only what
+gets rendered. Window layout is fixed once per video; only each window's
+own foam STATE resets at a hard `cycleSec` boundary.
+
+**The windowed redesign then needed substantial additional iteration,
+found only by running `validateEngine()` across seed batches and by
+rendering and looking, not by reasoning about the code:**
+
+1. **All tested seeds immediately failed `fastMotion`/`compositionDrift`**
+   once windowed: each window's much smaller lit area meant the ORIGINAL
+   full-canvas motion amplitudes read as far less change relative to the
+   frame. Fixed by substantially raising per-seed orbit amplitude/rate and
+   the von Neumann growth-rate constant (`rateK`).
+2. **`compositionDrift` stayed thin even after that**, because the von
+   Neumann rule alone barely moves `coverage` -- each window always fully
+   tiles its own FIXED box regardless of current cell count, so cell-count
+   churn alone doesn't swing the frame's lit-area fraction much. Fixed by
+   adding a bounded radius-BREATHING pulse per window (the visible CLIP
+   radius oscillates; the underlying simulation box/area stays fixed).
+   Critically, phases are assigned by WINDOW INDEX, evenly spaced across a
+   full 2*pi, sharing ONE rate (not independently randomised per window) --
+   **verified offline** that this makes the SUMMED lit area across all
+   windows EXACTLY constant at every single instant (not just on average)
+   by discrete-Fourier orthogonality, for windowCount >= 3 (floating-point
+   noise only, ~1e-13, across a dense sweep of simulated time; N=2 does
+   NOT satisfy this identity, measured variance ~0.05 there -- the engine's
+   window count is always >= 4 by construction).
+3. **Even with exactly-zero-sum breathing AREA, 2 of 5 initially-tested
+   seeds still showed a REAL brightness-trend rise** (+73.5/+68.8 luma
+   projected) -- not an aliasing artefact. Isolated by disabling breathing
+   entirely (confirmed the coarsening dynamics alone were brightness-clean)
+   then re-enabling it, proving breathing itself was coupling to luma
+   through a side channel the area-exactness proof doesn't cover: cells
+   seeded only within an inner margin (0.82r of the window radius) left an
+   outer annulus (0.82r to the box edge) covered only by the OUTERMOST
+   cells' Voronoi regions, which are systematically larger/sparser than
+   interior cells (bounded by the box edge on one side instead of fully
+   surrounded by neighbours) -- so revealing more of that annulus (breathing
+   "open") had different average edge-ink density than showing less of it,
+   a real coverage-exact-but-luma-NOT-exact coupling. Fixed by widening
+   seed placement to span nearly the whole box (margin 0.82r -> 0.95r),
+   directly confirmed by re-test to eliminate the coupling.
+4. **A separate, independent whiteout source**: total stroke-ink length
+   scales directly with live cell count (more, smaller cells = more total
+   dark edge length = lower average frame luma), and cell count genuinely
+   swings over each coarsening cycle -- a real per-cycle brightness effect
+   a few unlucky seeds' specific timing caught as a false "trend" in
+   `validate.js`'s 8 fixed sample times. Tuning the coarsening RATE to fix
+   one seed measurably broke a DIFFERENT seed (the swing's shape, not just
+   its rate, differs per seed) -- fixed instead by shrinking the swing's
+   magnitude at the source: lowered stroke alpha from 0.6 to 0.38.
+5. **A real visual-quality defect, not caught by any numeric gate** (per
+   the standing "look at it" visual-requirements rule): two adjacent
+   windows were seen touching/overlapping in a rendered frame. The
+   original radius/jitter combination (`r = 0.49x` grid spacing, jitter
+   `+-0.08x`) allowed up to 1.14x the spacing in the worst case (both
+   windows jittered maximally toward each other) -- breaking the "true
+   black negative space between windows" design this engine exists for.
+   Fixed by tightening both (`r` to 0.42x, jitter to `+-0.05x`), verified
+   to leave a real 6% worst-case safety margin (`2*r + 2*jitterMax =
+   0.94x` the grid spacing).
+
+**Verified** (final design): `validateEngine()` **16/16** across seeds
+1-15 plus the CLI's actual default seed 12345 (see `geodome.html`'s
+write-up for why that seed matters). Margins comfortable throughout:
+`avgSat` 75.6-87.3 (vs the 22 minimum), zero near-white pixels on every
+seed, `projectedRise` -27.1 to +33.8 (vs the 50 threshold, no seed left
+near the line after the alpha/margin fixes), `compositionDrift`
+0.0162-0.0378 (vs the 0.015 minimum), `unitMotionNonRigidFrac` exactly 1.0
+on every seed (independent per-window cell boundaries and breathing are
+never explained by one rigid transform), `fastMotion` always above its
+per-frame floor, `avgMsPerFrame` ~12-17ms giving `projectedHourRenderMin`
+~17-25min (well inside the CI budget). Visual spot-checks across multiple
+cycle fractions and seeds, actually rendering PNGs and looking at them,
+not just reading validator output: a vivid, bold, immediately-legible
+field of independent stained-glass "foam patch" windows with clean black
+gaps between them (confirmed no overlap after the spacing fix), genuine
+visible coarsening (fewer, bigger cells) across a cycle, and distinct
+palette combinations per seed.
+
+**Novelty gate** (final design): measured against all 61 existing engines
+(the committed fingerprint cache was badly stale, so the whole pool was
+fingerprinted fresh alongside the candidate twice -- once for the failed
+first design, once for the final windowed one -- per this pool's
+established practice; the refreshed cache was not committed, per this
+routine's "touch only the new engine + log + CLAUDE.md" constraint, with
+the same `ENGINE_SUBJECTS` exception this pool's `tensegritychain.html`
+write-up already established). Nearest neighbour is `reactiondiffusion` at
+distance **0.8196** -- comfortably clear of the 0.60 threshold and above
+this pool's own historical median pair distance, not a thin-margin case;
+unsurprising that the pool's other multi-window "petri dish" engine is the
+nearest match, but the margin confirms the discrete cellular-topology
+mechanism reads as structurally distinct from `reactiondiffusion.html`'s
+continuous PDE field.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

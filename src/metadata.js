@@ -43,6 +43,7 @@ const ENGINE_SUBJECTS = {
   diagrid: 'Diagrid Tower Lattice',
   doylespiral: 'Doyle Spiral Circles',
   dragonfold: 'Dragon Curve Fractal',
+  foamcoarsen: 'Foam Coarsening Cells',
   frostgrowth: 'Frost Crystal Growth',
   geodome: 'Geodesic Dome',
   geometric: 'Sacred Geometry Mandala',

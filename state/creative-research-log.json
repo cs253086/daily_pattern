@@ -663,5 +663,34 @@
     ],
     "nearestNeighbour": "herringbone",
     "nearestDistance": 0.8743
+  },
+  {
+    "date": "2026-10-06",
+    "category": "random natural structure",
+    "inspirationSource": "Delegated an open WebSearch for a genuinely new natural-structure construction principle, explicitly scoped to exclude every already-shipped structural technique in the pool (branching growth, overlaid band families, receding staircases, diffusion-limited aggregation, Voronoi partitions, nested geodesic shells, wing-scale imbrication, hexagonal spike lattices, Liesegang rings, moire interference, Penrose substitution, schlieren vortex superposition). Top recommendation: 2D FOAM COARSENING -- the von Neumann-Mullins law (dA/dt depends only on side count n: n<6 shrinks, n>6 grows, n=6 neutral) plus T1 (edge-flip neighbour-swap) and T2 (cell-death) topological transitions that govern how a real 2D soap froth ages toward equilibrium. Sources: arxiv.org/pdf/cond-mat/0502287 (scaling state of dry 2D froths), par.nsf.gov/servlets/purl/10562600 (foam-coarsening PRE preprint), pubs.rsc.org/en/content/articlehtml/2024/sm/d4sm00555d (RSC Soft Matter, open access).",
+    "idea": "A genuinely different construction PRINCIPLE from every partition-type engine already in the pool (columnarbasalt's Voronoi, quasicrystal's substitution tiling, widmanstatten's overlaid bands all compute a tessellation ONCE and only transform it rigidly afterward) -- here the cell TOPOLOGY itself (how many sides each cell has, who is adjacent to whom) keeps evolving via genuinely discrete rewiring events, not a rigid transform. Implemented without hand-coded T1 edge-flip graph surgery (a large, bug-prone piece of computational geometry) by using a POWER (Laguerre) VORONOI diagram recomputed from scratch every frame from a live weighted seed set, reusing voronoimosaic.html's own proven half-plane-intersection clipping code with a per-seed scalar weight added to the bisector constant -- a well-established materials-science grain-growth technique, not an ad hoc shortcut. T1-like neighbour swaps fall out of the clipping algorithm automatically; T2 death/birth are just seed removal/addition, with no stitching code. Cells coloured by current side count, bucketed onto the day's 5-colour palette with luma-equalised lightness.",
+    "engineName": "foamcoarsen",
+    "outcome": "shipped",
+    "reason": "First design (one full-canvas power diagram, structurally identical in composition to voronoimosaic.html's own full-bleed mosaic) FAILED the mandatory novelty gate outright: nearest neighbour voronoimosaic at distance 0.3958, well below the 0.60 minimum. A per-feature z-score diagnostic showed coverage/blobCount/blobSizeCV/largestBlobFrac were EXACTLY identical (diff=0.00) between the two -- both are full-bleed tessellations with no black background, the identical failure signature reactiondiffusion.html's own write-up documents against widmanstatten/voronoimosaic/stripweave. Fixed by applying that engine's own proven fix: rendering through several independent circular 'foam patch' windows (a near-regular jittered grid, sized so adjacent windows' discs can never touch) with TRUE BLACK negative space between them, instead of filling the whole canvas -- the underlying power-Voronoi/von-Neumann mechanism is unchanged. Needed substantial follow-up tuning once windowed: (1) each window's much smaller lit area made fastMotion/compositionDrift fail on all tested seeds at the original full-canvas motion amplitudes -- fixed by raising orbit amplitude/rate and the coarsening rate constant. (2) compositionDrift stayed thin because the von Neumann rule alone barely moves 'coverage' (each window always fully tiles its own fixed box regardless of cell count) -- fixed by adding a bounded radius-breathing pulse per window, with phases assigned by WINDOW INDEX (evenly spaced across a full 2*pi, not independently randomised) and a SHARED rate, verified offline to make the summed lit area across all windows EXACTLY constant at every instant (not just on average) by discrete-Fourier orthogonality for windowCount>=3. (3) Even with exact area zero-sum, 2 seeds still failed with a REAL brightness-trend rise -- isolated by disabling breathing entirely (confirmed the coarsening dynamics alone were clean) then re-enabling it, proving breathing itself was coupling to luma through a side channel: cells near a window's box edge (outside the original seed-placement margin) were systematically larger/sparser than central cells, so revealing more of the periphery (breathing open) had different average edge-ink density than showing less of it. Fixed by widening seed placement to span nearly the whole box (margin 0.82r -> 0.95r), confirmed by direct re-test to eliminate the coupling. (4) A separate, real whiteout source (total stroke-ink length scales directly with live cell count, which genuinely swings over each coarsening cycle) was reduced at the source by lowering stroke alpha (0.6 -> 0.38) rather than chasing it via the coarsening rate, which measurably helped one seed while breaking another. (5) A visual-quality bug (not caught by validate.js) found by rendering and looking: two adjacent windows were seen touching/overlapping in a rendered frame -- the original radius/jitter combination allowed up to 1.14x the grid spacing in the worst case; fixed by tightening both (r 0.49->0.42, jitter +-0.08->+-0.05 of cell size) for a verified 6% worst-case safety margin. Final design: validateEngine() 16/16 across seeds 1-15 plus the CLI default seed 12345. Margins: avgSat 75.6-87.3 (vs the 22 minimum), zero near-white pixels, projectedRise -27.1 to +33.8 (vs the 50 threshold), compositionDrift 0.0162-0.0378 (vs the 0.015 minimum), unitMotionNonRigidFrac exactly 1.0 on every seed, fastMotion always above its per-frame floor, avgMsPerFrame ~12-17ms giving projectedHourRenderMin ~17-25min (well inside the CI budget). Visual spot-checks across multiple cycle fractions and seeds, actually rendering PNGs and looking at them: vivid, bold, immediately-legible stained-glass foam patches with clean black gaps between windows, genuine visible coarsening (fewer/bigger cells) across a cycle, and no window overlap.",
+    "seedsVerified": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      12345
+    ],
+    "nearestNeighbour": "reactiondiffusion",
+    "nearestDistance": 0.8196
   }
 ]
