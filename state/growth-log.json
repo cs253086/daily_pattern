@@ -55,5 +55,16 @@
     "outcome": "skipped",
     "goalReached": false,
     "note": "This entry itself, successfully pushed to origin/main, is the direct test of whether the persistent-session redesign actually fixes the prior 'reports success but never pushes' infra bug documented in the entry above. If a human is reading this from a future firing and this entry is NOT the newest thing on origin/main for its date, the fix did not hold and needs a different approach (e.g. direct log inspection of this session rather than inferring from git history alone)."
+  },
+  {
+    "date": "2026-10-07",
+    "subscribersKnown": 16,
+    "goal": 500,
+    "change": null,
+    "filesChanged": [],
+    "rationale": "Second real firing of the persistent-session growth bot. Confirmed yesterday's commits (6e4337a and its parent) are present on origin/main -- the push-access fix held, so the prior infra bug is resolved for this design. No new subscriber-count data since yesterday (state/subscriber-updates.json still dated 2026-10-06, only 1 day old, not stale). Did not repeat yesterday's full WebSearch research round: a systematic pass was already done less than 24 hours ago (see the 2026-10-06 entry immediately above), and this routine's own instructions say research should be periodic, not every firing, specifically to avoid this kind of redundant churn. Instead checked one concrete, previously-identified recurring gap directly against the current repo state: whether any non-auto-* curated engine added by the (separate) engine-of-the-day bot is missing an `ENGINE_SUBJECTS` entry in src/metadata.js (the exact gap the 2026-09-27 entry documents causing generic 'Generative Geometry' titles for 15 engines at the time). Ran a direct comparison of engines/manual/*.html (excluding auto-* Gemini-promoted files, which intentionally fall back to a generic subject by design) against ENGINE_SUBJECTS's keys: 53 curated engine files, 53 ENGINE_SUBJECTS keys, zero missing. That gap is fully closed as of this check -- the engine-research bot has been adding the entry in the same commit as each new engine, as CLAUDE.md asks it to. No other new, well-evidenced, in-scope lever surfaced without redoing yesterday's research from scratch, which the situation (one day elapsed, no new data, no new owner input) doesn't justify. Skipping is the correct call here, not a failure to look.",
+    "verified": "git fetch origin main && git reset --hard origin/main confirmed clean sync, HEAD at 6e4337a (yesterday's last push) before this entry; read state/subscriber-updates.json (latest still 16, 2026-10-06) and this whole growth-log.json; ran a direct Node script comparing `fs.readdirSync('engines/manual')` (non-auto-* names) against ENGINE_SUBJECTS's parsed keys in src/metadata.js -- 53/53 matched, zero gaps.",
+    "outcome": "skipped",
+    "goalReached": false
   }
 ]
