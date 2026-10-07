@@ -7039,6 +7039,152 @@ nearest match, but the margin confirms the discrete cellular-topology
 mechanism reads as structurally distinct from `reactiondiffusion.html`'s
 continuous PDE field.
 
+## Chaotic strange-attractor engine (`strangeattractor.html`) — 2026-10-07
+
+Daily creative-research routine. Category was "random Wikipedia article" --
+the only category not used in the preceding 5 days' rotation (schlieren/
+obscure-math, radiolarian/featured-image, diagrid/architectural, tartansett/
+textile, foamcoarsen/natural-structure -- a clean round-robin through 5 of
+the 6 categories). Since Wikipedia is blocked in this sandbox, used the
+established fallback: a delegated open WebSearch, explicitly scoped to
+exclude every already-shipped construction technique in the pool (listed in
+full in the prompt -- substitution tilings, discrete automata, wave fields,
+sieves, golden-angle packing, branching/DLA growth, L-system paths, Voronoi/
+foam partitions, overlaid bands, all five weave mechanisms, circle packing,
+reaction-diffusion, orb-web, wing-scale imbrication, Truchet tiles, the two
+physics engines, and every real-WebGL architectural/lattice composition).
+Top recommendation: the **Peter de Jong attractor** -- a 2D chaotic
+dynamical system, `x' = sin(a*y) - cos(b*x)`, `y' = sin(c*x) - cos(d*y)`,
+rendered as a density-histogram accumulation of a long iterated orbit (the
+same "fractal flame" technique used for chaotic-attractor art). Sources:
+[Wolfram Demonstrations](https://demonstrations.wolfram.com/PeterDeJongAttractors/),
+[Hetrick, UCSB thesis](https://www.mat.ucsb.edu/Masters/Michael_Hetrick_DrawJong2.pdf),
+[Wikipedia: List of chaotic maps](https://en.wikipedia.org/wiki/List_of_chaotic_maps)
+(search snippets only -- Wikipedia is blocked in this sandbox).
+
+**A genuinely different construction PRINCIPLE from every other engine in
+the pool**: iterate a deterministic nonlinear feedback map and histogram
+where it lands, rather than a substitution/subdivision rule
+(`quasicrystal.html`/`voderberg.html`), a discrete local-rule automaton
+(`automaton.html`), a wave field built from SUPERPOSED sinusoids sampled on
+a lattice (`chladni.html`/`phasespikes.html`/`moire.html`/`schlieren.html`),
+an arithmetic sieve (`primespiral.html`), golden-angle packing
+(`phyllotaxis.html`), deterministic recursive branching (`dendrite.html`),
+or stochastic random-walk accretion (`frostgrowth.html`'s DLA -- the
+closest relative, but DLA is stochastic while this map has zero randomness
+in its own dynamics, only in the seed-chosen starting parameters; same
+seed always gives the identical attractor).
+
+**Boundedness is a mathematical guarantee, confirmed not assumed**: `x'`
+and `y'` are each a difference of two `[-1,1]`-bounded trig terms, so
+`|x|,|y| <= 2` for ANY real `(a,b,c,d)` -- verified directly (worst `|x|`/
+`|y|` across 200 wildly out-of-range trial parameters in `[-10,10]` was
+still exactly 2.0). So drifting `(a,b,c,d)` over time carries zero
+divergence risk. The real risk is DEGENERATION to a trivial, low-entropy
+orbit (a fixed point/short cycle, collapsing the rendered density to a
+single bright dot) -- investigated at length OFFLINE before writing any
+rendering code, the same discipline this pool's `quasicrystal.html`/
+`geodome.html`/`spaceframe.html` already established for a construction
+that could still "look plausible" even if subtly wrong:
+1. A 1D per-parameter sensitivity sweep around several published "pretty"
+   de Jong presets found most have narrow collapse cliffs nearby; preset
+   `(a,b,c,d) = (-2.0,-2.0,-1.2,2.0)` was unusually robust across its own
+   full tested range.
+2. Even so, independently-drifting all 4 parameters (or just a,b) with
+   random per-seed phases still hit rare collapse pockets across a stress
+   test of dozens of random phase/rate seeds -- de Jong attractor
+   stability has a FRACTAL boundary in parameter space, so "small enough
+   amplitude" is not a safe general argument on its own.
+3. Fixed by using a FIXED (not per-seed-random) relative phase/amplitude
+   structure instead of independent per-parameter drift:
+   `a(theta) = -2.0 + 0.10*sin(theta)`, `b(theta) = -2.0 +
+   0.10*sin(theta+pi/2)`, `c,d` held exactly constant -- verified safe
+   across the ENTIRE closed theta loop by dense (2880-point) offline
+   sampling (visited-cell fraction stable at 0.46-0.54, worst single-bin
+   share 0.45% of all samples, everywhere along the loop). Because the
+   full loop is pre-verified safe at every phase, ANY starting offset and
+   ANY traversal rate (including sign reversal) stays safe by
+   construction -- only the loop's fixed shape is load-bearing, never the
+   timing of how it's walked.
+
+**Rendered as a density histogram, not drawn shapes**: every frame reruns
+the iteration FRESH from a fixed start point with that frame's current
+`(a,b)` -- no cross-frame accumulation at all, whiteout-proof by
+construction, the same "recompute fresh every frame" pattern
+`chladni.html`/`phasespikes.html`/`moire.html` already established.
+Lit-cell AREA is held exactly constant every frame via percentile
+rank-selection (the `TARGET_FRAC` technique `chladni.html`/
+`hilbertweave.html` already proved safe). Colour is assigned by each lit
+cell's FIXED spatial angle rank (computed once over the whole grid, not by
+density), giving a smooth rainbow-pinwheel gradient instead of a speckled,
+noisy one -- an early design coloured by per-frame DENSITY rank instead,
+which looked like static/TV noise since adjacent pixels with similar but
+not identical density could land at very different ranks.
+
+**A FIXED (not animated, not seed-random) one-time viewing rotation was
+chosen by rendering the raw square density map at several candidate
+angles and LOOKING at them**, per the standing visual-requirements rule:
+this exact preset's attractor is a "comma/nautilus" shape with a genuine
+negative-space notch (confirmed real, not a bug, by inspecting the raw
+un-stretched square density map) that wastes a large wedge of a 16:9
+frame at the untouched default orientation. `ROT = 2.5` radians reorients
+the shape to reach all four edges of a landscape frame -- verified to
+hold up across the whole theta range (spot-checked at theta =
+0, 1, 2, 4, 5.5), not just one snapshot.
+
+**One real bug found only by running `validateEngine()` across a seed
+batch, not by reasoning about the code**: the first design's
+`validateEngine()` battery (seeds 1-8) passed 7/8, with seed 4 showing a
+real brightness-trend rise of +57.8 luma, just over the 50 threshold.
+Root-caused to a two-draw "offset halo" glow technique (a slightly
+larger, low-alpha copy drawn under the main image, meant as a cheap
+two-pass glow): since the halo was only visible in the thin FRINGE where
+the enlarged copy extends past the core shape's exact boundary, its
+contribution scaled with the lit region's PERIMETER, not its AREA -- and
+perimeter (how scattered vs. compact the density pattern is) genuinely
+varies across the theta drift cycle even though lit-cell COUNT is held
+exactly constant by the percentile rank-select. A perimeter-dependent
+effect is not coverage-neutral by the same invariant this pool relies on
+everywhere else. Fixed by removing the offset-halo pass entirely -- a
+single smoothed upscale of the small density grid already reads as soft/
+glowy from the bilinear interpolation alone, confirmed by rendering and
+looking (no visual regression). Also tightened `TARGET_FRAC` from 0.44 to
+0.38 for a larger safety margin below the offline-verified worst-case
+visited-cell fraction (~0.46), since the original ~2-percentage-point
+margin was thinner than ideal for the `nLit == TARGET_CELLS` invariant to
+reliably hold.
+
+**Verified** (final design): `validateEngine()` **16/16** across seeds
+1-15 plus the CLI's actual default seed 12345 (see `geodome.html`'s
+write-up for why that seed matters), confirmed twice -- once before and
+once after the halo-removal fix (the previously-failing seed 4 improved
+from +57.8 to +38.8). Margins comfortable throughout: `avgSat` 75.2-95.2
+(vs the 22 minimum), zero near-white pixels on every seed, `projectedRise`
+-20.9 to +38.8 (vs the 50 threshold, no seed left near the line),
+`compositionDrift` 0.025-0.052 (vs the 0.015 minimum), `unitMotionNonRigidFrac`
+exactly **1.0 on every single seed** (the attractor's own continuous
+reshaping under theta drift is never a rigid rotation/translation, so no
+choreography layer was needed at all -- predicted before ever running
+`validateEngine()`, then confirmed), `fastMotion` always comfortably above
+its per-frame floor, `avgMsPerFrame` 39.5-52.4ms giving
+`projectedHourRenderMin` 56.8-75.4min (comfortably inside the CI budget).
+Visual spot-checks across 2/25/50/75/95/105% of a 43.5s cycle at multiple
+seeds, actually rendering PNGs and looking at them: a vivid, bold,
+immediately-recognisable chaotic-attractor filament structure with a
+smooth rainbow angular colour gradient, no artifacts at the cycle-boundary
+reconfigure, and genuinely distinct colour-wheel orientations/spreads
+across seeds (one seed showed a bold 3-lobe pinwheel contrast, another a
+magenta/green/blue palette, another a smooth continuous sweep).
+
+**Novelty gate**: measured against 61 of the pool's 62 existing engines
+(`reactiondiffusion.html` timed out during fingerprinting under this
+session's load and was skipped, the same known per-engine fingerprinting-
+cost gap this pool has hit before -- structurally very different from a
+density-histogram chaotic map, so unlikely to be the true nearest
+neighbour, but flagged honestly rather than silently omitted). Nearest
+neighbour is `columnarbasalt` at distance **0.8070** -- comfortably clear
+of the 0.60 threshold, a clean pass, not a thin-margin case.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

@@ -72,6 +72,7 @@ const ENGINE_SUBJECTS = {
   spinbounce: 'Bouncing Balls',
   spirograph: 'Spirograph Mandala',
   starburst: 'Starburst Mandala',
+  strangeattractor: 'Chaotic Strange Attractor',
   stripweave: 'Woven Strip Patterns',
   tabletweave: 'Tablet Weaving Bands',
   taniko: 'Taniko Woven Borders',

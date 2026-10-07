@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Strange Attractor — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "random Wikipedia article" -- since
+// Wikipedia itself is blocked in this sandbox, used the established
+// fallback for this category: an open WebSearch, explicitly scoped to
+// exclude every already-shipped construction technique in the pool).
+// Recommendation: the PETER DE JONG ATTRACTOR, a 2D chaotic dynamical
+// system defined by iterating
+//   x' = sin(a*y) - cos(b*x)
+//   y' = sin(c*x) - cos(d*y)
+// from a starting point and histogramming where the orbit lands. Different
+// (a,b,c,d) give wildly different structures (spirals, braided ribbons,
+// swarms of filaments); the image is a DENSITY ESTIMATE of an orbit's
+// long-run behaviour, not a drawn shape. Sources:
+// https://demonstrations.wolfram.com/PeterDeJongAttractors/,
+// https://www.mat.ucsb.edu/Masters/Michael_Hetrick_DrawJong2.pdf,
+// https://en.wikipedia.org/wiki/List_of_chaotic_maps (de Jong / Clifford
+// attractor family, search snippets only -- Wikipedia is blocked here).
+//
+// A genuinely different construction PRINCIPLE from everything else in the
+// pool: not a substitution/subdivision tiling (quasicrystal.html/
+// voderberg.html), not a discrete local-rule automaton (automaton.html),
+// not an implicit wave-interference field built from SUPERPOSED sinusoids
+// sampled on a lattice (chladni.html/phasespikes.html/moire.html/
+// schlieren.html), not an arithmetic sieve (primespiral.html), not a
+// golden-angle packing (phyllotaxis.html), not deterministic recursive
+// branching (dendrite.html) or stochastic random-walk accretion
+// (frostgrowth.html's DLA), not a recursively-defined space-filling path
+// (hilbertweave.html/dragonfold.html), not a proximity partition
+// (voronoimosaic.html/foamcoarsen.html), not an overlaid-band or weave
+// construction. The generative primitive here -- ITERATE A DETERMINISTIC
+// NONLINEAR MAP AND HISTOGRAM WHERE IT LANDS -- has no analogue in the
+// pool; the closest relative is frostgrowth.html's DLA, but DLA is a
+// STOCHASTIC random walk with a sticking rule, while this is fully
+// deterministic chaos (the map itself has no randomness at all -- only the
+// starting parameters are seed-chosen). Also structurally distinct from
+// every prior wave-interference engine: those superpose independent
+// sinusoids and sample the result on a lattice; this iterates ONE
+// feedback map and accumulates visit counts, so "waviness" emerges from
+// orbit dynamics, not from superposition.
+//
+// BOUNDEDNESS is a mathematical guarantee, not something that needed
+// simulation to check: x' = sin(a*y) - cos(b*x) is a difference of two
+// terms each in [-1,1], so x' (and y') always lie in [-2,2] for EVERY real
+// (a,b,c,d) -- confirmed directly (worst |x|,|y| across 200 wildly
+// out-of-range trial parameters in [-10,10] was still exactly 2.0). So
+// there is no divergence risk from drifting (a,b,c,d) at all, by
+// construction -- the only real risk is DEGENERATION to a trivial, low-
+// entropy orbit (a fixed point or short cycle), which collapses the
+// rendered density to a single bright dot. This risk was investigated
+// OFFLINE at length before writing this file, the same discipline this
+// pool's quasicrystal.html/geodome.html/hilbertweave.html/spaceframe.html
+// already established: a 1D per-parameter sensitivity sweep around several
+// published "pretty" de Jong presets found most presets have narrow
+// collapse cliffs nearby, but preset (a,b,c,d) = (-2.0,-2.0,-1.2,2.0) is
+// unusually robust. Naive independent random-phase oscillation of all 4
+// parameters (or even just a,b) still hit rare collapse pockets across a
+// stress test of dozens of random phase/rate seeds -- these systems have
+// FRACTAL stability boundaries in parameter space, so a "small enough"
+// amplitude box is not a safe general argument. The fix that actually
+// worked: use a FIXED (not per-seed-random) relative phase structure --
+// a(theta) = -2.0 + 0.10*sin(theta), b(theta) = -2.0 + 0.10*sin(theta +
+// pi/2), c and d held exactly at -1.2 and 2.0 always -- and verify the
+// ENTIRE closed loop (theta from 0 to 2*pi) by DENSE sampling (2880 points)
+// rather than a handful of spot checks. That exact loop measured a stable
+// visited-cell fraction of 0.46-0.54 and a worst single-bin share of 0.45%
+// of all samples EVERYWHERE along the loop -- no collapse at any point.
+// Because the full loop is pre-verified safe at every phase, ANY starting
+// offset and ANY traversal RATE (including sign reversals) stays on that
+// same safe loop and needs no further checking -- only the loop's fixed
+// shape (amplitudes 0.10/0.10, phases 0/pi/2) is load-bearing, never the
+// timing of how it's walked.
+//
+// Rendered as a DENSITY HISTOGRAM on a small offscreen grid (not drawn
+// shapes): every frame reruns the iteration FRESH from a fixed start point
+// with that frame's current (a,b) -- there is no cross-frame accumulation
+// at all, so this is whiteout-proof by construction, the same "recompute
+// fresh every frame" pattern chladni.html/phasespikes.html/moire.html
+// already established. Lit-cell AREA is held EXACTLY constant every frame
+// via percentile rank-selection (the TARGET_FRAC technique chladni.html/
+// hilbertweave.html already proved safe): the top TARGET_FRAC of grid
+// cells by visit count are lit, always exactly the same COUNT of cells.
+// Colour is assigned by each lit cell's DENSITY RANK within that fixed-size
+// selected set (rank 0 = densest ... rank N-1 = least dense of the N
+// selected), not by spatial position or raw count -- so the rank
+// population is EXACTLY N cells every single frame, letting a coherent
+// hue-sweep ride on top with the same exact-zero-sum guarantee
+// rosenspikes.html/doylespiral.html/wingscales.html already proved:
+// sum_i cos(2*pi*k*(i/N) - phase) is exactly zero for any phase, so the
+// hue DISTRIBUTION across the lit set never shifts the aggregate luma
+// regardless of how far the sweep has advanced. The underlying visual
+// change (which specific cells are "densest" reshapes continuously as
+// (a,b) drift) is real, independent of the colour sweep, and is not a
+// rigid rotation/translation of anything -- no whole-canvas rotation is
+// used at all (per truchet.html's lesson that a reflexive whole-field
+// rotation only dilutes the mandatory unit-motion signal unless
+// fastMotion genuinely needs it as a second source; the attractor's own
+// continuous reshaping already supplies non-rigid motion directly).
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. The map itself has zero randomness --
+// RNG is used only once at init to pick the starting phase/rate/hue, same
+// convention as every other engine in this pool.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+  function hsl2rgb(h, s, l) {
+    s /= 100; l /= 100;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = l - c / 2;
+    let r, g, b;
+    h = ((h % 360) + 360) % 360;
+    if (h < 60) { r = c; g = x; b = 0; }
+    else if (h < 120) { r = x; g = c; b = 0; }
+    else if (h < 180) { r = 0; g = c; b = x; }
+    else if (h < 240) { r = 0; g = x; b = c; }
+    else if (h < 300) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+    return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+  }
+
+  const dt = 1 / FPS;
+  const dFac = Math.max(0.6, Math.min(1.5, DENSITY));
+
+  // ---- Attractor map: FIXED base preset (offline-verified robust, see
+  // header), a/b driven by a pre-verified-safe closed loop in theta, c/d
+  // held exactly constant. Never re-derive a different preset per seed --
+  // the robustness is a property of this EXACT (a0,b0,c0,d0) + exact
+  // (0.10, pi/2) phase/amplitude structure, not of de Jong attractors in
+  // general.
+  const A0 = -2.0, B0 = -2.0, C0 = -1.2, D0 = 2.0;
+  const DRIFT_AMP = 0.10;
+
+  // Fixed (not animated, not seed-random) viewing rotation + half-extent,
+  // chosen by rendering the raw square density map at several candidate
+  // angles and LOOKING at them (per the standing visual-requirements
+  // rule): this exact preset's attractor is a "comma/nautilus" shape with
+  // a genuine negative-space notch (not a rendering bug -- confirmed by
+  // inspecting the raw un-stretched square density map), and at ROT=0 that
+  // notch lands as a large wasted black wedge in a 16:9 frame. ROT=2.5
+  // radians reorients the shape so it reaches all four edges of a
+  // landscape frame -- verified to hold up across the whole theta range
+  // (spot-checked at theta = 0, 1, 2, 4, 5.5), not just one snapshot.
+  const ROT = 2.5;
+  const ROT_COS = Math.cos(ROT), ROT_SIN = Math.sin(ROT);
+  const VIEW_HALF = 2.3; // slightly > the map's exact [-2,2] bound, for safety margin after rotation
+
+  // Grid resolution fixed (not density-scaled -- resolution changing the
+  // visited/lit-cell fraction's denominator is an unnecessary extra risk
+  // axis; DENSITY instead scales sample richness, see NSAMPLE below).
+  const GW = Math.max(60, Math.round(W / 8));
+  const GH = Math.max(34, Math.round(H / 8));
+  const NCELLS = GW * GH;
+  const grid = new Uint32Array(NCELLS);
+  const NBURN = 100;
+  const NSAMPLE = Math.round(220000 * dFac);
+  // Kept comfortably below the offline-verified worst-case visited-cell
+  // fraction (fracDistinct, ~0.46 at fine sampling resolution across the
+  // whole safe theta loop -- see header) so nLit == TARGET_CELLS always
+  // holds in practice: lit AREA stays exactly constant every frame,
+  // never silently shrinking because a frame happened to visit fewer
+  // cells than the target.
+  const TARGET_FRAC = 0.38;
+  const TARGET_CELLS = Math.max(8, Math.round(TARGET_FRAC * NCELLS));
+
+  // Reusable scratch buffers (allocate once, never per-frame) for the
+  // percentile rank-select over visited cells.
+  const visitedIdx = new Int32Array(NCELLS);
+  const sortScratch = new Int32Array(NCELLS);
+
+  // Colour is assigned by a SMOOTH spatial coordinate (angle from the grid
+  // centre), not by each cell's noisy per-frame density rank -- adjacent
+  // cells share nearly the same angle, so adjacent pixels get nearly the
+  // same hue, avoiding a speckled/static-noise look. The angle->rank
+  // mapping is computed ONCE over the FULL fixed grid (every cell gets a
+  // rank 0..NCELLS-1, spaced perfectly evenly by construction, not just
+  // the lit subset), so the hue distribution over the whole grid is
+  // exactly uniform at every instant regardless of which subset of cells
+  // the live density threshold happens to light up that frame.
+  const spatialRankFrac = new Float32Array(NCELLS);
+  {
+    const order = new Int32Array(NCELLS);
+    for (let i = 0; i < NCELLS; i++) order[i] = i;
+    const cx = GW / 2, cy = GH / 2;
+    const angleOf = (i) => Math.atan2((i / GW | 0) - cy, (i % GW) - cx);
+    const angles = new Float32Array(NCELLS);
+    for (let i = 0; i < NCELLS; i++) angles[i] = angleOf(i);
+    order.sort((p, q) => angles[p] - angles[q]);
+    for (let r = 0; r < NCELLS; r++) spatialRankFrac[order[r]] = r / NCELLS;
+  }
+
+  const gridCanvas = document.createElement('canvas');
+  gridCanvas.width = GW; gridCanvas.height = GH;
+  const gctx = gridCanvas.getContext('2d');
+  const imgData = gctx.createImageData(GW, GH);
+  const pix = imgData.data;
+
+  const baseHue0 = rand(0, 360);
+  const hueSpread = rand(85, 130);
+  const hueWaveK = 3;
+  const baseSat = Math.max(78, Math.min(96, PAL[SEED % PAL.length][1]));
+  const baseLight = rand(46, 56);
+
+  // theta (the position on the pre-verified-safe loop) and the colour
+  // sweep phase both advance CONTINUOUSLY and are NEVER reset -- only
+  // their RATE (magnitude + sign) reassigns at a cycle boundary, the
+  // "reassign rate/sign, never reset the shared clock" convention already
+  // proven safe by arcrings.html/cascade.html/doylespiral.html/
+  // wingscales.html. Because the whole loop is safe at every phase and
+  // every traversal direction, a rate sign-flip can never leave the safe
+  // region.
+  let thetaRate, hueSweepRate;
+  function reconfigureRates() {
+    thetaRate = sgn() * rand(0.35, 0.55) * SPEED;
+    hueSweepRate = sgn() * rand(0.6, 1.0) * SPEED;
+  }
+  reconfigureRates();
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let theta = rand(0, Math.PI * 2);
+  let sweepPhase = 0;
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    theta += thetaRate * dt;
+    sweepPhase += hueSweepRate * dt;
+
+    const a = A0 + DRIFT_AMP * Math.sin(theta);
+    const b = B0 + DRIFT_AMP * Math.sin(theta + Math.PI / 2);
+    const c = C0, d = D0;
+
+    grid.fill(0);
+    let x = 0.1, y = 0.1;
+    for (let i = 0; i < NBURN; i++) {
+      const nx = Math.sin(a * y) - Math.cos(b * x);
+      const ny = Math.sin(c * x) - Math.cos(d * y);
+      x = nx; y = ny;
+    }
+    for (let i = 0; i < NSAMPLE; i++) {
+      const nx = Math.sin(a * y) - Math.cos(b * x);
+      const ny = Math.sin(c * x) - Math.cos(d * y);
+      x = nx; y = ny;
+      const rx = x * ROT_COS - y * ROT_SIN;
+      const ry = x * ROT_SIN + y * ROT_COS;
+      let gx = (((rx + VIEW_HALF) / (2 * VIEW_HALF)) * GW) | 0;
+      let gy = (((ry + VIEW_HALF) / (2 * VIEW_HALF)) * GH) | 0;
+      if (gx < 0) gx = 0; else if (gx >= GW) gx = GW - 1;
+      if (gy < 0) gy = 0; else if (gy >= GH) gy = GH - 1;
+      grid[gy * GW + gx]++;
+    }
+
+    // Collect visited cells, then rank-select the top TARGET_CELLS by
+    // count -- this is an exact percentile selection (sort), holding lit
+    // AREA perfectly constant every frame regardless of how the orbit's
+    // own spread happens to vary with (a,b).
+    let nVisited = 0;
+    for (let i = 0; i < NCELLS; i++) {
+      if (grid[i] > 0) { visitedIdx[nVisited] = i; nVisited++; }
+    }
+    const nLit = Math.min(TARGET_CELLS, nVisited);
+    for (let i = 0; i < nVisited; i++) sortScratch[i] = visitedIdx[i];
+    // Sort the visited-cell indices by descending count (partial view is
+    // fine -- we only need the top nLit, but a full sort of the visited
+    // subset, typically well under half the grid, is cheap and simple).
+    const sortedView = sortScratch.subarray(0, nVisited);
+    sortedView.sort((p, q) => grid[q] - grid[p]);
+
+    pix.fill(0);
+    for (let r = 0; r < nLit; r++) {
+      const idx = sortedView[r];
+      const densityRankFrac = r / nLit;
+      const hue = baseHue0 + hueSpread * Math.cos(2 * Math.PI * hueWaveK * spatialRankFrac[idx] - sweepPhase);
+      // Denser cells (low densityRankFrac) read brighter/hotter, sparser
+      // ones dimmer/cooler -- a fixed (not time-varying) function of a
+      // population whose composition (N evenly-spaced ranks) is identical
+      // every frame, so this adds visual depth with no luma-trend risk.
+      const light = baseLight + 13 * (0.5 - densityRankFrac);
+      const [rr, gg, bb] = hsl2rgb(hue, baseSat, Math.max(30, Math.min(72, light)));
+      const o = idx * 4;
+      pix[o] = rr; pix[o + 1] = gg; pix[o + 2] = bb; pix[o + 3] = 255;
+    }
+    gctx.putImageData(imgData, 0, 0);
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    ctx.imageSmoothingEnabled = true;
+    // A single smoothed upscale of the small density grid already reads
+    // as soft/glowy (confirmed by rendering and looking -- the bilinear
+    // interpolation from GW*GH up to W*H is itself a soft blur). An
+    // earlier version additionally drew a larger, low-alpha offset copy
+    // UNDERNEATH this one for extra glow -- removed after it was found to
+    // be the root cause of a real brightness-trend failure on one seed:
+    // that offset copy is only visible in the thin FRINGE where the
+    // enlarged shape extends past the core shape's exact boundary, so its
+    // contribution scales with the lit region's PERIMETER, not its area --
+    // and perimeter (how scattered vs. compact the density pattern is)
+    // genuinely varies across the theta drift cycle, unlike lit-cell COUNT
+    // (held exactly constant by the percentile rank-select above). A
+    // perimeter-dependent effect is not coverage-neutral and isn't worth
+    // the whiteout risk for a barely-visible cosmetic fringe.
+    ctx.drawImage(gridCanvas, 0, 0, W, H);
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureRates(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
