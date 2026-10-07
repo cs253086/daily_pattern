@@ -1,8 +1,8 @@
 {
-  "last3D": "tensegritychain",
+  "last3D": "torusrings3d",
   "last2D": "geometric",
   "lastMandala": "arcrings",
-  "last3DArchetype": "tensegritychain",
+  "last3DArchetype": "torusrings3d",
   "last2DArchetype": "geometric",
   "last3DByArchetype": {
     "geodome": "geodome",
@@ -30,5 +30,5 @@
     "frostgrowth": "frostgrowth",
     "geometric": "geometric"
   },
-  "updatedAt": "2026-10-06T15:49:55.620Z"
+  "updatedAt": "2026-10-07T16:19:11.590Z"
 }
