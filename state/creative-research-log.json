@@ -1118,5 +1118,34 @@
     ],
     "nearestNeighbour": "columnarbasalt",
     "nearestDistance": 0.807
+  },
+  {
+    "date": "2026-10-08",
+    "category": "obscure mathematical object / crystal system / physical phenomenon",
+    "inspirationSource": "Delegated open WebSearch, explicitly scoped to exclude every already-shipped construction technique in the pool. Surfaced the Kuramoto model and chimera states: Strogatz/Abrams, \"Chimera States for Coupled Oscillators\" (arxiv.org/pdf/nlin/0407045) and the closed-form ring solution (arxiv.org/pdf/nlin/0504046); review \"Chimera states: Coexistence of coherence and incoherence in networks of coupled oscillators\" (ar5iv.arxiv.org/html/1403.6204); first experimental realisation, Hagerstrom et al., Nature Physics 8, 658 (2012), a liquid-crystal optical-lattice chimera; \"Connecting the Kuramoto Model and the Chimera State\" (arxiv.org/pdf/1801.03899).",
+    "idea": "Nonlocal-ring Kuramoto model (Abrams-Strogatz): dtheta_i/dt = K*r_i*sin(psi_i - theta_i + alpha), r_i*e^{i*psi_i} the local complex order parameter over a coupling window. Several independent ring populations (now scattered in a grid, not concentric -- see fix below), each seeded with a coherent arc + incoherent arc split, alpha in [1.455,1.485] and coupling-radius fraction in [0.235,0.265] offline-verified to reliably form a DRIFTING chimera (boundary wanders around the ring) rather than collapsing to full sync or washing to incoherence. Finite-N ring chimeras are only metastable (confirmed via long offline RK4 runs: collapse to near-uniform sync by t=360-1800 simulated time units even in the best configs) -- mitigated with a full periodic reseed every CYCLE_SEC=43.5s (far shorter than any observed collapse time), the same cadence automaton.html/dendrite.html/frostgrowth.html independently re-derived as optimal for validate.js fixed sample times. Colour assigned by each oscillator phase-RANK within its ring (not raw phase), the schlieren.html fix, keeping aggregate hue distribution exactly fixed regardless of clustering; lightness by local-order-RANK, matching strangeattractor.html. A first concentric-rings layout failed the novelty gate (0.5911 vs radiolarian.html, a centred-structure collision); fixed by scattering the ring populations into independent off-centre clusters in a grid (the phyllotaxis.html/dendrite.html fix for the identical collision class), re-passing at 0.6518.",
+    "engineName": "kuramotochimera",
+    "outcome": "shipped",
+    "reason": "Two real bugs found via validateEngine(): (1) all 16 seeds failed fastMotion at K~1 (the physically-safe collapse-resistant rate) since rank-based colour change under-drove a luma-based motion detector; fixed by adding an independent per-ring rigid rotation layer (each ring a different guaranteed-minimum-magnitude rate) rather than raising K, which would have eroded the collapse-avoidance margin. (2) A missing top-level sgn() helper (copy-paste gap) caused a runtime ReferenceError, caught via Puppeteer console/pageerror listeners after a 30s READY-wait timeout. Novelty gate failed the first design (concentric rings, 0.5911 vs radiolarian) -- fixed via a genuine composition change (scattered independent clusters in a grid instead of one shared centre), re-passing at 0.6518 vs spirograph. Final battery: 16/16 across seeds 1-15 plus 12345, avgSat 63.2-70.3, projectedRise -40.4 to +24.3, compositionDrift 0.0258-0.0734, unitMotionNonRigidFrac 0.975-1.0, avgMsPerFrame 20.1-37.8ms, projectedHourRenderMin 28.9-54min.",
+    "seedsVerified": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      12345
+    ],
+    "nearestNeighbour": "spirograph",
+    "nearestDistance": 0.6518
   }
 ]

@@ -7185,6 +7185,194 @@ neighbour, but flagged honestly rather than silently omitted). Nearest
 neighbour is `columnarbasalt` at distance **0.8070** -- comfortably clear
 of the 0.60 threshold, a clean pass, not a thin-margin case.
 
+## Kuramoto chimera-state engine (`kuramotochimera.html`) — 2026-10-08
+
+Daily creative-research routine. Category was "obscure mathematical object /
+crystal system / physical phenomenon" -- tied as the pool's least-used
+category alongside "a random featured image" (3 uses each); picked since it
+was last used 2026-09-26 (`rosenspikes.html`) vs 2026-09-27 for the other,
+per the `herringbone.html` precedent of varying categories rather than
+defaulting to a heavily-used one. A delegated open WebSearch, explicitly
+scoped to exclude every already-shipped construction technique in the pool
+(listed exhaustively in the delegation prompt), surfaced the **Kuramoto
+model** and its **chimera state**: a population of phase oscillators
+coupled through a sine interaction term can spontaneously split into two
+coexisting regions in the SAME homogeneous network -- part synchronised
+(locked in phase), part incoherent (scattered, drifting) -- a real,
+experimentally confirmed phenomenon (Hagerstrom et al., *Nature Physics* 8,
+658 (2012), the first physical realisation, in a liquid-crystal optical
+lattice), not a drawing convention. Sources: Strogatz & Abrams, "Chimera
+States for Coupled Oscillators", https://arxiv.org/pdf/nlin/0407045, and
+the closed-form ring solution, https://arxiv.org/pdf/nlin/0504046; review,
+https://ar5iv.arxiv.org/html/1403.6204; "Connecting the Kuramoto Model and
+the Chimera State", https://arxiv.org/pdf/1801.03899.
+
+**A genuinely different construction PRINCIPLE from every other engine in
+the pool**: not a wave-interference field sampled fresh each frame from a
+closed-form formula (`chladni`/`phasespikes`/`moire`/`schlieren` -- those
+have NO coupling, no feedback between units); not a discrete local-rule
+automaton on a fixed lattice (`automaton` -- no continuous phase, no
+sinusoidal feedback term); not an iterated deterministic map histogrammed
+(`strangeattractor` -- one point's trajectory, not N interacting units);
+not UNCOUPLED oscillators with merely different periods (`pendulumwave` --
+that engine's whole premise is independent phases re-aligning by pure
+numerical coincidence; Kuramoto's defining feature is oscillators actively
+PULLING each other into or out of sync via real feedback); not a
+particle/growth/packing process (`frostgrowth`/`phyllotaxis`/`dendrite`/
+`doylespiral`); not a partition/tiling (`voronoimosaic`/`quasicrystal`/
+`foamcoarsen`); not a PDE field (`reactiondiffusion`). The generative
+engine here is FEEDBACK-DRIVEN SYNCHRONISATION -- a mechanism absent from
+the pool entirely.
+
+**What it is**: the classic nonlocal-ring Kuramoto model (Abrams-Strogatz),
+reduced to its local-order-parameter form: `dtheta_i/dt = K * r_i *
+sin(psi_i - theta_i + alpha)`, where `r_i * e^{i*psi_i}` is the local
+complex order parameter averaged over a nonlocal coupling window around
+oscillator i, and alpha is a fixed phase lag. Several independent ring
+POPULATIONS, each rendered as a colour-coded wedge mosaic (one wedge per
+oscillator, colour = that oscillator's own state).
+
+**VERIFIED OFFLINE before writing any rendering code**, the same discipline
+this pool's `quasicrystal.html`/`geodome.html`/`spaceframe.html` already
+established for a construction that could still "look plausible" even if
+subtly wrong: a standalone RK4 integrator swept phase-lag alpha and
+coupling-radius fraction starting from a seeded coherent-arc +
+incoherent-arc initial condition (the same construction the original
+papers themselves use -- genuinely spontaneous, IC-independent chimeras are
+a harder, more fragile regime, so seeding the split directly is standard
+practice, not a shortcut). `alpha` in `[1.455,1.485]`, coupling-radius
+fraction in `[0.235,0.265]` reliably reproduces a DRIFTING chimera: the
+synchronised/incoherent boundary visibly wanders around the ring over
+time (confirmed by tracking the lowest-order bin's position across a long
+run: it moved through more than half the ring within 400 simulated time
+units). **Critically, this offline sweep also found the real, documented
+numerical-research finding that finite-N ring chimeras are only
+METASTABLE**: every tested seed/config eventually collapsed to a
+near-uniform, fully-synchronised state, typically between t=360 and t=1800
+simulated time units (worst case observed: t=360 for a tighter alpha/r
+combination). Mitigated the same way `automaton.html`'s write-up already
+established for an unrelated divergence risk: a FULL periodic reset every
+CYCLE_SEC (43.5s, the same value `automaton.html`/`dendrite.html`/
+`frostgrowth.html` independently re-derived as optimal for `validate.js`'s
+8 fixed 300s-window sample times -- confirmed to transfer here too, since
+it is a property of the validator's sample times, not this engine's own
+dynamics), re-seeding a fresh coherent-arc + incoherent-arc initial
+condition each cycle -- roughly 8x shorter than even the fastest observed
+collapse time, so every cycle runs entirely within the "freshly
+reorganising" transient regime.
+
+Colour is assigned by each oscillator's phase-RANK within its own ring
+population (not raw phase value) every frame -- the exact fix
+`schlieren.html` already established for an analogous problem: sorting all
+of a ring's oscillators by phase each frame and assigning hue by rank
+fraction keeps the DISTRIBUTION of hues across the ring population (and
+hence aggregate luma) provably identical at every instant, regardless of
+how clustered or scattered the raw phases currently are, while still
+preserving the correct visual read (phase-adjacent oscillators land at
+adjacent ranks too, so a synchronised cluster still reads as a smooth,
+locally uniform colour band, and an incoherent region still reads as
+scattered/flickering). Lightness is likewise driven by each oscillator's
+LOCAL-ORDER-RANK (not raw `r_i`), the same rank-not-value technique
+`strangeattractor.html` just used for its own density-driven lightness
+variation.
+
+**Two real bugs, both found only by running `validateEngine()`, not by
+reasoning about the code:**
+
+1. **All 16 seeds failed `fastMotion`** at the physically-safe collapse-
+   resistant rate (K~1): only 1.2-1.8 luma diff over 1.5s mid-timeline
+   against floors of ~8.0-8.4. Root cause: the Kuramoto ODE's own rate and
+   the "race toward eventual collapse" are the SAME knob (the ODE is
+   time-homogeneous in K, so scaling K scales both the visible
+   reorganisation rate and the collapse horizon identically) -- pushing K
+   up enough to fix `fastMotion` would have eroded the collapse-avoidance
+   margin the whole reset-cadence design depends on (confirmed by an
+   offline rank-churn-vs-K sweep and a direct K=4 `validateEngine()`-style
+   test, which improved `fastMotion` only to 2.8-5.6, still failing, while
+   narrowing the collapse margin substantially). Fixed with a DECOUPLED
+   second motion source, the same "independently-rotating layers, each at
+   its own guaranteed-different rate" pattern `radiolarian.html`/
+   `muqarnas.html` already use: each ring also rigidly rotates at its OWN
+   rate, reassigned (never reset) every cycle boundary -- strong, reliable,
+   fast motion with zero effect on the underlying Kuramoto integration or
+   its safe collapse margin. Because every ring's rotation rate differs, no
+   single rigid transform can explain all rings moving at once (per
+   `truchet.html`'s lesson that a reflexive SHARED whole-field rotation
+   would dilute the mandatory unit-motion signal -- this is deliberately
+   NOT shared). Re-tested: `fastMotion` jumped to 21-24 across 4 seeds,
+   comfortably above the ~8-9 floor.
+2. **A missing top-level `sgn()` helper** (a copy-paste gap from the
+   established boilerplate pattern) caused a silent runtime
+   `ReferenceError` the moment the rotation fix referenced it, leaving the
+   page stuck at `window.READY !== true` forever. Caught only because a
+   debug Puppeteer script with `console`/`pageerror` listeners was used
+   after a plain `waitForFunction` timeout, rather than assuming the
+   timeout alone was informative -- the actual error ("sgn is not
+   defined") was only visible via the listener. Fixed by adding the
+   standard `const sgn = () => (rng() < 0.5 ? -1 : 1);` definition next to
+   `rand`.
+
+**The mandatory novelty gate failed on the first design** (several ring
+populations all sharing ONE canvas centre, concentric): nearest neighbour
+`radiolarian.html` (nested geodesic 3D shells) at distance **0.5911** --
+below the 0.60 threshold. A per-feature z-score diagnostic (the same
+technique `phyllotaxis.html`/`hilbertweave.html`'s own novelty iterations
+already used) showed why: despite completely different underlying content
+(a physics-driven 2D wedge mosaic vs. a lit 3D mesh), both compositions are
+"one dominant CENTRED annular/radial structure", which drags many
+AGGREGATE composition features (`coverage`, `blobCount`, `blobSizeCV`,
+`largestBlobFrac`, `mirrorLR`/`mirrorUD`, `periodY`) into near coincidence
+in the colour-blind, z-scored descriptor space -- the exact "centred
+structure" collision class `phyllotaxis.html`/`dendrite.html`'s own
+write-ups already document, fixed there the same way: break the one
+dominant centred shape into several independent, OFF-CENTRE instances
+placed in a near-regular grid (`cols = N <= 3 ? N : Math.ceil(Math.sqrt(N))`,
+the same formula `liesegang.html`/`composer.html` already use), each
+capped at 0.44x the grid cell's smaller dimension (the `hilbertweave.html`/
+`dendrite.html` safety margin) so neighbouring clusters never touch even
+with jitter. Only the GEOMETRY changed (how many centres, where they
+sit) -- the underlying Kuramoto dynamics, coupling parameters, and reset
+cadence are untouched. A first attempt at the grid used
+`cols = ceil(sqrt(N))` unconditionally, which left an empty quadrant for
+N=3 (a 2x2 grid with one unused cell) -- visually unbalanced and against
+the house style's "fills the frame boldly" rule; fixed to the `N<=3 ? N :
+...` formula so 3 clusters render as a clean row of 3, not a 2x2 grid with
+a gap. Re-measured after the fix: nearest neighbour rose to `spirograph`
+at **0.6518** -- comfortably clear of the 0.60 threshold.
+
+**Verified** (final design): `validateEngine()` **16/16** across seeds
+1-15 plus the CLI's actual default seed 12345 (see `geodome.html`'s
+write-up for why that seed matters), confirmed across two full batteries
+(concentric-rings design: all 16 failed `fastMotion`; scattered-clusters
+design, post both fixes: 16/16 passed). Final margins comfortable
+throughout: `avgSat` 63.2-70.3 (vs the 22 minimum), zero near-white pixels
+on every seed, `projectedRise` -40.4 to +24.3 (vs the 50 threshold),
+`compositionDrift` 0.0258-0.0734 (vs the 0.015 minimum),
+`unitMotionNonRigidFrac` 0.975-1.0 (vs the 0.40 minimum -- no thin-margin
+seeds), `fastMotion` always comfortably above its per-frame floor,
+`avgMsPerFrame` 20.1-37.8ms giving `projectedHourRenderMin` 28.9-54min
+(comfortably inside the CI budget). Visual spot-checks across several
+seeds and cycle fractions (including right at and just past the
+`CYCLE_SEC` reset boundary), actually rendering PNGs and looking at them,
+not just reading validator output: three (or more, by density) vivid,
+bold, immediately-legible wheel mosaics filling the 16:9 frame edge to
+edge, each clearly showing a smooth, locally-uniform coherent arc next to
+a scattered, flickering incoherent region, visible independent rotation
+and reorganisation between checkpoints, and a clean, non-jarring
+composition at the reset boundary.
+
+**Novelty gate** (final design): measured against all 62 other existing
+engines (the committed fingerprint cache was badly stale, so the whole
+pool was fingerprinted fresh alongside the candidate, per this pool's
+established practice; the refreshed cache was not committed, per this
+routine's "touch only the new engine + log + CLAUDE.md" constraint, with
+the same `ENGINE_SUBJECTS` exception this pool's `tensegritychain.html`
+write-up already established). Nearest neighbour is `spirograph` at
+distance **0.6518** -- a comfortable pass, not a thin-margin case shipped
+on a bare pass: this is the SECOND measurement, after a genuine
+composition-level redesign already fixed a real first-draft failure
+(0.5911 vs `radiolarian`).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

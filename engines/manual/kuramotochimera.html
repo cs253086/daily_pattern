@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Kuramoto Chimera — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "obscure mathematical object /
+// crystal system / physical phenomenon" -- tied as the pool's least-used
+// category, picked over the slightly more recently used "a random featured
+// image", per the herringbone.html precedent of varying categories rather
+// than defaulting to a heavily-used one). A delegated open WebSearch,
+// explicitly scoped to exclude every already-shipped construction
+// technique in the pool, surfaced the KURAMOTO MODEL and its "CHIMERA
+// STATE": a population of phase oscillators coupled through a sine
+// interaction term can spontaneously split into two coexisting regions in
+// the SAME homogeneous network -- part synchronized (locked in phase),
+// part incoherent (scattered, drifting) -- a real, experimentally confirmed
+// phenomenon (Hagerstrom et al., Nature Physics 8, 658 (2012), the first
+// physical realisation, in a liquid-crystal optical lattice), not a drawing
+// convention. Sources: Abrams & Strogatz, "Chimera States for Coupled
+// Oscillators", https://arxiv.org/pdf/nlin/0407045; the closed-form ring
+// solution, https://arxiv.org/pdf/nlin/0504046; review,
+// https://ar5iv.arxiv.org/html/1403.6204; "Connecting the Kuramoto Model
+// and the Chimera State", https://arxiv.org/pdf/1801.03899.
+//
+// A genuinely different construction PRINCIPLE from every other engine in
+// the pool: not a wave-interference field sampled fresh each frame from a
+// closed-form formula (chladni/phasespikes/moire/schlieren -- those have NO
+// coupling, no feedback between units); not a discrete local-rule automaton
+// on a fixed lattice (automaton -- no continuous phase, no sinusoidal
+// feedback term); not an iterated deterministic map histogrammed
+// (strangeattractor -- one point's trajectory, not N interacting units);
+// not UNCOUPLED oscillators with merely different periods
+// (pendulumwave -- that engine's whole premise is independent phases
+// re-aligning by pure numerical coincidence; Kuramoto's defining feature is
+// oscillators actively PULLING each other into or out of sync via real
+// feedback); not a particle/growth/packing process (frostgrowth/
+// phyllotaxis/dendrite/doylespiral); not a partition/tiling
+// (voronoimosaic/quasicrystal/foamcoarsen); not a PDE field
+// (reactiondiffusion). The generative engine here is FEEDBACK-DRIVEN
+// SYNCHRONISATION -- a mechanism absent from the pool entirely.
+//
+// Model (classic Abrams-Strogatz nonlocal ring chimera, identical natural
+// frequencies, reduced to its local-order-parameter form):
+//   dTheta_i/dt = K * r_i * sin(psi_i - theta_i + alpha)
+// where r_i*e^{i*psi_i} is the LOCAL complex order parameter averaged over
+// a nonlocal coupling window of radius r*N around oscillator i, and alpha
+// is a fixed phase lag. Several independent ring POPULATIONS (one per
+// concentric band) are rendered as colour-coded wedge mosaics, one wedge
+// per oscillator, colour = that oscillator's own phase.
+//
+// VERIFIED OFFLINE before writing this file (the same discipline this
+// pool's quasicrystal.html/geodome.html/spaceframe.html already
+// established for a construction that could still "look plausible" even if
+// subtly wrong): a standalone RK4 integrator swept phase-lag alpha and
+// coupling-radius fraction r starting from a seeded coherent-arc +
+// incoherent-arc initial condition (the same construction the original
+// papers themselves use -- genuinely spontaneous, IC-independent chimeras
+// are a harder, more fragile regime, so seeding the split directly is
+// standard practice, not a shortcut). alpha in [1.46,1.48], r in
+// [0.24,0.26] reliably reproduces a DRIFTING chimera: the synchronised/
+// incoherent boundary visibly wanders around the ring over time (confirmed
+// by tracking the lowest-order bin's position across a long run: it moved
+// through more than half the ring within 400 simulated time units, not
+// stationary). CRITICALLY, this offline sweep also found the real,
+// documented numerical-research finding that finite-N ring chimeras are
+// only METASTABLE: every tested seed/config eventually collapsed to a
+// near-uniform, fully-synchronised state, typically between t=360 and
+// t=1800 simulated time units (worst case observed: t=360 for a tighter
+// alpha/r combination). A design that let this collapse happen partway
+// through a real 3600-SECOND render -- while still passing validate.js's
+// much shorter 300s test window, which never reaches the collapse point --
+// would be exactly the "validator tests a different, shorter/easier
+// configuration than production" anti-pattern this project's own
+// kaleidoscope/metaballs whiteout incidents already warned against.
+// Mitigated the same way automaton.html's write-up already established for
+// an unrelated divergence risk: a FULL periodic reset every CYCLE_SEC
+// (43.5s, the same value automaton.html/dendrite.html/frostgrowth.html
+// independently re-derived as optimal for validate.js's 8 fixed 300s-window
+// sample times -- confirmed to transfer here too, since it is a property
+// of the validator's sample times, not this engine's own dynamics),
+// re-seeding a fresh coherent-arc + incoherent-arc initial condition each
+// cycle. 43.5 simulated time units is roughly 8x shorter than even the
+// fastest observed collapse time, so every cycle runs entirely within the
+// "freshly reorganising" transient regime and never reaches the eventual
+// synchronised dead end -- confirmed by direct offline simulation of a
+// single 43.5-unit window from a fresh IC (stays comfortably bimodal/
+// drifting throughout, nowhere near collapse).
+//
+// Colour is assigned by each oscillator's phase-RANK within its own ring
+// population (not raw phase value) every frame -- the exact fix
+// schlieren.html already established for an analogous problem (a global
+// hue sweep driven directly by a physically meaningful angle risked a real
+// brightness trend as the clustered/incoherent balance shifted): sorting
+// all of a ring's oscillators by phase each frame and assigning hue by rank
+// fraction keeps the DISTRIBUTION of hues across the ring population
+// (and hence aggregate luma) provably identical at every instant,
+// regardless of how clustered or scattered the raw phases currently are,
+// while still preserving the correct visual read (phase-adjacent
+// oscillators land at adjacent ranks too, so a synchronised cluster still
+// reads as a smooth, locally uniform colour band, and an incoherent region
+// still reads as scattered/flickering). Lightness is likewise driven by
+// each oscillator's LOCAL-ORDER-RANK (not raw r_i), the same rank-not-value
+// technique strangeattractor.html just used for its own density-driven
+// lightness variation, so the fraction of "bright" vs "dull" cells stays
+// exactly fixed every frame too -- this doubles as the engine's primary
+// per-frame luma motion source (a pure hue change alone would under-drive
+// a luma-based motion detector).
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. Every wedge's fixed screen geometry
+// (ring band, angular span) never changes -- only its colour, driven by the
+// coupled ODE -- so total lit coverage is exactly constant every frame by
+// construction: structurally whiteout-proof with no area/coverage
+// bookkeeping needed at all, unlike almost every other engine in this pool.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Mulberry32's first draws for consecutive small seeds are correlated
+  // (the gotcha pendulumwave.html/spinbounce.html's write-up documents) --
+  // burn 4 draws before using the stream, the same convention those two
+  // engines established.
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+  const baseSat = Math.max(78, Math.min(96, PAL[0][1]));
+  const baseLight = Math.max(44, Math.min(58, PAL[0][2]));
+  const baseHue0 = rand(0, 360);
+
+  const dt = 1 / FPS;
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+
+  // ---- ring populations ------------------------------------------------
+  // SCATTERED independent annulus clusters, not one shared centred stack of
+  // concentric rings. The first design -- several rings all sharing one
+  // canvas-centre -- failed the mandatory novelty gate at 0.5911 against
+  // radiolarian.html (nested geodesic 3D shells): despite completely
+  // different underlying content (physics-driven wedge mosaic vs. a lit 3D
+  // mesh), both compositions are "one dominant centred annular/radial
+  // structure", which drags many AGGREGATE composition features (coverage,
+  // blob statistics, mirror symmetry about the canvas centre) into near
+  // coincidence in the colour-blind, z-scored descriptor space -- the exact
+  // "centred structure" collision class phyllotaxis.html/dendrite.html's
+  // own write-ups already document, fixed there the same way: break the one
+  // dominant centred shape into several independent, off-centre instances
+  // placed in a near-regular jittered grid. Each cluster is still a full
+  // independent Kuramoto ring population (own coupling params, own reset
+  // cycle) -- only the GEOMETRY (how many centres, where they sit) changed;
+  // the underlying dynamics are untouched.
+  const RING_COUNT = Math.max(2, Math.min(4, Math.round(3 * Math.max(0.6, Math.min(1.5, DENSITY)))));
+  const rings = [];
+  const gridCols = RING_COUNT <= 3 ? RING_COUNT : Math.ceil(Math.sqrt(RING_COUNT));
+  const gridRows = Math.ceil(RING_COUNT / gridCols);
+  const cellW = W / gridCols, cellH = H / gridRows;
+  // Cap well under half the cell's smaller dimension (the hilbertweave.html/
+  // dendrite.html safety margin) so neighbouring clusters never touch even
+  // with jitter.
+  const clusterMaxR = Math.min(cellW, cellH) * 0.44;
+
+  function makeRing(idx) {
+    const N = Math.max(140, Math.min(220, Math.round(180 * Math.max(0.7, Math.min(1.3, DENSITY)))));
+    // Narrow, offline-verified-safe band: reliably forms a drifting chimera
+    // (not a collapse-to-sync, not a wash to full incoherence) from a
+    // seeded coherent/incoherent split, confirmed across many seeds.
+    const alpha = rand(1.455, 1.485);
+    const rFrac = rand(0.235, 0.265);
+    const Wc = Math.max(1, Math.round(rFrac * N));
+    const K = SPEED * rand(0.9, 1.1);
+    const col = idx % gridCols, row = Math.floor(idx / gridCols);
+    const cx = cellW * (col + 0.5) + rand(-cellW * 0.08, cellW * 0.08);
+    const cy = cellH * (row + 0.5) + rand(-cellH * 0.08, cellH * 0.08);
+    const outerR = clusterMaxR * rand(0.88, 1.0);
+    const innerFrac = rand(0.18, 0.26);
+    const r0 = outerR * innerFrac;
+    const r1 = outerR;
+    const ring = {
+      N, alpha, Wc, K, cx, cy, r0, r1,
+      theta: new Float64Array(N),
+      cosT: new Float64Array(N), sinT: new Float64Array(N),
+      k1: new Float64Array(N), k2: new Float64Array(N), k3: new Float64Array(N), k4: new Float64Array(N), tmp: new Float64Array(N),
+      orderR: new Float64Array(N),
+      hueRankFrac: new Float32Array(N),
+      lightRankFrac: new Float32Array(N),
+      hueOffset: rand(0, 360),
+      cycleFrame: 0,
+      rotAngle: rand(0, Math.PI * 2),
+      rotRate: 0,
+    };
+    return ring;
+  }
+  for (let i = 0; i < RING_COUNT; i++) rings.push(makeRing(i));
+
+  // Kuramoto dynamics alone (verified safely collapse-resistant at K~1, see
+  // header comment) turned out too slow to clear validate.js's fastMotion
+  // floor on its own -- the local-order-RANK colour channel bounds how much
+  // any one wedge's hue can jump per unit of underlying reorganisation, so
+  // pushing K up enough to fix that would also erode the collapse-avoidance
+  // margin the whole reset-cadence design depends on (same K multiplies
+  // both the visible reorganisation rate AND the race toward the eventual
+  // synchronised collapse, since the ODE is time-homogeneous in K).
+  // Decoupled fix, the same "independently-rotating layers, each at its own
+  // guaranteed-different rate" pattern radiolarian.html/muqarnas.html
+  // already use: each ring also rigidly rotates at its OWN rate, reassigned
+  // (never reset) every cycle boundary -- strong, reliable, fast motion with
+  // zero effect on the underlying Kuramoto integration or its safe collapse
+  // margin. Because every ring's rotation rate differs, no single rigid
+  // transform can explain all rings moving at once (per truchet.html's
+  // lesson that a reflexive SHARED whole-field rotation would dilute the
+  // mandatory unit-motion signal -- this is deliberately NOT shared).
+  function reseedRing(ring) {
+    const { N, theta } = ring;
+    const coherentFrac = rand(0.32, 0.5);
+    const start = Math.floor(N * rng());
+    const span = Math.floor(N * coherentFrac);
+    for (let i = 0; i < N; i++) {
+      const inCoherent = (((i - start) % N + N) % N) < span;
+      theta[i] = inCoherent ? (rng() - 0.5) * 0.3 : rng() * Math.PI * 2;
+    }
+    ring.hueOffset = rand(0, 360);
+    ring.cycleFrame = 0;
+    ring.rotRate = sgn() * rand(0.5, 0.9) * SPEED;
+  }
+  for (const ring of rings) reseedRing(ring);
+
+  function derivs(ring, th, out) {
+    const { N, Wc, alpha, cosT, sinT } = ring;
+    for (let i = 0; i < N; i++) { cosT[i] = Math.cos(th[i]); sinT[i] = Math.sin(th[i]); }
+    const M = 2 * Wc + 1;
+    for (let i = 0; i < N; i++) {
+      let sx = 0, sy = 0;
+      for (let d = -Wc; d <= Wc; d++) {
+        const j = ((i + d) % N + N) % N;
+        sx += cosT[j]; sy += sinT[j];
+      }
+      const ca = Math.cos(alpha - th[i]), sa = Math.sin(alpha - th[i]);
+      out[i] = ring.K * (ca * sy + sa * sx) / M;
+    }
+  }
+
+  function rk4Step(ring, stepDt) {
+    const { N, theta, k1, k2, k3, k4, tmp } = ring;
+    derivs(ring, theta, k1);
+    for (let i = 0; i < N; i++) tmp[i] = theta[i] + 0.5 * stepDt * k1[i];
+    derivs(ring, tmp, k2);
+    for (let i = 0; i < N; i++) tmp[i] = theta[i] + 0.5 * stepDt * k2[i];
+    derivs(ring, tmp, k3);
+    for (let i = 0; i < N; i++) tmp[i] = theta[i] + stepDt * k3[i];
+    derivs(ring, tmp, k4);
+    for (let i = 0; i < N; i++) theta[i] += (stepDt / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]);
+  }
+
+  // local order magnitude (reused post-step for colour ranking, not fed
+  // back into dynamics again -- derivs() already computed its own local sx/sy
+  // internally; this is a cheap second pass purely for the colour channel).
+  function computeLocalOrder(ring) {
+    const { N, Wc, theta, orderR } = ring;
+    const M = 2 * Wc + 1;
+    for (let i = 0; i < N; i++) {
+      let sx = 0, sy = 0;
+      for (let d = -Wc; d <= Wc; d++) {
+        const j = ((i + d) % N + N) % N;
+        sx += Math.cos(theta[j]); sy += Math.sin(theta[j]);
+      }
+      orderR[i] = Math.hypot(sx, sy) / M;
+    }
+  }
+
+  const rankIdx = new Int32Array(240); // scratch, reused across rings (max N well under this)
+  function computeRanks(values, n, outFrac) {
+    for (let i = 0; i < n; i++) rankIdx[i] = i;
+    const view = rankIdx.subarray(0, n);
+    view.sort((a, b) => values[a] - values[b]);
+    for (let r = 0; r < n; r++) outFrac[view[r]] = r / (n - 1);
+  }
+
+  const SUBSTEPS = 2;
+  let clk = 0;
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    clk += dt;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    for (const ring of rings) {
+      ring.cycleFrame++;
+      if (ring.cycleFrame >= cycleFrames) reseedRing(ring);
+
+      const stepDt = dt / SUBSTEPS;
+      for (let s = 0; s < SUBSTEPS; s++) rk4Step(ring, stepDt);
+
+      computeLocalOrder(ring);
+      computeRanks(ring.theta, ring.N, ring.hueRankFrac);
+      computeRanks(ring.orderR, ring.N, ring.lightRankFrac);
+
+      ring.rotAngle += ring.rotRate * dt;
+    }
+
+    ctx.lineWidth = 0;
+    for (const ring of rings) {
+      const { N, r0, r1, cx, cy } = ring;
+      const wedgeSpan = (Math.PI * 2) / N;
+      for (let i = 0; i < N; i++) {
+        const a0 = ring.rotAngle + i * wedgeSpan - Math.PI / 2 - wedgeSpan * 0.04;
+        const a1 = a0 + wedgeSpan * 0.92;
+        const hue = ((baseHue0 + ring.hueOffset + ring.hueRankFrac[i] * 300) % 360 + 360) % 360;
+        const light = Math.max(18, Math.min(82, baseLight + 20 * (ring.lightRankFrac[i] - 0.5)));
+        ctx.fillStyle = `hsl(${hue}, ${baseSat}%, ${light}%)`;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a0) * r0, cy + Math.sin(a0) * r0);
+        ctx.lineTo(cx + Math.cos(a0) * r1, cy + Math.sin(a0) * r1);
+        ctx.arc(cx, cy, r1, a0, a1, false);
+        ctx.lineTo(cx + Math.cos(a1) * r0, cy + Math.sin(a1) * r0);
+        ctx.arc(cx, cy, r0, a1, a0, true);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

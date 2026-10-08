@@ -53,6 +53,7 @@ const ENGINE_SUBJECTS = {
   hoppercrystal: 'Hopper Crystal Staircase',
   ikatweave: 'Ikat Weave Patterns',
   kaleidoscope: 'Kaleidoscope Patterns',
+  kuramotochimera: 'Synchronizing Oscillator Rings',
   lattice3d: 'Spinning Cube Lattice',
   liesegang: 'Liesegang Rings',
   moire: 'Moire Patterns',
