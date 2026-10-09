@@ -41,6 +41,7 @@ const ENGINE_SUBJECTS = {
   composer: 'Geometric Composition',
   dendrite: 'Fractal Branches',
   diagrid: 'Diagrid Tower Lattice',
+  diatomlattice: 'Diatom Shell Lattice',
   doylespiral: 'Doyle Spiral Circles',
   dragonfold: 'Dragon Curve Fractal',
   foamcoarsen: 'Foam Coarsening Cells',

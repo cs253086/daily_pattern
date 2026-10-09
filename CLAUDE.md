@@ -7373,6 +7373,149 @@ on a bare pass: this is the SECOND measurement, after a genuine
 composition-level redesign already fixed a real first-draft failure
 (0.5911 vs `radiolarian`).
 
+## Diatom-shell disclination-lattice engine (`diatomlattice.html`) — 2026-10-09
+
+Daily creative-research routine. Category was "a random featured image" --
+the pool's global least-used category per a tally of every prior log entry,
+and already shipped from once each for pollen (`phasespikes.html`), spider
+webs (`orbweb.html`), angelfish stripes (`reactiondiffusion.html`), butterfly
+wings (`wingscales.html`), and radiolarian shells (`radiolarian.html`), so
+the delegated WebSearch was explicitly scoped to find a sixth, genuinely
+different subject within it. Surfaced DIATOM FRUSTULE pore geometry: the
+silica shells of these single-celled algae carry species-specific micropore
+patterns, and several documented species (Rhaphoneis amphiceros, Stictodiscus
+californicus, Coscinodiscus wailesii, C. granii) show a RADIALLY-ALIGNED
+hexagonal-ish pore lattice. A real APS March Meeting abstract ("Frustrated
+frustules: geometric frustration in diatom frustules") states directly that
+"tiling a circle with [a radially-aligned hex] lattice requires defects" --
+the same topological-disclination mathematics behind 2D crystal grain
+boundaries and fullerene/geodesic-dome pentagon insertion. Sources:
+arxiv.org/pdf/2608.27119 (diatom frustule SEM figures), archive.aps.org/
+mar/2022/w02/8 (the "geometric frustration... requires defects" abstract),
+experts.arizona.edu (Coscinodiscus wailesii quasi-periodic hexagonal pore
+array).
+
+**What it is**: a genuinely different construction PRINCIPLE from every
+other partition/lattice engine in the pool: `columnarbasalt.html`'s/
+`voronoimosaic.html`'s/`foamcoarsen.html`'s Voronoi-family cells have no
+notion of radial order or forced local defects at all; `muqarnas.html`'s
+tiers double in cell count UNIFORMLY and SYNCHRONOUSLY across the whole
+tier; `rosenspikes.html`'s hex lattice is FLAT with no radial growth or
+defects at all. Here, cell-count growth happens through LOCAL, SCATTERED
+wedge-splitting insertions -- only where a cell's own angular width would
+otherwise exceed an aspect-ratio bound -- producing genuine scattered
+pentagon/hexagon disclination-defect cells among ordinary quadrilaterals,
+not a tidy synchronised doubling. Several independent circular "frustule"
+windows (3-5, scattered at varying radii) each hold one such lattice, built
+once per video; motion comes from a rank-fraction-phased per-cell lightness
+sweep (hue fixed per cell by ring index) plus a per-window radius
+"breathing" with a shared constant absolute area amplitude.
+
+**GEOMETRY verified OFFLINE before writing any rendering code** (the same
+discipline this pool's `quasicrystal.html`/`geodome.html`/`spaceframe.html`/
+`hilbertweave.html` already established): a standalone script built the
+exact ring-by-ring angular-boundary-splitting algorithm across 5 swept
+configs and confirmed nesting (every ring's boundary set is an exact
+superset of the ring inside it), gap-free total angular coverage (exactly
+2*pi at every ring, floating-point noise only), and the aspect-ratio bound.
+A real bug caught this way: a plain always-2-way split left cells up to ~2%
+over the bound on one swept config (a cell just over 2x the bound still left
+each half slightly over after an even split) -- fixed by generalising to a
+k-way split, `k = ceil(width/bound)`, which guarantees the bound for ANY k
+including k=1/no-split; re-verified clean afterward with a real k=3 case
+exercised on the previously-failing config.
+
+**The mandatory novelty gate needed real iteration across THREE
+composition-level changes, not a parameter nudge, each one measured rather
+than assumed:**
+1. A first design reused `foamcoarsen.html`'s own uniform grid-with-jitter
+   window layout verbatim -- measured only **0.240** from foamcoarsen
+   itself. A per-feature z-score diagnostic (the same technique
+   `phyllotaxis.html`/`hilbertweave.html`'s own novelty iterations already
+   used) showed `periodY`/`edgeDensity`/`mirrorUD`/`mirrorLR`/`periodX`
+   together explained over 80% of the squared distance: both engines place
+   several SAME-SIZED disks on an axis-aligned periodic grid, which the
+   colour-blind descriptor reads as the same composition regardless of what
+   fills each disk. Fixed with a genuinely different ARRANGEMENT (not a
+   within-window tweak, per this pool's own "what is the repeated element
+   vs how is it arranged" lesson): fewer (3-5), independently-sized windows
+   placed by rejection sampling at scattered, non-grid positions -- the same
+   scattered-nucleation-centre technique `liesegang.html` already proved
+   safe against this exact collision class. Verified offline across 500
+   trials/window-counts before trusting it: always terminates (a bounded
+   shrink-and-retry loop with a safe deterministic fallback, hit on only 1
+   of 500 trials), never overlapping or out-of-bounds -- a real bug caught
+   this way too: a radius near `minDim/2` could make the `rand(lo,hi)`
+   sampling range invalid (`lo > hi`), silently placing a window out of
+   bounds; fixed by capping radius to `minDim/2 - gap - 1`. This redesign
+   alone passed novelty at **0.609**.
+2. Strengthening window-breathing amplitude (0.30-0.44) to comfortably
+   clear `compositionDrift` on every tested seed then DROPPED novelty to
+   **0.589** (a fail) -- a concrete new instance of this pool's repeated
+   lesson (`voderberg.html`/`dragonfold.html`/`schlieren.html`) that a lever
+   helping one gate can hurt another: more breathing pulled the composition
+   closer to the pool's OTHER multi-window-pulsing engines (`foamcoarsen`,
+   `reactiondiffusion`), not away from them.
+3. Reducing window count to 2-3 larger disks (reasoning that fewer/bigger
+   would read less like "a field of many similar blobs") was far WORSE, not
+   better -- **0.417** against `torusrings3d`, because a few large centred
+   round shapes instead collide with the pool's many single-object radial/
+   round engines (`torusrings3d`, `lattice3d`, `solids3d`, `starburst`). A
+   per-cell geometric size-inset pulse was also tried as an orthogonal
+   `compositionDrift` lever on top of moderate breathing and measured WORSE
+   for novelty too (0.598 against `cascade`, vs 0.609 with breathing alone)
+   for no `compositionDrift` benefit over amplitude tuning -- removed
+   rather than shipped as dead/harmful code.
+
+The orthogonal lever that actually worked: keep 3-5 scattered windows AND a
+MODERATE (not maximal) breathing amplitude (0.22-0.32) -- novelty settles
+back at **0.609**, essentially unchanged from step 1, while `compositionDrift`
+clears on 14 of 16 tested seeds.
+
+**Verified** (final design): `validateEngine()` **14/16** across seeds 1-15
+plus the CLI's actual default seed 12345 (see `geodome.html`'s write-up for
+why that seed matters), after three full battery passes tuning breathing
+amplitude (0.14-0.22 left 2 seeds thin-failing; 0.24-0.36 cost novelty for
+no additional compositionDrift benefit; 0.22-0.32 shipped). Passing-seed
+margins comfortable throughout: `avgSat` 72.1-82.0 (vs the 22 minimum),
+zero near-white pixels on every seed, `projectedRise` -17.4 to +9.3 (vs the
+50 threshold), `compositionDrift` 0.0163-0.0578 on the 14 passing seeds (vs
+the 0.015 minimum), `unitMotionNonRigidFrac` exactly 1.0 on every single
+seed (a rigid transform can explain neither a per-cell lightness change at
+a fixed position nor a window's own radius breathing), `fastMotion` always
+comfortably above its per-frame floor, `avgMsPerFrame` 32.3-61.5ms giving
+`projectedHourRenderMin` 46.5-88.5min (comfortably inside the CI budget).
+**Residual**: seeds 9 and 10 still fail `compositionDrift` (0.0134/0.0111)
+even after three different breathing-amplitude levels were tried -- window
+count for both (5 and 4 respectively) is not unusually low, ruling out a
+"fewer windows -> weaker aggregate signal" hypothesis via a direct offline
+RNG replay, so the precise per-seed cause was not root-caused further given
+amplitude changes don't move these two specific seeds appreciably while
+costing novelty margin on every other seed. Treated as consistent with this
+pool's own documented, accepted residual-failure-rate precedent
+(`spaceframe.html`'s 14/16 = 87.5% pass rate for an analogous "two stubborn
+seeds" situation) rather than an unaddressed bug -- curated engines are a
+design-time sanity check only and never run `validate.js` at production
+runtime, and the production-default seed 12345 passes comfortably
+(`compositionDrift` 0.0504). Visual spot-checks across 25/50/75/95/105% of
+a 43.5s cycle at the default seed, actually rendering PNGs and looking at
+them, not just reading validator output: vivid, bold, immediately-legible
+scattered stained-glass-style disks with visible scattered pentagon/hexagon
+defect cells among the ordinary quadrilaterals, a clearly visible lightness
+sweep and window-size breathing between checkpoints, and no jarring
+artifact at the cycle-boundary reconfigure.
+
+**Novelty gate** (final design): measured against all 63 existing engines
+(the committed fingerprint cache was badly stale, so the whole pool was
+fingerprinted fresh alongside the candidate, per this pool's established
+practice; the refreshed cache was not committed, per this routine's "touch
+only the new engine + log + CLAUDE.md" constraint, with the same
+`ENGINE_SUBJECTS` exception this pool's `tensegritychain.html` write-up
+already established). Nearest neighbour is
+`auto-2026-08-27-field-of-small-lit-3d-solids-drifting-th` at distance
+**0.609** -- a genuine pass reached only after the three-round iteration
+documented above, not a bare first-draft number.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

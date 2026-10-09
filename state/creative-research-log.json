@@ -1147,5 +1147,34 @@
     ],
     "nearestNeighbour": "spirograph",
     "nearestDistance": 0.6518
+  },
+  {
+    "date": "2026-10-09",
+    "category": "a random featured image",
+    "inspirationSource": "Delegated open WebSearch for a striking macro/scientific-photography subject not yet used in the pool (pollen/phasespikes, spider webs/orbweb, angelfish stripes/reactiondiffusion, butterfly wings/wingscales, radiolarian shells/radiolarian were all already shipped from this category). Surfaced diatom frustule pore geometry: several documented species (Rhaphoneis amphiceros, Stictodiscus californicus, Coscinodiscus wailesii, C. granii) show a radially-aligned hexagonal-ish micropore lattice, and a real APS March Meeting abstract (\"Frustrated frustules: geometric frustration in diatom frustules\") states that tiling a circle with such a lattice requires topological defects. arxiv.org/pdf/2608.27119 ; archive.aps.org/mar/2022/w02/8 ; experts.arizona.edu (Coscinodiscus wailesii pore array).",
+    "idea": "A radial lattice built ring-by-ring from a fixed inner boundary count, where each ring only gains new angular boundaries via LOCAL, SCATTERED k-way wedge-splitting (k = ceil(width/aspectBound) ) wherever a cell would otherwise exceed an aspect-ratio bound -- producing genuine scattered pentagon/hexagon disclination-defect cells among ordinary quadrilaterals, unlike muqarnas.html's synchronised uniform tier-doubling. Several independent circular \"frustule\" windows (3-5, scattered via rejection sampling at varying radii, not a uniform grid) each hold one such lattice, built once per video. Motion: per-cell lightness travels a rank-fraction-phased wave (hue fixed per cell by ring index); each window's visible clip radius breathes with a shared constant absolute area amplitude (not a per-window fraction), phased by window index for exact zero-sum cancellation across windows of differing size.",
+    "engineName": "diatomlattice",
+    "outcome": "shipped",
+    "reason": "Offline-verified the ring-splitting algorithm (nesting, aspect-ratio bound via generalised k-way split, exact 2*pi angular coverage) before writing render code -- a plain always-2-way split left cells up to ~2% over the bound on one swept config, fixed by the general k=ceil(width/bound) rule. Novelty gate needed real iteration across 3 composition-level changes: (1) a first design reusing foamcoarsen.html's own uniform grid-with-jitter window layout verbatim measured 0.240 from foamcoarsen itself (periodY/edgeDensity/mirrorLR/mirrorUD explained >80% of the collision) -- fixed with a scattered, variable-radius rejection-sampling placement (offline-verified safe across 500 trials), passing at 0.609. (2) Strengthening window-breathing amplitude to comfortably clear compositionDrift on every seed then dropped novelty to 0.589 (FAIL) -- pulled the composition closer to the pool's other multi-window-pulsing engines. (3) Reducing to 2-3 larger windows (reasoning fewer/bigger would read less like \"many similar blobs\") was far WORSE (0.417 vs torusrings3d) -- collided instead with the pool's many single-object radial/round engines. Settled on 3-5 windows with MODERATE breathing (0.22-0.32): novelty back to 0.609, compositionDrift clears on 14/16 tested seeds including the production-default seed 12345 (comfortably, 0.0504). Seeds 9 and 10 still fail compositionDrift (0.0134/0.0111) after trying 3 different amplitude levels with no appreciable improvement -- window count for both is not unusually low (ruled out via an RNG replay), so treated as an accepted residual per this pool's own spaceframe.html precedent (14/16=87.5%) rather than chased further. A per-cell geometric inset-pulse was also tried as an orthogonal compositionDrift lever and measured WORSE for novelty (0.598) for no compositionDrift benefit over amplitude tuning alone, so it was removed rather than shipped as dead/harmful code.",
+    "seedsVerified": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      12345
+    ],
+    "nearestNeighbour": "auto-2026-08-27-field-of-small-lit-3d-solids-drifting-th",
+    "nearestDistance": 0.609
   }
 ]

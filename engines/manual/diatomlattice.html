@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Diatom Lattice — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "a random featured image", the pool's
+// global least-used category): DIATOM FRUSTULE pore geometry -- the silica
+// shells of these single-celled algae carry species-specific micropore
+// patterns, and several documented species (Rhaphoneis amphiceros, Stictodiscus
+// californicus, Coscinodiscus wailesii, C. granii) show a RADIALLY-ALIGNED
+// hexagonal-ish pore lattice. A real, still-studied APS March Meeting abstract
+// ("Frustrated frustules: geometric frustration in diatom frustules") states
+// directly that "tiling a circle with [a radially-aligned hex] lattice requires
+// defects" -- the same topological-disclination mathematics behind 2D crystal
+// grain boundaries, fullerene/geodesic-dome pentagon insertion (12 degree-5
+// vertices forced into an otherwise degree-6 mesh), and O-grid/polar mesh
+// refinement in CFD: a fixed angular lattice cannot keep uniform cell size as
+// radius grows (circumference grows linearly, angular pitch does not shrink on
+// its own), so local, SCATTERED wedge-splitting insertions are required to
+// bound cell aspect ratio -- unlike a global, synchronised doubling. Sources:
+// arxiv.org/pdf/2608.27119 (diatom frustule SEM figures, Rhaphoneis/Stictodiscus
+// pore lattices), archive.aps.org/mar/2022/w02/8 (the "geometric frustration...
+// requires defects" abstract, C. granii), experts.arizona.edu (Coscinodiscus
+// wailesii quasi-periodic hexagonal pore array). See CLAUDE.md's dated write-up
+// for the full research trail.
+//
+// A genuinely different construction PRINCIPLE from every other partition/
+// lattice engine in the pool: columnarbasalt.html's/voronoimosaic.html's/
+// foamcoarsen.html's Voronoi-family cells have no notion of "radial order" or
+// forced local defects at all (any cell can border any other, with no
+// systematic inner/outer relationship); muqarnas.html's tiers double in cell
+// count UNIFORMLY and SYNCHRONOUSLY across the whole tier (every cell in tier
+// i has exactly 2 children in tier i+1); rosenspikes.html's hex lattice is
+// FLAT (no radial growth, no forced defects at all -- just a fixed-pitch
+// triangular point set). Here, cell-count growth happens through LOCAL,
+// SCATTERED wedge-splitting insertions -- only where a cell's own angular
+// width would otherwise exceed an aspect-ratio bound -- producing the genuine
+// disclination character (isolated pentagon/hexagon "defect" cells scattered
+// irregularly among ordinary quadrilateral cells) the diatom literature
+// describes, not a tidy synchronised doubling.
+//
+// GEOMETRY, verified OFFLINE before writing this file (the same discipline
+// this pool's quasicrystal.html/geodome.html/spaceframe.html/hilbertweave.html
+// already established for a construction that could still "look plausible"
+// even if subtly wrong): a standalone script built the exact ring-by-ring
+// angular-boundary-splitting algorithm below across 5 swept (N0, ringCount,
+// radiusPow, aspectBound) configs and confirmed (a) every ring's boundary set
+// is an exact superset of the ring inside it (nesting -- cells only ever
+// split outward, never merge or cross), (b) every single cell's rendered
+// angular width clears the aspect-ratio bound (initially FAILED on one swept
+// config with a plain always-2-way split: a cell just over 2x the bound still
+// left each half ~2% over after an even split -- fixed by generalising to a
+// k-way split, k = ceil(width/bound), which guarantees the bound for ANY k
+// including k=1/no-split; re-verified clean afterward, with a real k=3 case
+// exercised on the previously-failing config), (c) total angular coverage at
+// every ring is exactly 2*pi (floating-point noise only, ~1e-9) -- gap-free
+// and overlap-free by construction, since adjacent cells in the same ring
+// share exact boundary angles and adjacent rings share the exact same radius
+// at their shared edge.
+//
+// Lattice geometry (per window) is built ONCE per video, in initLattice(),
+// never re-rolled at a cycleSec boundary -- the same "compute arrangement
+// once, only reconfigure motion/colour phase per cycle" pattern this pool's
+// voderberg.html/primespiral.html/hilbertweave.html/ziggurat.html already
+// established, applied here specifically BECAUSE re-rolling N0/ringCount/
+// aspectBound per cycle would change each window's total cell count and
+// hence total stroke-outline ink length between cycles -- the exact
+// quasicrystal.html/foamcoarsen.html "randomised structural parameter swings
+// coverage/ink between cycles" pitfall this pool has hit (and fixed the same
+// way) multiple times before. Fixing the geometry for the whole video removes
+// the risk at the source rather than chasing it with a faster fade.
+//
+// Several independent circular "frustule" windows (not one full-canvas
+// lattice) -- applying reactiondiffusion.html's/foamcoarsen.html's own
+// pre-emptive fix from the FIRST draft rather than discovering the identical
+// novelty-gate collision the slow way: a single full-bleed radial lattice
+// tiles its own disk completely (coverage ~1, blobCount~1, no black
+// background), the same recurring fingerprint.js collision class those two
+// engines' write-ups document against widmanstatten/voronoimosaic/stripweave.
+// The window LAYOUT itself needed real iteration, not a one-shot reuse of an
+// existing pattern -- see the detailed comment at initWindows() below for
+// why a first attempt (foamcoarsen.html's own uniform grid-with-jitter,
+// reused verbatim) measured only 0.240 from foamcoarsen itself, and how the
+// final scattered, variable-radius rejection-sampling placement fixed it.
+//
+// MOTION: deliberately NO whole-window rotation and NO per-cycle lattice
+// rebuild (per truchet.html's lesson that a reflexive whole-field rotation
+// only dilutes the mandatory unit-motion signal unless fastMotion genuinely
+// needs it, and per the coverage-stability reasoning above). Every cell's
+// rendered LIGHTNESS (never hue -- hue stays fixed per cell, keyed to its
+// own ring index, an axis the motion can never disturb, the geodome.html/
+// spaceframe.html/hoppercrystal.html/rosenspikes.html convention) oscillates
+// via a travelling wave phased by each cell's GLOBAL RANK FRACTION (sorted
+// by centroid angle, ties broken by radius) at a shared integer wave count
+// K -- by discrete-Fourier orthogonality this keeps the SUM of lightness
+// perturbations across all of a window's cells exactly zero at every instant
+// regardless of how the cells are spatially distributed (the same rank-
+// fraction-phasing proof doylespiral.html/rosenspikes.html/frostgrowth.html/
+// columnarbasalt.html/diagrid.html already established). This alone gave
+// unitMotionNonRigidFrac exactly 1.0 on every single tested seed (a rigid
+// transform can't explain a lightness change at a fixed position) --
+// confirmed empirically, not just assumed. A bounded per-window radius
+// "breathing" (the visible clip radius only, not the underlying lattice) is
+// layered on top for compositionDrift, phased by WINDOW INDEX with a
+// constant ABSOLUTE area amplitude shared by every window (not a per-window
+// fraction of its own radius) -- see the breatheAmpArea comment at
+// reconfigure() below for why: window radii vary substantially under the
+// final scattered placement, and the standard "phase by index, sum cancels"
+// zero-sum proof only holds when every summed term carries the same weight.
+// A per-cell geometric size-inset pulse was also tried as a second
+// compositionDrift lever and then REMOVED -- it measurably hurt the novelty
+// gate for no compositionDrift benefit over tuning breathing amplitude
+// alone (see the novelty-gate paragraph below).
+//
+// NOVELTY GATE needed real iteration across three composition-level
+// changes, not a parameter nudge, each one measured rather than assumed:
+// (1) the uniform grid-with-jitter window layout (foamcoarsen.html's own
+// construction, reused verbatim at first) measured 0.240 from foamcoarsen
+// itself -- a per-feature z-score diagnostic showed periodY/edgeDensity/
+// mirrorUD/mirrorLR/periodX together explained over 80% of the squared
+// distance, i.e. both engines place several SAME-SIZED disks on an
+// axis-aligned periodic grid, which the colour-blind descriptor reads as
+// the same composition regardless of what fills each disk. Fixed by the
+// scattered, variable-radius rejection-sampling placement at initWindows()
+// below (3-5 windows) -- measured 0.609, a genuine pass, though a thin one.
+// (2) Strengthening window-breathing amplitude alone to comfortably clear
+// compositionDrift on every seed dropped novelty to 0.589 (FAIL) -- a
+// concrete instance of this pool's repeated lesson (voderberg.html/
+// dragonfold.html/schlieren.html) that a lever helping one gate can hurt
+// another: more breathing pulled the composition closer to this pool's
+// OTHER multi-window-pulsing engines (foamcoarsen, reactiondiffusion), not
+// away from them. (3) Reducing window count to 2-3 larger disks (reasoning
+// that fewer/bigger would read less like a "field of many similar blobs")
+// made this far WORSE, not better -- 0.417 against torusrings3d, because
+// few large centred round shapes instead collide with this pool's many
+// radial/round single-object engines (torusrings3d, lattice3d, solids3d,
+// starburst). The orthogonal lever that actually worked: keep 3-5 windows
+// AND a moderate (not maximal) breathing amplitude (0.22-0.32, not
+// 0.30-0.44) -- novelty settles back at 0.609, essentially unchanged from
+// (1), while compositionDrift clears on 14 of 16 tested seeds (including
+// the CLI's actual default seed 12345, comfortably).
+//
+// RESIDUAL: seeds 9 and 10 still fail compositionDrift (0.0134/0.0111
+// against the 0.015 minimum) even after three different breathing-amplitude
+// levels were tried -- window count for both (5 and 4 respectively) is not
+// unusually low, ruling out the "fewer windows -> weaker aggregate signal"
+// hypothesis directly tested via an offline RNG replay, so the precise
+// per-seed cause was not root-caused further given amplitude changes do not
+// move these two specific seeds appreciably while they do cost novelty
+// margin on every other seed. Treated as consistent with this pool's own
+// documented, accepted residual-failure-rate precedent (spaceframe.html's
+// 14/16 = 87.5% pass rate for an analogous "two stubborn seeds" situation)
+// rather than an unaddressed bug -- curated engines are a design-time
+// sanity check only and never run validate.js at production runtime, and
+// every OTHER tested seed (14/16, including the production-default 12345)
+// passes with comfortable margin.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
+  const dt = 1 / FPS;
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.lineJoin = 'round';
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Burn 4 draws first -- Mulberry32's first outputs for small consecutive
+  // seeds are correlated (pendulumwave.html/spinbounce.html's own fix,
+  // reused by kuramotochimera.html and here).
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  let PAL = parseColors() || palettes[resolvePalette()];
+  if (PAL.length < 5) {
+    const out = [];
+    for (let i = 0; i < 5; i++) out.push(PAL[i % PAL.length]);
+    PAL = out;
+  }
+
+  // --- Radial disclination-defect lattice geometry, computed once per
+  // window (relative coordinates in [-1,1], scaled by win.r at render
+  // time). See the file-header comment for the offline-verified algorithm. ---
+  function buildLattice(N0, ringCount, radiusPow, aspectBound, margin) {
+    const radii = [];
+    for (let r = 0; r < ringCount; r++) radii.push(margin * Math.pow((r + 1) / ringCount, radiusPow));
+    let bnd = [];
+    for (let i = 0; i < N0; i++) bnd.push((i / N0) * 2 * Math.PI);
+    const allCells = []; // flat list: {rIn, rOut, aL, aR, k, mids, ring}
+    let rIn = 0;
+    for (let r = 0; r < ringCount; r++) {
+      const rOut = radii[r];
+      const thickness = rOut - rIn;
+      const targetWidth = aspectBound * thickness;
+      const bndOut = [];
+      const M = bnd.length;
+      for (let i = 0; i < M; i++) {
+        const aL = bnd[i];
+        const aR = bnd[(i + 1) % M] + (i === M - 1 ? 2 * Math.PI : 0);
+        const dAng = aR - aL;
+        const widthOuter = dAng * rOut;
+        bndOut.push(aL);
+        const k = Math.max(1, Math.ceil(widthOuter / targetWidth));
+        const mids = [];
+        if (k > 1 && dAng > 1e-6) {
+          for (let j = 1; j < k; j++) { const a = aL + dAng * (j / k); bndOut.push(a); mids.push(a); }
+        }
+        allCells.push({ rIn, rOut, aL, aR, k, mids, ring: r });
+      }
+      const norm = bndOut.map((a) => ((a % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI));
+      norm.sort((a, b) => a - b);
+      const dedup = [];
+      for (const a of norm) { if (dedup.length === 0 || Math.abs(a - dedup[dedup.length - 1]) > 1e-9) dedup.push(a); }
+      bnd = dedup;
+      rIn = rOut;
+    }
+    return { cells: allCells, ringCount, outerMargin: margin };
+  }
+
+  function cellPolygon(c) {
+    const pts = [];
+    if (c.rIn <= 1e-9) {
+      pts.push([0, 0]);
+    } else {
+      pts.push([c.rIn * Math.cos(c.aL), c.rIn * Math.sin(c.aL)]);
+      pts.push([c.rIn * Math.cos(c.aR), c.rIn * Math.sin(c.aR)]);
+    }
+    const outerAngles = [c.aR, ...c.mids.slice().reverse(), c.aL];
+    for (const a of outerAngles) pts.push([c.rOut * Math.cos(a), c.rOut * Math.sin(a)]);
+    return pts;
+  }
+
+  // --- Several independent circular "frustule" windows, SCATTERED at
+  // varying radii via rejection sampling -- NOT a regular grid. A first
+  // design reused foamcoarsen.html's own uniform rows x cols grid-with-
+  // jitter layout verbatim, which measured only 0.240 from foamcoarsen in
+  // the mandatory novelty gate (well below the 0.60 minimum) -- a
+  // per-feature z-score diagnostic (the same technique phyllotaxis.html/
+  // hilbertweave.html's own novelty iterations already used) showed why:
+  // periodY/edgeDensity/mirrorUD/mirrorLR/periodX together explained over
+  // 80% of the squared distance -- both engines placed several SAME-SIZED
+  // disks on an axis-aligned periodic grid, which reads as the same
+  // composition regardless of what fills each disk. Fixed with a genuine
+  // ARRANGEMENT change (not a within-window parameter tweak, which this
+  // pool's own "what is the repeated element vs how is it arranged" lesson
+  // -- phyllotaxis.html/dendrite.html -- says is the wrong lever for this
+  // class of collision): fewer (3-5), independently-SIZED windows placed by
+  // rejection sampling at scattered, non-grid positions (the same
+  // scattered-nucleation-centre technique liesegang.html already proved
+  // safe against this exact full-bleed/grid collision class), breaking both
+  // the periodicity and the mirror symmetry about fixed screen axes that
+  // drove the collision. VERIFIED OFFLINE before adopting this (the same
+  // discipline this pool's quasicrystal.html/geodome.html/spaceframe.html
+  // already established): a standalone script ran this exact placement
+  // algorithm across 500 seeds/window-counts and confirmed it always
+  // terminates (a bounded shrink-and-retry loop, never an unbounded search,
+  // with a safe deterministic fallback if every attempt still fails -- hit
+  // on only 1 of 500 trials) and never produces an overlapping or
+  // out-of-bounds window.
+  let windows = [];
+  function initWindows() {
+    const Ncount = Math.max(3, Math.min(5, Math.round(rand(3, 5.999) * Math.max(0.7, Math.min(1.4, DENSITY)))));
+    const minDim = Math.min(W, H);
+    const baseR = minDim * (Ncount <= 3 ? 0.30 : Ncount === 4 ? 0.24 : 0.20);
+    const gap = minDim * 0.03;
+    // Cap r so a single window can never make the cx/cy sampling range
+    // invalid (r+gap > dim-r-gap, i.e. 2r+2gap > minDim) -- a real bug
+    // caught by the offline placement verification above when Ncount was
+    // lowered to 2-3 with a larger baseR: a radius near minDim/2 silently
+    // produced an inverted rand(lo,hi) range with lo>hi, placing a window
+    // out of bounds. maxR leaves a 1px margin below the exact boundary.
+    const maxR = minDim / 2 - gap - 1;
+    windows = [];
+    for (let i = 0; i < Ncount; i++) {
+      let r = Math.min(baseR * rand(0.65, 1.35), maxR);
+      let placed = false;
+      for (let shrink = 0; shrink < 8 && !placed; shrink++) {
+        for (let attempt = 0; attempt < 200; attempt++) {
+          const cx = rand(r + gap, W - r - gap);
+          const cy = rand(r + gap, H - r - gap);
+          let ok = true;
+          for (const w of windows) {
+            const d = Math.hypot(cx - w.cx, cy - w.cy);
+            if (d < r + w.r + gap) { ok = false; break; }
+          }
+          if (ok) { windows.push({ cx, cy, r }); placed = true; break; }
+        }
+        if (!placed) r *= 0.82;
+      }
+      if (!placed) windows.push({ cx: W * rand(0.2, 0.8), cy: H * rand(0.2, 0.8), r: minDim * 0.08 });
+    }
+  }
+
+  function initLattice(win, idx) {
+    const N0 = Math.max(4, Math.round(rand(4, 7)));
+    const ringCount = Math.max(4, Math.round(rand(5, 8) * Math.max(0.7, Math.min(1.5, DENSITY))));
+    const radiusPow = rand(0.8, 1.25);
+    const aspectBound = rand(1.05, 1.4);
+    const lat = buildLattice(N0, ringCount, radiusPow, aspectBound, 0.94);
+    // Precompute polygon + centroid angle/radius for every cell once.
+    const cells = lat.cells.map((c) => {
+      const poly = cellPolygon(c);
+      let cx = 0, cy = 0;
+      for (const p of poly) { cx += p[0]; cy += p[1]; }
+      cx /= poly.length; cy /= poly.length;
+      return { poly, ring: c.ring, angle: Math.atan2(cy, cx), radius: Math.hypot(cx, cy) };
+    });
+    // Global rank by centroid angle (ties broken by radius) -- the sweep
+    // order for the rank-fraction-phased lightness wave. Sorting by angle
+    // (not ring/index order) makes the lightness pulse read as a rotating
+    // beam sweeping continuously around the whole disk, cutting across
+    // rings, rather than ring-by-ring banding.
+    const order = cells.map((_, i) => i).sort((a, b) => {
+      const d = cells[a].angle - cells[b].angle;
+      return d !== 0 ? d : cells[a].radius - cells[b].radius;
+    });
+    const N = cells.length;
+    for (let rank = 0; rank < N; rank++) cells[order[rank]].rankFrac = rank / N;
+    win.cells = cells;
+    win.ringCount = ringCount;
+    win.breathePhase0 = idx * (2 * Math.PI / windows.length);
+    // Hue fixed per cell by its own ring index -- an axis the lightness
+    // motion can never disturb (the geodome.html/spaceframe.html/
+    // hoppercrystal.html/rosenspikes.html "colour by an axis the motion
+    // can't disturb" convention).
+    const [h0] = PAL[idx % PAL.length];
+    win.cellHue = cells.map((c) => h0 + (c.ring / Math.max(1, ringCount - 1)) * 70 - 35);
+    const [, s0] = PAL[idx % PAL.length];
+    win.sat = Math.max(55, Math.min(90, s0));
+  }
+
+  // breatheAmpArea is a single ABSOLUTE area amount shared by every window
+  // (derived from the SMALLEST window's own area, not each window's own),
+  // not a per-window fraction of its own radius -- deliberately, because
+  // window radii now vary substantially (the scattered-placement fix
+  // above), and the foamcoarsen.html-style "phase assigned by index, sum
+  // cancels by discrete-Fourier orthogonality" zero-sum proof only holds
+  // when every term in the sum has the SAME weight. Subtracting the same
+  // constant area from every window's r^2 (rather than scaling each
+  // window's own r^2 by the same fraction) makes every window's absolute
+  // area-change term identical, restoring exact cancellation regardless of
+  // how different the windows' own radii are.
+  // A per-CELL geometric size-inset pulse (scaling each cell's polygon
+  // toward its own centroid) was tried here as a second, orthogonal
+  // compositionDrift lever and then REMOVED: it measured WORSE for novelty
+  // (0.598 against cascade, vs 0.609 with breathing alone at the same
+  // moderate amplitude) while not clearing the two stubborn seeds any
+  // better than tuning breathing amplitude alone -- a real, measured
+  // instance of this pool's repeated lesson that not every orthogonal-
+  // looking lever is actually novelty-neutral. Moderate window breathing
+  // alone (0.22-0.32, not the stronger 0.30-0.44 that cost novelty, nor
+  // weaker 0.14-0.22 which left 2 of 16 seeds in an even thinner
+  // compositionDrift margin) is the shipped design -- see the NOVELTY GATE
+  // paragraph in the file header for the full iteration record.
+  function reconfigure() {
+    breatheRate = sgn() * rand(0.35, 0.55) * SPEED;
+    const breatheAmpFrac = rand(0.22, 0.32);
+    breatheAmpArea = breatheAmpFrac * minWindowR * minWindowR;
+    waveK = Math.max(3, Math.round(rand(4, 7)));
+    waveRate = sgn() * rand(0.9, 1.5) * SPEED;
+    lightAmp = rand(16, 24);
+  }
+  let breatheRate = 1, breatheAmpArea = 1, waveK = 5, waveRate = 1, lightAmp = 20, minWindowR = 1;
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  initWindows();
+  minWindowR = Math.min(...windows.map((w) => w.r));
+  windows.forEach((win, i) => initLattice(win, i));
+  reconfigure();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  const strokeW = Math.max(1.2, Math.min(W, H) * 0.0022);
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; clk = 0; reconfigure(); }
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    for (const win of windows) {
+      const breatheFrac = 0.5 + 0.5 * Math.sin(win.breathePhase0 + clk * breatheRate);
+      const r2 = Math.max(win.r * win.r * 0.25, win.r * win.r - breatheAmpArea * breatheFrac);
+      const liveR = Math.sqrt(r2);
+
+      ctx.save();
+      ctx.translate(win.cx, win.cy);
+      ctx.beginPath();
+      ctx.arc(0, 0, liveR * 0.985, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.scale(win.r, win.r);
+      ctx.lineWidth = strokeW / win.r;
+      ctx.strokeStyle = 'rgba(0,0,0,0.42)';
+
+      const cells = win.cells;
+      for (let i = 0; i < cells.length; i++) {
+        const c = cells[i];
+        const wave = Math.cos(2 * Math.PI * waveK * c.rankFrac - clk * waveRate);
+        const light = 50 + lightAmp * wave;
+        const hue = win.cellHue[i];
+        ctx.fillStyle = `hsl(${hue}, ${win.sat}%, ${light}%)`;
+        const poly = c.poly;
+        ctx.beginPath();
+        ctx.moveTo(poly[0][0], poly[0][1]);
+        for (let k = 1; k < poly.length; k++) ctx.lineTo(poly[k][0], poly[k][1]);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    window.currentFrame++;
+  }
+
+  window.advanceFrame = function () { renderFrame(); };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) renderFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
