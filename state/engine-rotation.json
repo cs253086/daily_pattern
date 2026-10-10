@@ -1,9 +1,9 @@
 {
   "last3D": "auto-2026-08-27-field-of-small-lit-3d-solids-drifting-th",
-  "last2D": "geometric",
+  "last2D": "grid",
   "lastMandala": "kaleidoscope",
   "last3DArchetype": "discrete-3d-solids",
-  "last2DArchetype": "geometric",
+  "last2DArchetype": "grid",
   "last3DByArchetype": {
     "geodome": "geodome",
     "hoppercrystal": "hoppercrystal",
@@ -28,7 +28,8 @@
     "doylespiral": "doylespiral",
     "dragonfold": "dragonfold",
     "frostgrowth": "frostgrowth",
-    "geometric": "geometric"
+    "geometric": "geometric",
+    "grid": "grid"
   },
-  "updatedAt": "2026-10-09T16:24:03.970Z"
+  "updatedAt": "2026-10-10T15:25:51.261Z"
 }
