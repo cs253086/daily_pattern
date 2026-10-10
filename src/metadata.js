@@ -57,6 +57,7 @@ const ENGINE_SUBJECTS = {
   kuramotochimera: 'Synchronizing Oscillator Rings',
   lattice3d: 'Spinning Cube Lattice',
   liesegang: 'Liesegang Rings',
+  mashrabiya: 'Kinetic Mashrabiya Screen',
   moire: 'Moire Patterns',
   muqarnas: 'Muqarnas Honeycomb Vault',
   orbweb: 'Spider Web Spiral',

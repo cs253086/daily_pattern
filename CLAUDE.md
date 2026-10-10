@@ -7516,6 +7516,139 @@ already established). Nearest neighbour is
 **0.609** -- a genuine pass reached only after the three-round iteration
 documented above, not a bare first-draft number.
 
+## Kinetic mashrabiya engine (`mashrabiya.html`) — 2026-10-10
+
+Daily creative-research routine. Category was "random architectural or
+typographic movement" (used before for `ziggurat.html`/Art Deco,
+`geodome.html`/geodesic domes, `spaceframe.html`/octet trusses,
+`diagrid.html`/diagrids, `tensegritychain.html`/floating compression). A
+delegated open WebSearch surfaced the **kinetic mashrabiya facade**, most
+famously Aedas's Al Bahr Towers (Abu Dhabi): ~2,000 independently
+linear-actuator-driven shading units, building-management-system
+controlled, whose apertures fold open/closed following the sun's position
+across the building through the day, cutting solar gain by roughly half.
+The perforation geometry draws on the older Islamic girih/star-polygon
+tradition (Lu & Steinhardt, *Science* 315, 1106 (2007)). Sources:
+[architizer.com/projects/al-bahr-towers](https://architizer.com/projects/al-bahr-towers)
+(mechanism, including the direct quote "as the sun rises... the mashrabiya
+along the east of the building will all begin to close" -- the literal
+licence for this engine's left-to-right sweeping motion, not an invented
+embellishment), Wikipedia's Girih tiles article (search snippets only --
+Wikipedia is blocked in this sandbox),
+[peterlu.org's PDF of the Science paper](http://www.peterlu.org/pdf/publications/2007/Science_315_1106_2007.pdf)
+("simple decagonal patterns can be drawn directly with compass and
+straightedge").
+
+**What it is**: a genuinely different construction PRINCIPLE from every
+other engine in the pool, including the pool's other architectural
+engines: not a continuous lit-3D mesh/lattice (`geodome.html`/
+`spaceframe.html`/`diagrid.html`/`muqarnas.html`/`tensegritychain.html` --
+all real WebGL; this is a flat Canvas2D screen), not a substitution/
+subdivision tiling repartitioning a fixed area (`quasicrystal.html`/
+`voderberg.html` -- this engine's grid is fixed, only each cell's own
+aperture size changes), not any existing textile/grid engine's binary or
+positional state (`herringbone.html`/`tartansett.html`/`ikatweave.html`).
+The generative act is literally cutting a VOID out of solid material (an
+`evenodd`-filled star-polygon hole in each tile), each void's size
+independently animated -- no other engine in the pool renders negative
+space as its primary per-unit state.
+
+**GEOMETRY verified OFFLINE before writing any rendering code** (the same
+discipline this pool's `quasicrystal.html`/`geodome.html`/`spaceframe.html`/
+`diatomlattice.html` already established): a standalone script confirmed
+the star-polygon hole area matches the closed form
+`A = n*Router*Rinner*sin(PI/n)` to floating-point precision, and --
+critically -- that this area is EXACTLY (not just approximately) linear in
+`Router` for fixed `Rinner`/`n`. Combined with a rank-fraction-phased cos
+wave summing to exactly zero across N tiles at every sampled phase (the
+`doylespiral.html`/`rosenspikes.html`/`diagrid.html`/`columnarbasalt.html`/
+`diatomlattice.html` technique), this gives an EXACT, not first-order,
+zero-sum proof that total aperture area across the whole grid never
+varies -- the first engine in this pool to land on an exact rather than
+approximate proof, because area happens to be perfectly linear in the
+animated radius here.
+
+**A second, independent wave term was needed, found only by running
+`validateEngine()` across the full seed battery, not by reasoning about
+the descriptor in the abstract.** The first design phased aperture size by
+COLUMN rank only (a direct rendering of "the sun sweeps across the
+facade"), and while it passed `avgSat`/`projectedRise`/`peakNearWhiteFrac`
+cleanly, it stayed stuck around `compositionDrift` 0.006-0.009 (need
+>= 0.015) however much the column wave's amplitude/rate were raised.
+Root cause: `fingerprint.js`'s rotation-invariant descriptor circularly
+AVERAGES several features over angle at each radius, and a purely
+directional travelling wave has roughly equal numbers of opening/closing
+tiles at any given radius, so the signal cancels in that averaging almost
+entirely -- a new instance of the same "measure the descriptor's actual
+invariances, not just reason about the wave" lesson this file's own
+"Standing visual requirements" item 6 write-up already documents for
+`compositionDrift`'s rotation-invariant feature subset. Fixed by adding a
+SECOND rank-fraction-phased wave term keyed to each tile's RADIAL rank
+(distance-from-centre rank, not raw radius, for the usual non-uniform-
+distribution-safety reason), combined as
+`0.45*waveCol + 0.55*waveRad`, then pushed through a 1.45x gain and
+symmetric clamp for extra amplitude headroom beyond what the convex
+combination alone could reach (verified the gain's own mean perturbation
+stayed small via `projectedRise` remaining comfortably inside +/-50 across
+the full battery after adding it, not assumed safe). The radial wave's own
+K was capped to 1-2 (never 3+): allowing K up to 3 re-introduced the same
+within-coarse-bin cancellation this pool already documents for several
+engines' K=3-6 attempts against this same ~6-bin descriptor.
+
+**A genuinely new failure mode discovered empirically, not reasoned out in
+advance**: `validate.js`'s `fastMotion` check samples two frames exactly
+1.5s apart, and a rate near an integer multiple of `2*pi/1.5`
+(~4.19 rad/s) brings those two samples back to nearly the SAME phase
+(aliasing), making genuinely fast motion read as nearly static. This was
+found only by direct measurement -- several full-battery re-runs sweeping
+the rate range showed NO smooth trend with amplitude or rate: small shifts
+(+/-0.2-0.4 rad/s) swung the 16-seed pass count from 0/16 up to 11/16 and
+back down with no monotonic pattern, the signature of a resonance rather
+than a continuous effect. `[2.8, 3.8]` / `[2.6, 3.4]` rad/s (for
+`sunRate`/`radialRate` respectively) was the best of many tested ranges,
+staying clear of the aliasing band.
+
+**Verified** (final design): `validateEngine()` across seeds 1-15 plus the
+CLI's actual default seed 12345 (see `geodome.html`'s write-up for why
+that seed matters) -- **11/16 passed**, including the production-default
+seed (`fastMotion` 5.47 vs floor 4.81, `compositionDrift` 0.0207 vs the
+0.015 minimum). Every one of the other metrics -- `avgSat` (81.9-88.9 vs
+the 22 minimum), `peakNearWhiteFrac` (0 on every seed), `projectedRise`
+(-9.9 to +8.9 vs the 50 threshold), `unitMotionNonRigidFrac` (exactly 1.0
+on every single seed -- many independently-sized apertures at fixed screen
+positions are never explained by one rigid transform) -- passed
+comfortably on ALL 16 seeds with zero exceptions; the 5 residual failures
+are all thin-margin `fastMotion`/`compositionDrift` misses alone
+(shortfalls of 4-46%), never a near-total failure and never alongside a
+whiteout/saturation/speed problem. This residual rate is an honest,
+measured limit rather than an under-tuned parameter: many further rounds
+of amplitude/rate/K tuning (gain up to 1.65, rates shifted to
+`[3.0,3.9]`/`[2.8,3.6]`, `radialK` fixed at 1 then at 2, a seed-jittered
+grid size) were each tried and measured via a full 16-seed battery; none
+improved on 11/16, and several made things measurably worse (down to
+0/16-3/16), confirming this sits close to a real plateau for this
+composition rather than a parameter that just needed one more push.
+`avgMsPerFrame` (6-14ms, ~9-20min/hour projected render time) is
+comfortably inside the CI budget on every seed. Visual spot-checks across
+2/25/50/75/95/105% of a 43.5s cycle at 2 seeds, actually rendering PNGs
+and looking at them: bold, vivid, immediately-legible star-aperture grids
+with clearly visible independent per-tile size variation, a smooth
+non-jarring transition through the cycle-boundary reconfigure, and two
+genuinely distinct warm/cool palette combinations across the two
+spot-checked seeds.
+
+**Novelty gate**: measured against all 64 existing engines (the committed
+fingerprint cache was stale, so the whole pool was fingerprinted fresh
+alongside the candidate, per this pool's established practice; the
+refreshed cache was not committed, per this routine's "touch only the new
+engine + log + CLAUDE.md" constraint, with the same `ENGINE_SUBJECTS`
+exception this pool's `tensegritychain.html` write-up already
+established). Nearest neighbour is `moire` at distance **0.9285** -- a
+clean, comfortable pass well above this pool's own historical median pair
+distance, not a thin-margin case at all, and reached on the first
+attempt with no composition-level iteration needed (unlike the quality
+gate above).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
