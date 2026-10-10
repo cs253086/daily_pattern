@@ -117,6 +117,16 @@ function readRotationState() {
       // Featured-mandala cursor (2026-09-28, see curatedOr). Listed here for
       // the same whitelist reason as every field below.
       lastMandala: typeof data.lastMandala === 'string' ? data.lastMandala : null,
+      // Rolling record of recent curated-fallback CALENDAR days (2026-10-10,
+      // see effectiveMandalaPct below) -- the dates (YYYYMMDD strings, same
+      // format as the production seed) on which curatedOr() was actually
+      // invoked, i.e. Gemini failed or was disabled that day. Used to make
+      // the featured-mandala rate self-correct against how often the
+      // pipeline is ALREADY leaning on the curated pool, the same
+      // self-correction principle effectiveP3D() already applies to the
+      // 3D/2D bucket weighting.
+      recentCuratedDates: Array.isArray(data.recentCuratedDates)
+        ? data.recentCuratedDates.filter((d) => typeof d === 'string') : [],
       last3DArchetype: typeof data.last3DArchetype === 'string' ? data.last3DArchetype : null,
       last2DArchetype: typeof data.last2DArchetype === 'string' ? data.last2DArchetype : null,
       // Per-archetype internal cursors (2026-09-06, see nextInBucket()
@@ -130,6 +140,7 @@ function readRotationState() {
   } catch { /* missing or corrupt state file -- caller bootstraps instead */ }
   return {
     last3D: null, last2D: null, last3DArchetype: null, last2DArchetype: null, last3DByArchetype: {}, last2DByArchetype: {},
+    lastMandala: null, recentCuratedDates: [],
   };
 }
 
@@ -358,6 +369,55 @@ function effectiveP3D(n3D) {
   return Math.min(DESIRED_P_3D, MAX_SINGLE_ENGINE_FREQ * n3D);
 }
 const MANDALA_DAY_PCT = 33;
+// Self-correcting mandala rate (2026-10-10). Real user complaint: a
+// specific kaleidoscope video (2026-10-09, youtu.be/lrWix6_P4ZQ -- the
+// correctly-rotated "featured mandala day" pick, confirmed directly from
+// that day's production job log) read as "a pattern I've seen before".
+// Pulling the real job logs for the prior 12 days showed Gemini succeeded
+// only 1 of 12 days, so curatedOr() ran on 11 of those 12 -- and
+// MANDALA_DAY_PCT's flat 33%-of-curated-days rate put a mandala-archetype
+// engine on screen 4 of those 11 curated days (ziggurat, arcrings,
+// geometric, kaleidoscope): a much higher CALENDAR-day rate than 33% was
+// designed around, entirely because Gemini's success rate collapsed, not
+// because the mandala rotation repeated a file (it correctly visited 4
+// distinct engines in a row -- verified against state/engine-rotation.json
+// and the job logs, not assumed). This is the exact "a fixed percentage
+// weight applied against an abnormally large/frequent resource
+// concentrates exposure" lesson effectiveP3D() already fixed for the
+// 3D-bucket weighting (see its own comment above), applied here to
+// MANDALA_DAY_PCT instead of bucket size: scale the mandala percentage
+// down when the pipeline has recently been leaning on curated fallback
+// far more than usual, so the CALENDAR-day mandala rate stays roughly
+// constant (~1 in TARGET_MANDALA_DAYS days) regardless of how healthy
+// Gemini currently is, self-adjusting back up automatically once Gemini's
+// success rate recovers, without needing a human to notice and re-tune a
+// percentage again.
+const TARGET_MANDALA_DAYS = 10;
+const RECENT_CURATED_WINDOW = 10;
+function dateKeyFromSeed(seed) {
+  const digits = String(seed).replace(/\D/g, '');
+  return digits.slice(0, 8);
+}
+function daysBetweenDateKeys(a, b) {
+  const parse = (k) => Date.UTC(Number(k.slice(0, 4)), Number(k.slice(4, 6)) - 1, Number(k.slice(6, 8)));
+  return Math.abs(parse(b) - parse(a)) / 86400000;
+}
+function effectiveMandalaPct(recentCuratedDates) {
+  const dates = [...new Set(recentCuratedDates)].sort();
+  const recent = dates.slice(-RECENT_CURATED_WINDOW);
+  // Fewer than 3 recorded curated days isn't enough to estimate a
+  // calendar-day rate with any confidence -- stay at the original rate
+  // rather than guess (the same "don't trust a tiny sample" caution
+  // effectiveP3D() applies via MAX_SINGLE_ENGINE_FREQ).
+  if (recent.length < 3) return MANDALA_DAY_PCT;
+  const span = Math.max(1, daysBetweenDateKeys(recent[0], recent[recent.length - 1]));
+  const curatedRate = (recent.length - 1) / span;
+  const targetDailyFrac = 1 / TARGET_MANDALA_DAYS;
+  // min(): never exceeds the original 33% even if curatedRate is very low
+  // (a healthy Gemini stretch), the same two-sided cap shape effectiveP3D()
+  // uses.
+  return Math.min(MANDALA_DAY_PCT, (targetDailyFrac / Math.max(curatedRate, 0.01)) * 100);
+}
 function curatedOr(reason, seed) {
   const pool = curatedPool();
   if (pool.length === 0) {
@@ -369,17 +429,31 @@ function curatedOr(reason, seed) {
   const pool2D = pool.filter((p) => !isWebGLEngine(p));
   const state = readRotationState();
 
+  // Record today as a curated-fallback calendar day BEFORE computing the
+  // mandala rate, so an elevated Gemini-failure streak (including today's
+  // own fallback) is reflected immediately rather than with a one-day lag.
+  const dateKey = dateKeyFromSeed(seed);
+  const recentCuratedDates = Array.isArray(state.recentCuratedDates) ? [...state.recentCuratedDates] : [];
+  if (dateKey.length === 8 && recentCuratedDates[recentCuratedDates.length - 1] !== dateKey) {
+    recentCuratedDates.push(dateKey);
+  }
+  while (recentCuratedDates.length > RECENT_CURATED_WINDOW) recentCuratedDates.shift();
+  state.recentCuratedDates = recentCuratedDates;
+
   // Featured mandala day (2026-09-28). Channel analytics showed the
   // "Kaleidoscope"/"Sacred Geometry" videos are the ones bringing viewers
   // back, and the 2026-09-14 research found radial symmetry the most
-  // reliably liked shape family. On about 1 in 3 curated days the pick
-  // comes from MANDALA_ENGINES instead (own name-keyed round-robin, so they
-  // take turns), on top of their normal turns in the main rotation.
-  // Seed-hashed like the 3D/2D choice, so the same date always decides the
-  // same way. FEATURE_MANDALA=0 turns it off.
+  // reliably liked shape family. On about 1 in 3 curated days (self-
+  // corrected against recent curated-fallback frequency, see
+  // effectiveMandalaPct() above) the pick comes from MANDALA_ENGINES
+  // instead (own name-keyed round-robin, so they take turns), on top of
+  // their normal turns in the main rotation. Seed-hashed like the 3D/2D
+  // choice, so the same date always decides the same way. FEATURE_MANDALA=0
+  // turns it off.
   const mandalaPool = pool.filter((p) => MANDALA_ENGINES.includes(path.basename(p, '.html')));
+  const mandalaPct = effectiveMandalaPct(recentCuratedDates);
   if (process.env.FEATURE_MANDALA !== '0' && mandalaPool.length > 0
-      && (hashStr(`${seed}:mandala`) % 100) < MANDALA_DAY_PCT) {
+      && (hashStr(`${seed}:mandala`) % 100) < mandalaPct) {
     const names = mandalaPool.map((p) => path.basename(p, '.html'));
     const lastIdx = names.indexOf(state.lastMandala);
     let idx = lastIdx >= 0 ? (lastIdx + 1) % names.length : hashStr(String(seed)) % names.length;

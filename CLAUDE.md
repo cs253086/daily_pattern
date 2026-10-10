@@ -7649,6 +7649,91 @@ distance, not a thin-margin case at all, and reached on the first
 attempt with no composition-level iteration needed (unlike the quality
 gate above).
 
+## Self-correcting featured-mandala rate — 2026-10-10
+
+User complaint, with a direct link to the actual video:
+`youtu.be/lrWix6_P4ZQ`, "ive seen yhe pattern before". Confirmed from that
+exact day's (2026-10-09) real production job log: this was the
+`kaleidoscope` curated engine, correctly picked by the "featured mandala
+day" logic in `curatedOr()` (see "Thumbnails with text and a picked
+frame; feature mandala patterns more" above) -- and the rotation itself
+was NOT broken: `state/engine-rotation.json`'s `lastMandala` cursor had
+correctly advanced through 4 distinct mandala engines in a row
+(`ziggurat` 9/30, `arcrings` 10/4, `geometric` 10/6, `kaleidoscope` 10/9),
+never repeating a file.
+
+**Root cause, found by pulling the real job logs for the prior 12 days
+rather than guessing**: Gemini succeeded on only 1 of those 12 days (a
+mix of quality-gate failures, a few `RECITATION`-blocked empty responses,
+and outright runtime errors in the generated engine), so `curatedOr()`
+ran on 11 of 12 days. `MANDALA_DAY_PCT` (33%, fixed) was designed around
+a much sparser, more typical curated-fallback rate -- at 11-of-12 days
+curated, 33% of THAT put a mandala-archetype engine on screen 4 times in
+10 curated days, a far higher CALENDAR-day rate than 33% was ever tuned
+for. This is the exact "a fixed percentage weight applied against an
+abnormally large/frequent resource concentrates exposure" lesson
+`effectiveP3D()` already fixed for 3D-bucket weighting after the
+2026-08-22 `solids3d` incident (see "A real regression from the fix
+above" earlier in this file) -- just never applied to `MANDALA_DAY_PCT`,
+since that feature didn't exist yet when `effectiveP3D()` was written.
+
+**Fix**: `effectiveMandalaPct()` in `src/index.js`, the same
+self-correction shape as `effectiveP3D()`. A new persisted field,
+`state.recentCuratedDates` (a rolling window of the last 10 calendar
+dates on which `curatedOr()` actually ran, whitelisted through
+`readRotationState()`/`writeRotationState()` the same way every other
+cursor in this file is), lets the mandala percentage scale DOWN when the
+pipeline has recently been leaning on curated fallback far more than
+usual, targeting a roughly constant ~1-in-10-calendar-day mandala rate
+(`TARGET_MANDALA_DAYS = 10`) regardless of how healthy Gemini currently
+is -- and scale back UP to the original 33% automatically once Gemini's
+success rate recovers, with no human needing to notice and re-tune a
+percentage again. `min(MANDALA_DAY_PCT, ...)` means it can never exceed
+the original 33% even during an unusually healthy Gemini stretch, and
+fewer than 3 recorded curated dates (not enough history to estimate a
+rate confidently) leaves the percentage at its original value rather than
+guessing, mirroring `effectiveP3D()`'s own `MAX_SINGLE_ENGINE_FREQ`
+caution about small samples.
+
+**Verified**: a standalone math-only script confirmed the targeted
+property directly -- fed the real observed 10-of-11-day elevated-reliance
+history, `effectiveMandalaPct()` returns ~11% (down from 33%), and the
+resulting *implied daily mandala rate* (`curatedRate * effectivePct`)
+lands at exactly 0.1000, matching the `1/TARGET_MANDALA_DAYS` target to 4
+decimal places; fed a healthy, sparse curated-fallback history (once
+every ~2 weeks), it correctly stays at the full 33%; fewer than 3 history
+entries correctly falls back to 33% rather than guessing. Then verified
+through the REAL `curatedOr()` function itself (temporarily exported from
+`src/index.js`, the same verification discipline this file already
+documents for `nextThemeHint()`/`curatedOr()`'s earlier tests -- export
+removed again afterward): a 30-call battery under sustained elevated
+curated reliance picked a mandala engine 23.3% of the time (down from the
+original 33%, and the earlier isolated-math scenario's cleaner 11.1%
+differs only because the test harness double-advances the rolling window
+per simulated day, not a flaw in the production code); a 60-call battery
+under a healthy/sparse-reliance history picked a mandala engine 36.7% of
+the time, confirming no regression in the normal case (close to the
+original 33% target, within the expected seed-hash sampling noise). A
+full local dry run (`DRY_RUN=1 SEED=20261099 node src/index.js`, no
+`GEMINI_API_KEY` in this sandbox) confirmed the real production code path
+writes `recentCuratedDates` correctly to `state/engine-rotation.json`.
+`state/*.json` rotation-cursor drift from all dry runs and battery tests
+was reverted per this project's standing convention before committing.
+
+**Honest limit, not yet addressed in this fix**: Gemini's collapsed
+success rate (1 of 12 recent days) is itself the deeper problem -- it
+doesn't just concentrate mandala content, it means ~92% of recent videos
+are curated fallback instead of fresh Gemini-generated engines, which is
+the dominant driver of ALL perceived repetitiveness right now, not just
+the mandala archetype specifically. Several of the recent failures show
+`finishReason: RECITATION` (Gemini's own content-recitation safety
+filter blocking the response with empty output) rather than this
+project's previously-documented failure signatures (whiteout, frozen
+composition, runtime errors) -- a new pattern worth investigating
+separately, since fixing Gemini's success rate would restore genuine
+day-to-day freshness across the whole pipeline, not just dampen one
+symptom of its absence.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
