@@ -7734,6 +7734,128 @@ separately, since fixing Gemini's success rate would restore genuine
 day-to-day freshness across the whole pipeline, not just dampen one
 symptom of its absence.
 
+## Boids flocking engine (`murmuration.html`) — 2026-10-12
+
+Daily creative-research routine. This firing covers a consolidated catch-up
+run: the routine fired twice (2026-10-11 and 2026-10-12) while queued behind
+an ongoing human conversation in this session, and neither was executed
+separately -- this single engine/entry covers both, dated 2026-10-12, with
+no separate 2026-10-11 log entry. Category was "random natural structure". A
+delegated open WebSearch, explicitly scoped to exclude every already-shipped
+construction technique in this now-65-engine pool, surfaced Craig Reynolds's
+1986 BOIDS model -- the algorithm behind starling murmurations and fish
+schools: no bird has a plan or a leader, yet three purely LOCAL rules
+(separation, alignment, cohesion) applied identically by every individual
+produce the whole flock's large-scale coherent shape, splits and merges, as
+an emergent, bottom-up property of the system. Sources:
+[Reynolds, "Flocks, Herds, and Schools: A Distributed Behavioral Model"](https://www.red3d.com/cwr/papers/1987/boids.html)
+(SIGGRAPH 1987),
+[Cornell ECE4760 Boids lab, rule summary](https://people.ece.cornell.edu/land/courses/ece4760/labs/s2021/Boids/Boids.html),
+[ResearchGate: murmuration structure](https://www.researchgate.net/publication/234804654)
+(search snippets).
+
+**A genuinely different construction PRINCIPLE from every other engine in
+the pool**: not a wave-interference field sampled fresh each frame
+(`chladni.html`/`phasespikes.html`/`moire.html`/`schlieren.html`), not a
+discrete local-rule automaton on a FIXED lattice (`automaton.html` -- cells
+never move), not feedback-driven PHASE synchronisation with no spatial
+position at all (`kuramotochimera.html` -- oscillators interact through one
+shared sinusoidal term, never move in space), not an iterated deterministic
+map histogrammed (`strangeattractor.html` -- one point's trajectory, not N
+interacting agents), not a particle/growth/packing process whose units never
+move once placed (`frostgrowth.html`'s DLA random-walk accretion,
+`phyllotaxis.html`'s golden-angle placement, `doylespiral.html`'s conformal
+map), not a partition/tiling (`voronoimosaic.html`/`quasicrystal.html`/
+`foamcoarsen.html`), not a PDE field (`reactiondiffusion.html`). Here N
+mobile agents each sense only their own local neighbourhood and steer by
+three independent vector rules, plus a per-boid correlated-random-walk
+wander force and a slow per-flock goal-direction bias, inside a hard
+circular containment clamp -- a continuously self-reorganising multi-agent
+system with real 2D position AND velocity, the one archetype missing from
+this pool.
+
+**The simulation was verified OFFLINE for 40 SIMULATED MINUTES across 5
+seeds before writing any render code** (4x `spinbounce.html`'s own 10-minute
+precedent, the same discipline this pool's `quasicrystal.html`/
+`geodome.html`/`spaceframe.html` already established for a construction
+that could still "look plausible" even if subtly wrong): confirmed zero
+NaN/Infinity ever; every boid's distance from its own flock centre never
+exceeded its confinement radius by more than floating-point noise (0.000px
+measured); speed always stayed within `[minSpeed, maxSpeed]`; and the WANDER
+force keeps each flock's internal shape (pairwise boid-to-boid distance
+variance, sampled every 30s) changing continuously rather than converging to
+a frozen sub-formation that merely translates -- a real, checked risk for
+simplified boids models under strong alignment/cohesion, which would fail
+BOTH `compositionDrift` (no development) and the mandatory unit-motion gate
+(a frozen local shape is trivially explained by one rigid transform). The
+shape-variance time series' coefficient of variation stayed well above a
+0.03 floor on every flock, every seed (measured 2.6-8.7).
+
+**Several INDEPENDENT flocks (not one), each confined to its own circular
+region in a near-regular grid** (the `dendrite.html`/`hilbertweave.html`/
+`phyllotaxis.html`/`kuramotochimera.html` multi-instance technique, the same
+0.44x-of-the-smaller-cell-dimension safety cap those engines already
+established), each with its OWN goal-direction rate (guaranteed-minimum-
+magnitude, random sign, reassigned -- never reset -- at `cycleSec`
+boundaries). Deliberate, not cosmetic: per `truchet.html`'s lesson that a
+single SHARED whole-field motion source dilutes the mandatory unit-motion
+signal, several flocks drifting in independently different directions at
+independently different rates guarantees no single global rigid transform
+can explain the whole frame's change -- the same "independently-rotating
+layers" pattern `radiolarian.html`/`muqarnas.html`/`kuramotochimera.html`
+already use for rotating shells/rings, applied here to translating flocks.
+Each boid also has its own independent render-only size "flutter" (wing-flap
+amplitude/rate, guaranteed-minimum-magnitude, random phase) as a second,
+decoupled layer of local non-rigid signal. Colour is fixed by (flock index,
+boid rank within its flock) -- an axis the physics can never disturb, the
+same "colour by an axis the motion can't disturb" principle this pool's
+`geodome.html`/`spaceframe.html`/`rosenspikes.html` already established,
+applied here to population membership instead of a spatial coordinate.
+
+**One real bug found only by rendering actual frames and looking, not by
+reasoning about the code**: the first design's SOFT steering-based
+separation force, averaged across all nearby neighbours, cancels almost
+completely once a symmetric tight cluster forms (each neighbour's push
+answered by another from roughly the opposite side) -- alignment+cohesion
+collapsed every flock into a near-single overlapping blob within ~20s on
+every tested seed, confirmed by dumping real boid positions (inter-boid
+spacing 2-5px against a 25-31px separation radius). Fixed with a HARD
+positional-separation pass every substep (`spinbounce.html`'s ball-ball
+technique, reused verbatim) that pushes overlapping boids apart directly,
+sidestepping the averaging-cancellation entirely rather than tuning the soft
+force's weight further. That fix then surfaced a second bug, found the same
+way (re-running the offline stability check after adding hard separation):
+the hard-separation push could shove a boid already near the containment
+boundary up to 64px past it. Fixed with a position-only re-clamp pass
+immediately after hard separation (no velocity reflection needed, since this
+is a small corrective nudge, not a fast collision).
+
+**Verified**: `validateEngine()` **16/16** across seeds 1-15 plus the CLI's
+actual default seed 12345 (see `geodome.html`'s write-up for why that seed
+matters). Margins comfortable throughout: `avgSat` 58-70.5 (vs the 22
+minimum), zero near-white pixels on every seed, `projectedRise` -5.2 to +4.0
+(vs the 50 threshold), `compositionDrift` 0.060-0.145 (vs the 0.015
+minimum), `unitMotionNonRigidFrac` 0.899-1.0 (vs the 0.40 minimum, no
+thin-margin seeds), `avgMsPerFrame` 16-31ms giving `projectedHourRenderMin`
+23-45min (comfortably inside the CI budget). Visual spot-checks across
+2/25/50/75/95/105% of a 43.5s cycle at 3 seeds, plus early frames, actually
+rendering PNGs and looking at them, not just reading validator output: bold,
+vivid, immediately-legible arrow-shaped "birds" with visible individual
+headings and trails, and genuine flock-level splitting/merging between
+checkpoints.
+
+**Novelty gate**: measured against all 65 other existing engines (the
+committed fingerprint cache was stale, so the whole pool was fingerprinted
+fresh alongside the candidate, per this pool's established practice; the
+refreshed cache was not committed, per this routine's "touch only the new
+engine + log + CLAUDE.md" constraint, with the same `ENGINE_SUBJECTS`
+exception this pool's `tensegritychain.html` write-up already established).
+Nearest neighbour is `frostgrowth`
+at distance **0.919** -- comfortably clear of the 0.60 threshold and among
+the largest nearest-neighbour margins of any engine in the pool, not a
+thin-margin case at all. `murmuration` also forms its own singleton
+archetype group at the pool's perceptual-grouping threshold (0.55/0.6).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

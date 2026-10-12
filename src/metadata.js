@@ -59,6 +59,7 @@ const ENGINE_SUBJECTS = {
   liesegang: 'Liesegang Rings',
   mashrabiya: 'Kinetic Mashrabiya Screen',
   moire: 'Moire Patterns',
+  murmuration: 'Starling Murmuration Flock',
   muqarnas: 'Muqarnas Honeycomb Vault',
   orbweb: 'Spider Web Spiral',
   pendulumwave: 'Pendulum Wave',

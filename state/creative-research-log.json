@@ -1205,5 +1205,34 @@
     ],
     "nearestNeighbour": "moire",
     "nearestDistance": 0.9285
+  },
+  {
+    "date": "2026-10-12",
+    "category": "random natural structure",
+    "inspirationSource": "Consolidated catch-up run covering two missed daily-research firings (2026-10-11 and 2026-10-12, both queued behind an ongoing human conversation in this session and not executed separately -- this single entry covers the backlog, dated 2026-10-12, no separate 2026-10-11 entry). Delegated an open WebSearch for a random natural-structure phenomenon, explicitly scoped away from every already-shipped construction technique in the pool. Surfaced Craig Reynolds's 1986 BOIDS model -- the algorithm behind starling murmurations and fish schools: no bird has a plan or a leader, yet three purely LOCAL rules (separation, alignment, cohesion) applied identically by every individual produce the whole flock's large-scale coherent shape, splits and merges as an emergent bottom-up property. Sources: Reynolds, \"Flocks, Herds, and Schools: A Distributed Behavioral Model\" (SIGGRAPH 1987, red3d.com/cwr/papers/1987/boids.html); people.ece.cornell.edu/land/courses/ece4760/labs/s2021/Boids/Boids.html (rule summary); researchgate.net/publication/234804654 (murmuration structure).",
+    "idea": "A genuinely different construction PRINCIPLE from every other engine in the pool: not a wave-interference field sampled fresh each frame (chladni/phasespikes/moire/schlieren), not a discrete local-rule automaton on a fixed lattice (automaton -- cells never move), not feedback-driven phase synchronisation with no spatial position at all (kuramotochimera), not an iterated deterministic map histogrammed (strangeattractor -- one point, not N agents), not a particle/growth/packing process with a fixed accretion/placement rule whose units never move once placed (frostgrowth's DLA, phyllotaxis's golden-angle packing, doylespiral's conformal map), not a partition/tiling (voronoimosaic/quasicrystal/foamcoarsen), not a PDE field (reactiondiffusion). Here N mobile agents each sense only their own local neighbourhood and steer by three independent vector rules (separation + alignment + cohesion), plus a per-boid correlated-random-walk wander force and a slow per-flock goal-direction bias, inside a hard circular containment clamp -- a continuously self-reorganising multi-agent system with real 2D position and velocity, the one archetype missing from this pool. Several independent flocks (not one) are placed in a near-regular grid of circular regions (the dendrite.html/hilbertweave.html/phyllotaxis.html/kuramotochimera.html multi-instance technique), each with its own independently-rated goal-direction drift so no single global rigid transform can explain the frame; each boid also gets an independent render-only wing-flap size flutter as a second, decoupled non-rigid signal layer. Colour is fixed by (flock index, boid rank within its flock) -- an axis the physics can never disturb.",
+    "engineName": "murmuration",
+    "outcome": "shipped",
+    "reason": "Offline-verified the simulation (separation/alignment/cohesion + wander + goal-bias + hard clamp) for 40 SIMULATED MINUTES across 5 seeds before writing full render code: zero NaN/Infinity, exact containment (0.000px overshoot), speed always in [minSpeed,maxSpeed], and flock-shape variance (pairwise boid-distance variance, sampled every 30s) staying well above a 0.03 coefficient-of-variation floor on every flock/seed (measured 2.6-8.7) -- confirming the wander force keeps each flock genuinely reorganising rather than settling into a frozen sub-formation that just translates (which would fail both compositionDrift and the unit-motion gate). One real bug found only by rendering actual frames and looking, not by reasoning about the code: the first design's SOFT steering-based separation force, averaged across all nearby neighbours, cancels almost completely once a symmetric tight cluster forms (each neighbour's push answered by another from roughly the opposite side) -- alignment+cohesion collapsed every flock into a near-single overlapping blob within ~20s on every tested seed, confirmed by dumping real boid positions (inter-boid spacing 2-5px against a 25-31px separation radius). Fixed with a HARD positional-separation pass every substep (spinbounce.html's ball-ball technique, reused verbatim) that pushes overlapping boids apart directly, sidestepping the averaging-cancellation entirely. That fix then surfaced a second bug, found the same way (re-running the offline stability check after adding hard separation): the hard-separation push could shove a boid already near the containment boundary up to 64px past it. Fixed with a position-only re-clamp pass immediately after hard separation. Rendered and looked at real PNG frames across 2/25/50/75/95/105% of a 43.5s cycle at 3 seeds, plus early frames: bold, vivid, immediately-legible arrow-shaped \"birds\" with visible individual headings and trails, and genuine flock-level splitting/merging. Full validateEngine() battery across seeds 1-15 plus the CLI default seed 12345: 16/16 passed with strong margins -- avgSat 58-70.5 (vs the 22 minimum), zero near-white pixels, projectedRise -5.2 to +4.0 (vs the 50 threshold), compositionDrift 0.060-0.145 (vs the 0.015 minimum), unitMotionNonRigidFrac 0.899-1.0 (vs the 0.40 minimum, no thin-margin seeds), avgMsPerFrame 16-31ms giving projectedHourRenderMin 23-45min (comfortably inside the CI budget).",
+    "seedsVerified": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      12345
+    ],
+    "nearestNeighbour": "frostgrowth",
+    "nearestDistance": 0.919
   }
 ]

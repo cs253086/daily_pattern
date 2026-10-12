@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Murmuration — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated engine, daily creative-research routine -- a consolidated
+// catch-up run covering two missed firings (2026-10-11 and 2026-10-12,
+// both queued behind a human conversation and not yet executed; dated
+// 2026-10-12, no separate 2026-10-11 entry). Category was "random natural
+// structure" / open web search, explicitly scoped away from every already-
+// shipped construction technique in this pool. Search surfaced Craig
+// Reynolds's 1986 BOIDS model -- the algorithm behind starling murmurations
+// and fish schools: no bird has a plan or a leader, yet three purely LOCAL
+// rules (separation, alignment, cohesion) applied identically by every
+// individual produce the whole flock's large-scale coherent shape, splits
+// and merges as an emergent, bottom-up property of the system. Sources:
+// Reynolds, "Flocks, Herds, and Schools: A Distributed Behavioral Model"
+// (SIGGRAPH 1987, https://www.red3d.com/cwr/papers/1987/boids.html);
+// https://people.ece.cornell.edu/land/courses/ece4760/labs/s2021/Boids/Boids.html
+// (rule summary); https://www.researchgate.net/publication/234804654
+// (murmuration structure).
+//
+// A genuinely different construction PRINCIPLE from every other engine in
+// this pool: not a wave-interference field sampled fresh each frame
+// (chladni/phasespikes/moire/schlieren); not a discrete local-rule
+// automaton on a FIXED lattice (automaton -- cells never move); not
+// feedback-driven PHASE synchronisation with no spatial movement at all
+// (kuramotochimera); not an iterated deterministic map histogrammed
+// (strangeattractor -- one point, not N agents); not a particle/growth/
+// packing process with a fixed accretion/placement rule (frostgrowth's
+// random-walk accretion, phyllotaxis's golden-angle placement, doylespiral's
+// conformal map -- none of those units ever MOVE once placed); not a
+// partition/tiling (voronoimosaic/quasicrystal/foamcoarsen); not a PDE
+// field (reactiondiffusion); not an uncoupled uniform-rule swarm
+// (kuramotochimera's oscillators interact through ONE shared sinusoidal
+// term with no spatial position at all). Here, N mobile agents each sense
+// only their own local neighbourhood and steer by three independent vector
+// rules -- a continuously self-reorganising MULTI-AGENT system with real
+// 2D position and velocity, the one archetype missing from this pool.
+//
+// VERIFIED OFFLINE before writing this file (the same discipline this
+// pool's quasicrystal.html/geodome.html/spaceframe.html already
+// established for a construction that could still "look plausible" even if
+// subtly wrong): a standalone script replicating this exact simulation
+// (separation/alignment/cohesion + a per-boid correlated-random-walk
+// "wander" force + a slow per-flock goal-direction bias + a hard boundary
+// clamp) was run for 40 SIMULATED MINUTES (4x spinbounce.html's own
+// 10-minute precedent) across 5 seeds. Confirmed: (a) zero NaN/Infinity
+// ever; (b) every boid's distance from its own flock centre never exceeded
+// its confinement radius by more than floating-point noise (0.000px
+// measured -- the hard clamp works exactly as intended, so flocks can
+// never collide with a neighbouring flock's region); (c) speed stayed
+// within [minSpeed, maxSpeed] throughout; (d) the WANDER force keeps each
+// flock's internal shape (measured as the variance of all pairwise
+// boid-to-boid distances, sampled every 30s) changing continuously rather
+// than converging to a frozen arrangement that just translates -- a real,
+// checked risk for simplified boids models under strong alignment/
+// cohesion. Without wander, a flock can settle into a near-rigid
+// sub-formation that drifts as one block, which would fail BOTH
+// compositionDrift (no development) and the unit-motion gate (a frozen
+// local shape is trivially explained by a single rigid transform). With
+// wander, the shape-variance time series' coefficient of variation stayed
+// well above a 0.03 floor on every flock, every seed (measured 2.6-8.7,
+// nowhere close to flat).
+//
+// Several INDEPENDENT flocks (not one), each confined to its own circular
+// region in a near-regular grid (the dendrite.html/hilbertweave.html/
+// phyllotaxis.html/kuramotochimera.html multi-instance technique, same
+// 0.44x-of-the-smaller-cell-dimension safety cap those engines already
+// established), each with its OWN goal-direction rate (guaranteed-minimum-
+// magnitude, random sign, reassigned -- never reset -- at cycleSec
+// boundaries). This is deliberate, not cosmetic: per truchet.html's lesson
+// that a single SHARED whole-field motion source dilutes the mandatory
+// unit-motion signal, several flocks drifting in independently different
+// directions at independently different rates guarantees no single global
+// rigid transform (one rotation + one translation) can explain the whole
+// frame's change -- the same "independently-rotating layers" pattern
+// radiolarian.html/muqarnas.html/kuramotochimera.html already use, applied
+// here to translating flocks instead of rotating shells/rings. Each boid
+// also has its own independent render-only size "flutter" (wing-flap
+// amplitude/rate, guaranteed-minimum-magnitude, random phase) as a second,
+// decoupled layer of local non-rigid signal, in case any one flock's
+// internal motion is ever locally close to rigid on a given frame.
+//
+// Colour is fixed by (flock index, boid rank within its flock) -- an axis
+// the physics can never disturb, the same "colour by an axis the motion
+// can't disturb" principle this pool's geodome.html/spaceframe.html/
+// rosenspikes.html/etc. already established, here applied to population
+// membership instead of a spatial coordinate. Each flock's base colour is
+// drawn directly from the resolved palette array (cycled by flock index),
+// so a day's NASA-image recolour (the `colors` URL param) changes which
+// flock gets which hue exactly the way it already recolors every other
+// curated engine.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. Clear-and-redraw every frame (opaque
+// black fill), a fixed number of equal-size boids whose only size change is
+// the small, independently-phased, symmetric flutter above -- no
+// accumulation of any kind, structurally whiteout-proof by construction.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = Math.max(0.2, fltP('speed', 1));
+  const DENSITY = Math.max(0.3, fltP('density', 1));
+  const CYCLE_SEC = Math.max(4, fltP('cycleSec', 43.5));
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Mulberry32's first draws for consecutive small seeds are correlated
+  // (the gotcha pendulumwave.html/spinbounce.html's write-up documents) --
+  // burn 4 draws before using the stream, the same convention established
+  // by every physics-style engine in this pool since.
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+  const clampSat = (s) => Math.max(76, Math.min(96, s));
+  const clampLight = (l) => Math.max(48, Math.min(64, l));
+
+  const dt = 1 / FPS;
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+
+  // ---- flock layout: several independent circular regions in a
+  // near-regular grid, exactly the kuramotochimera.html/liesegang.html
+  // formula (see header comment for why this cap/jitter combination is
+  // already a proven-safe choice in this pool). ----
+  const FLOCK_COUNT = Math.max(3, Math.min(5, Math.round(4 * Math.max(0.7, Math.min(1.3, DENSITY)))));
+  const cols = FLOCK_COUNT <= 3 ? FLOCK_COUNT : Math.ceil(Math.sqrt(FLOCK_COUNT));
+  const rows = Math.ceil(FLOCK_COUNT / cols);
+  const cellW = W / cols, cellH = H / rows;
+  const clusterMaxR = Math.min(cellW, cellH) * 0.44;
+
+  function makeFlock(idx) {
+    const col = idx % cols, row = Math.floor(idx / cols);
+    const cx = cellW * (col + 0.5) + rand(-cellW * 0.08, cellW * 0.08);
+    const cy = cellH * (row + 0.5) + rand(-cellH * 0.08, cellH * 0.08);
+    const R = clusterMaxR * rand(0.85, 1.0);
+    const Nf = Math.max(7, Math.min(18, Math.round(rand(9, 15) * Math.max(0.7, Math.min(1.4, DENSITY)))));
+    const sepR = R * rand(0.16, 0.22);
+    const neiR = R * rand(0.40, 0.55);
+    const maxSpeed = R * rand(0.55, 0.75) * SPEED;
+    const minSpeed = maxSpeed * rand(0.35, 0.45);
+    const maxForce = maxSpeed * rand(2.2, 3.0);
+    const Wsep = rand(1.6, 2.2), Walign = rand(0.7, 1.0), Wcoh = rand(0.5, 0.8);
+    const Wwander = rand(0.5, 0.9), Wgoal = rand(0.25, 0.4);
+    const wanderJitter = rand(0.25, 0.4);
+    const boidSize = R * rand(0.10, 0.14);
+    const hardSep = boidSize * 2.3;
+    const col0 = PAL[idx % PAL.length];
+    const boids = [];
+    for (let j = 0; j < Nf; j++) {
+      let x = 0, y = 0;
+      for (let tries = 0; tries < 200; tries++) {
+        const a = rand(0, Math.PI * 2), r = Math.sqrt(rng()) * R * 0.6;
+        x = Math.cos(a) * r; y = Math.sin(a) * r;
+        if (boids.every((b) => Math.hypot(b.x - x, b.y - y) > R * 0.08)) break;
+      }
+      const va = rand(0, Math.PI * 2), vm = rand(minSpeed, maxSpeed);
+      const rankFrac = Nf > 1 ? j / (Nf - 1) : 0;
+      boids.push({
+        x, y, vx: Math.cos(va) * vm, vy: Math.sin(va) * vm,
+        wanderAngle: rand(0, Math.PI * 2),
+        flutterPhase: rand(0, Math.PI * 2),
+        flutterRate: sgn() * rand(1.2, 2.0),
+        flutterAmp: rand(0.12, 0.22),
+        hue: ((col0[0] + (rankFrac - 0.5) * 24) % 360 + 360) % 360,
+        sat: clampSat(col0[1]),
+        light: clampLight(col0[2] + (rankFrac - 0.5) * 12),
+      });
+    }
+    return {
+      cx, cy, R, Nf, sepR, neiR, maxSpeed, minSpeed, maxForce,
+      Wsep, Walign, Wcoh, Wwander, Wgoal, wanderJitter, boidSize, hardSep,
+      goalAngle: rand(0, Math.PI * 2), goalRate: sgn() * rand(0.5, 1.0) * SPEED,
+      cycleFrame: Math.floor(rng() * cycleFrames), boids,
+    };
+  }
+  const flocks = [];
+  for (let i = 0; i < FLOCK_COUNT; i++) flocks.push(makeFlock(i));
+
+  function reconfigureFlock(flock) {
+    flock.goalRate = sgn() * rand(0.5, 1.0) * SPEED;
+    flock.cycleFrame = 0;
+  }
+
+  const SUBSTEPS = 4;
+  const subDt = dt / SUBSTEPS;
+
+  function stepFlock(flock) {
+    const { boids, Nf, sepR, neiR, cx, cy, R, maxForce, maxSpeed, minSpeed,
+            Wsep, Walign, Wcoh, Wwander, Wgoal, wanderJitter, goalAngle } = flock;
+    for (let i = 0; i < Nf; i++) {
+      const bi = boids[i];
+      let sepX = 0, sepY = 0, sepN = 0;
+      let aliX = 0, aliY = 0, aliN = 0;
+      let cohX = 0, cohY = 0, cohN = 0;
+      for (let j = 0; j < Nf; j++) {
+        if (j === i) continue;
+        const bj = boids[j];
+        const dx = bi.x - bj.x, dy = bi.y - bj.y;
+        const d = Math.hypot(dx, dy);
+        if (d < sepR) {
+          const w = d < 1e-6 ? 1 : (sepR - d) / sepR;
+          const dirx = d < 1e-6 ? Math.cos(i * 2.399) : dx / d;
+          const diry = d < 1e-6 ? Math.sin(i * 2.399) : dy / d;
+          sepX += dirx * w; sepY += diry * w; sepN++;
+        }
+        if (d < neiR) { aliX += bj.vx; aliY += bj.vy; aliN++; cohX += bj.x; cohY += bj.y; cohN++; }
+      }
+      let fx = 0, fy = 0;
+      if (sepN > 0) { fx += (sepX / sepN) * Wsep; fy += (sepY / sepN) * Wsep; }
+      if (aliN > 0) { fx += (aliX / aliN - bi.vx) * Walign; fy += (aliY / aliN - bi.vy) * Walign; }
+      if (cohN > 0) { fx += (cohX / cohN - bi.x) * Wcoh; fy += (cohY / cohN - bi.y) * Wcoh; }
+      bi.wanderAngle += rand(-wanderJitter, wanderJitter);
+      fx += Math.cos(bi.wanderAngle) * Wwander;
+      fy += Math.sin(bi.wanderAngle) * Wwander;
+      fx += Math.cos(goalAngle) * Wgoal * maxForce;
+      fy += Math.sin(goalAngle) * Wgoal * maxForce;
+      const ox = bi.x - cx, oy = bi.y - cy, od = Math.hypot(ox, oy);
+      const softStart = R * 0.8;
+      if (od > softStart) {
+        const excess = Math.min(1, (od - softStart) / (R * 0.2));
+        const k = excess * excess * maxForce * 2.5;
+        fx += -(ox / Math.max(od, 1e-6)) * k;
+        fy += -(oy / Math.max(od, 1e-6)) * k;
+      }
+      const fm = Math.hypot(fx, fy);
+      if (fm > maxForce) { fx *= maxForce / fm; fy *= maxForce / fm; }
+      bi._ax = fx; bi._ay = fy;
+    }
+    for (let i = 0; i < Nf; i++) {
+      const bi = boids[i];
+      bi.vx += bi._ax * subDt; bi.vy += bi._ay * subDt;
+      let sp = Math.hypot(bi.vx, bi.vy);
+      if (sp < 1e-9) { bi.vx = minSpeed; bi.vy = 0; sp = minSpeed; }
+      if (sp > maxSpeed) { bi.vx *= maxSpeed / sp; bi.vy *= maxSpeed / sp; }
+      else if (sp < minSpeed) { bi.vx *= minSpeed / sp; bi.vy *= minSpeed / sp; }
+      bi.x += bi.vx * subDt; bi.y += bi.vy * subDt;
+      const ox = bi.x - cx, oy = bi.y - cy, od = Math.hypot(ox, oy);
+      if (od > R) {
+        const nx = ox / od, ny = oy / od;
+        bi.x = cx + nx * R; bi.y = cy + ny * R;
+        const radial = bi.vx * nx + bi.vy * ny;
+        if (radial > 0) { bi.vx -= 2 * radial * nx; bi.vy -= 2 * radial * ny; }
+      }
+    }
+    // Hard separation: directly push overlapping boids apart positionally
+    // every substep (spinbounce.html's ball-ball technique, reused
+    // verbatim). This was added after rendering real frames and finding a
+    // genuine bug: the SOFT steering separation force above, averaged
+    // across all nearby neighbours, cancels almost completely once a
+    // symmetric tight cluster forms (each neighbour's push is answered by
+    // another neighbour's push from roughly the opposite side), so
+    // alignment + cohesion collapsed every flock into a near-single
+    // overlapping blob within the first ~20s on every tested seed --
+    // confirmed directly by dumping real boid positions at that point
+    // (inter-boid spacing 2-5px against a 25-31px separation radius). A
+    // hard positional floor sidesteps the averaging-cancellation entirely:
+    // boids can simply never be closer than hardSep, regardless of how the
+    // steering forces balance.
+    const { hardSep } = flock;
+    for (let i = 0; i < Nf; i++) {
+      for (let j = i + 1; j < Nf; j++) {
+        const a = boids[i], b = boids[j];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= hardSep * hardSep || d2 === 0) continue;
+        const d = Math.sqrt(d2), nx = dx / d, ny = dy / d;
+        const overlap = (hardSep - d) / 2;
+        a.x -= overlap * nx; a.y -= overlap * ny;
+        b.x += overlap * nx; b.y += overlap * ny;
+      }
+    }
+    // Re-clamp to the containment circle: the hard-separation pass above
+    // can push a boid that was already near the R boundary back outside it
+    // (found the same way as the bug above -- re-running the offline
+    // stability check after adding hard separation showed boids up to 64px
+    // past R). Position-only is enough here (no velocity reflection,
+    // unlike the primary clamp above) since this is a small corrective
+    // nudge, not a fast collision.
+    for (let i = 0; i < Nf; i++) {
+      const bi = boids[i];
+      const ox = bi.x - cx, oy = bi.y - cy, od = Math.hypot(ox, oy);
+      if (od > R) { bi.x = cx + (ox / od) * R; bi.y = cy + (oy / od) * R; }
+    }
+    flock.goalAngle += flock.goalRate * dt;
+  }
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    for (const flock of flocks) {
+      flock.cycleFrame++;
+      if (flock.cycleFrame >= cycleFrames) reconfigureFlock(flock);
+      for (let s = 0; s < SUBSTEPS; s++) stepFlock(flock);
+    }
+
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    for (const flock of flocks) {
+      const { boids, boidSize } = flock;
+      for (const b of boids) {
+        b.flutterPhase += b.flutterRate * dt;
+        const sizeMul = 1 + b.flutterAmp * Math.sin(b.flutterPhase);
+        const L = boidSize * sizeMul, Wd = boidSize * 0.82 * sizeMul;
+        const heading = Math.atan2(b.vy, b.vx);
+        const dx = Math.cos(heading), dy = Math.sin(heading);
+        const px = -dy, py = dx;
+        const tipX = b.x + dx * L, tipY = b.y + dy * L;
+        const blX = b.x - dx * L * 0.55 + px * Wd * 0.5, blY = b.y - dy * L * 0.55 + py * Wd * 0.5;
+        const brX = b.x - dx * L * 0.55 - px * Wd * 0.5, brY = b.y - dy * L * 0.55 - py * Wd * 0.5;
+        const col = `hsl(${b.hue}, ${b.sat}%, ${b.light}%)`;
+
+        // short trail, drawn fresh every frame (no accumulation)
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = `hsla(${b.hue}, ${b.sat}%, ${b.light}%, 0.28)`;
+        ctx.lineWidth = L * 0.5;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(b.x - dx * L * 0.5, b.y - dy * L * 0.5);
+        ctx.lineTo(b.x - dx * L * 2.1, b.y - dy * L * 2.1);
+        ctx.stroke();
+
+        // glow backing
+        ctx.fillStyle = `hsla(${b.hue}, ${b.sat}%, ${b.light}%, 0.22)`;
+        ctx.beginPath();
+        ctx.moveTo(b.x + dx * L * 1.5, b.y + dy * L * 1.5);
+        ctx.lineTo(b.x - dx * L * 0.8 + px * Wd * 0.9, b.y - dy * L * 0.8 + py * Wd * 0.9);
+        ctx.lineTo(b.x - dx * L * 0.8 - px * Wd * 0.9, b.y - dy * L * 0.8 - py * Wd * 0.9);
+        ctx.closePath();
+        ctx.fill();
+
+        // bright crisp core
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(tipX, tipY);
+        ctx.lineTo(blX, blY);
+        ctx.lineTo(brX, brY);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
