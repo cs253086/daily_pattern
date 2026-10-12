@@ -1,11 +1,12 @@
 {
-  "last3D": "auto-2026-08-27-field-of-small-lit-3d-solids-drifting-th",
+  "last3D": "auto-2026-09-13-llanberis-lake-north-wales",
   "last2D": "herringbone",
   "lastMandala": "kaleidoscope",
   "recentCuratedDates": [
-    "20261011"
+    "20261011",
+    "20261012"
   ],
-  "last3DArchetype": "discrete-3d-solids",
+  "last3DArchetype": "auto-2026-09-13-llanberis-lake-north-wales",
   "last2DArchetype": "herringbone",
   "last3DByArchetype": {
     "geodome": "geodome",
@@ -35,5 +36,5 @@
     "grid": "grid",
     "herringbone": "herringbone"
   },
-  "updatedAt": "2026-10-11T15:31:19.262Z"
+  "updatedAt": "2026-10-12T18:51:11.438Z"
 }
