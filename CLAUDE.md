@@ -5557,6 +5557,17 @@ changing anything:
     5-6 turns each, zero same-engine repeats on consecutive days.
     `FEATURE_MANDALA=0` disables it. Gemini days are unaffected.
 
+- **Owner-action note, 2026-10-11 (growth bot, no code shipped)**: a
+  YouTube Studio channel trailer for non-subscribed visitors (Studio >
+  Customization > Basic info > channel trailer) is a plausible lever per
+  general 2026 YouTube-growth advice, which claims a well-made trailer
+  converts channel-page visitors to subscribers at a higher rate than any
+  single video. This is Studio-only (picking/trimming a representative
+  video and configuring it as the trailer) -- not reachable from this
+  bot's `src/metadata.js`/`src/thumbnail.js`/`src/index.js` scope, so it's
+  logged here rather than attempted. Worth the owner's time if they're
+  looking for one more lever.
+
 ## Rosensweig spike-lattice engine (`rosenspikes.html`) — 2026-09-26
 
 Daily creative-research routine. Category was "obscure mathematical object /
