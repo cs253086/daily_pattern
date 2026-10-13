@@ -1,12 +1,13 @@
 {
-  "last3D": "auto-2026-09-13-llanberis-lake-north-wales",
+  "last3D": "columnarbasalt",
   "last2D": "herringbone",
   "lastMandala": "kaleidoscope",
   "recentCuratedDates": [
     "20261011",
-    "20261012"
+    "20261012",
+    "20261013"
   ],
-  "last3DArchetype": "auto-2026-09-13-llanberis-lake-north-wales",
+  "last3DArchetype": "columnarbasalt",
   "last2DArchetype": "herringbone",
   "last3DByArchetype": {
     "geodome": "geodome",
@@ -17,7 +18,8 @@
     "auto-2026-09-13-llanberis-lake-north-wales": "auto-2026-09-13-llanberis-lake-north-wales",
     "muqarnas": "muqarnas",
     "rosenspikes": "rosenspikes",
-    "tensegritychain": "tensegritychain"
+    "tensegritychain": "tensegritychain",
+    "columnarbasalt": "columnarbasalt"
   },
   "last2DByArchetype": {
     "arcrings": "arcrings",
@@ -36,5 +38,5 @@
     "grid": "grid",
     "herringbone": "herringbone"
   },
-  "updatedAt": "2026-10-12T18:51:11.438Z"
+  "updatedAt": "2026-10-13T16:52:42.211Z"
 }
