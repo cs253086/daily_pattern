@@ -1,13 +1,14 @@
 {
-  "last3D": "columnarbasalt",
+  "last3D": "diagrid",
   "last2D": "herringbone",
   "lastMandala": "kaleidoscope",
   "recentCuratedDates": [
     "20261011",
     "20261012",
-    "20261013"
+    "20261013",
+    "20261015"
   ],
-  "last3DArchetype": "columnarbasalt",
+  "last3DArchetype": "diagrid",
   "last2DArchetype": "herringbone",
   "last3DByArchetype": {
     "geodome": "geodome",
@@ -19,7 +20,8 @@
     "muqarnas": "muqarnas",
     "rosenspikes": "rosenspikes",
     "tensegritychain": "tensegritychain",
-    "columnarbasalt": "columnarbasalt"
+    "columnarbasalt": "columnarbasalt",
+    "diagrid": "diagrid"
   },
   "last2DByArchetype": {
     "arcrings": "arcrings",
@@ -38,5 +40,5 @@
     "grid": "grid",
     "herringbone": "herringbone"
   },
-  "updatedAt": "2026-10-13T16:52:42.211Z"
+  "updatedAt": "2026-10-15T14:06:09.221Z"
 }
