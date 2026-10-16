@@ -1,14 +1,15 @@
 {
-  "last3D": "diagrid",
+  "last3D": "geodome",
   "last2D": "herringbone",
   "lastMandala": "kaleidoscope",
   "recentCuratedDates": [
     "20261011",
     "20261012",
     "20261013",
-    "20261015"
+    "20261015",
+    "20261016"
   ],
-  "last3DArchetype": "diagrid",
+  "last3DArchetype": "geodome",
   "last2DArchetype": "herringbone",
   "last3DByArchetype": {
     "geodome": "geodome",
@@ -40,5 +41,5 @@
     "grid": "grid",
     "herringbone": "herringbone"
   },
-  "updatedAt": "2026-10-15T14:06:09.221Z"
+  "updatedAt": "2026-10-16T13:53:59.708Z"
 }
