@@ -4,7 +4,12 @@
     "subscribersKnown": 14,
     "goal": 500,
     "change": "Diagnosed from the real production job log before changing anything: videos shipped silent (FREESOUND_API_KEY never set), titles were generic (not search terms), the Short had no link back to the long video, no subscribe link, no playlists wired, and uploads' public/private status was unverifiable from the masked log.",
-    "filesChanged": ["src/metadata.js", "src/upload.js", "src/index.js", ".github/workflows/daily.yml"],
+    "filesChanged": [
+      "src/metadata.js",
+      "src/upload.js",
+      "src/index.js",
+      ".github/workflows/daily.yml"
+    ],
     "rationale": "See CLAUDE.md 'Subscriber growth' section for full detail. Titles default to search style (subject + duration + mood) behind TITLE_STYLE; Short description links the long video; subscribe link added; playlist wiring added (inert until the YouTube token is re-minted with youtube.force-ssl -- owner action, still pending as of this entry); upload.js now logs public/NO explicitly.",
     "verified": "TITLE_STYLE=search DRY_RUN=1 DURATION=8 node src/index.js end to end; unit checks on metadata for both title styles.",
     "outcome": "shipped",
@@ -15,7 +20,12 @@
     "subscribersKnown": null,
     "goal": 500,
     "change": "Shorts cut from 30s to 15s (two 30s Shorts held viewers only ~10s per owner's Studio screenshot, Aug31-Sep27: 5.2K views, 181.7 watch hours, +4 subs). Custom thumbnail with a picked vivid frame + duration/pattern-name text added. Mandala-archetype engines (kaleidoscope, starburst, spirograph, geometric, arcrings, ziggurat) now featured ~1 in 3 curated days -- Studio's 'videos growing your audience' list was led by Kaleidoscope/Sacred Geometry titles.",
-    "filesChanged": ["src/render.js", "src/thumbnail.js", "src/metadata.js", "src/index.js"],
+    "filesChanged": [
+      "src/render.js",
+      "src/thumbnail.js",
+      "src/metadata.js",
+      "src/index.js"
+    ],
     "rationale": "See CLAUDE.md 'Subscriber growth' section. All three changes traced directly to owner-supplied Studio analytics (Content + Audience tabs): 60.9K impressions, 89% from recommendations, 2.8% CTR, traffic breakdown, 64.2% watch time on TVs, zero Shorts-to-subscriber conversion.",
     "verified": "Rendered and visually checked sample thumbnails across several engines; full validateEngine()-style dry runs.",
     "outcome": "shipped",
@@ -26,7 +36,10 @@
     "subscribersKnown": null,
     "goal": 500,
     "change": "Removed the yellow '1 HOUR' headline from thumbnails per direct owner request -- pattern name now reads larger, alone, on the dark scrim. Video title still carries '1 Hour' for search.",
-    "filesChanged": ["src/thumbnail.js", "src/index.js"],
+    "filesChanged": [
+      "src/thumbnail.js",
+      "src/index.js"
+    ],
     "rationale": "Owner instruction, not data-driven. See CLAUDE.md thumbnail write-up.",
     "verified": "Rendered sample thumbnails (Doyle spiral, bouncing balls) and looked at them.",
     "outcome": "shipped",
@@ -122,5 +135,17 @@
     "verified": "git fetch origin main && git reset --hard origin/main confirmed clean sync with zero new commits since this session's own prior push (0583ed3); read state/subscriber-updates.json (latest still 16, 2026-10-06) and confirmed no growth-log.json changes since yesterday's entry; re-ran the ENGINE_SUBJECTS coverage script -- 58/58 matched, zero gaps.",
     "outcome": "skipped",
     "goalReached": false
+  },
+  {
+    "date": "2026-10-17",
+    "subscribersKnown": 16,
+    "goal": 500,
+    "change": null,
+    "filesChanged": [],
+    "rationale": "Daily firing of the growth bot. state/subscriber-updates.json latest is still the 2026-10-06 owner-reported count of 16, now 11 days old, which hits the stale threshold this routine describes -- noted as a known gap, not fixable here. No new owner input and no new research need today (last WebSearch round was 2026-10-06). Gap to record: notifications for the 2026-10-13, 10-14, 10-15 and 10-16 firings were received in-session but were not processed or logged, so those four days have no growth-log entries. Those firings are not re-run retroactively here. This is a process failure to flag to the owner, not a new growth finding.",
+    "verified": "git fetch origin main && git reset --hard origin/main confirmed clean sync to 393c657; read state/subscriber-updates.json (latest 16, 2026-10-06) and state/growth-log.json (last entry 2026-10-12, 11 entries).",
+    "outcome": "skipped",
+    "goalReached": false,
+    "note": "Owner should know: four daily firings (10-13 to 10-16) were missed in the log. Also needed from the owner: a fresh Studio subscriber count, since the current one is 11 days old."
   }
 ]
