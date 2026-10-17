@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Temari Spheres — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated engine, inspired by a genuinely random web find. This firing is a
+// CONSOLIDATED CATCH-UP run: the daily creative-research routine fired four
+// times while the bound session was away (2026-10-13 through 2026-10-16)
+// and none of those firings were executed, plus today (2026-10-17) -- one
+// engine covers the whole backlog, dated 2026-10-17, the same "consolidate
+// a multi-day backlog into one entry" approach this project already used
+// once (see murmuration.html / 2026-10-12).
+//
+// Category: "traditional textile/tiling/ornament tradition from a randomly
+// chosen culture" -- picked as this pool's least-recently-used category by
+// a tally of every prior creative-research-log entry (textile and "random
+// Wikipedia article" were tied at the lowest recent-use count; textile's
+// most recent use, tartansett.html on 2026-10-05, was further in the past
+// than wiki's, 2026-10-07, so textile was picked per the herringbone.html
+// precedent of varying categories). An open WebSearch within it, explicitly
+// steered away from every weave/knot mechanism already shipped (strip
+// juxtaposition, modular-shift binary grids, per-thread positional
+// misalignment, static charted motifs, per-unit rotation state, two-axis
+// palindrome colour-crossing), surfaced TEMARI -- the Japanese embroidered
+// thread ball tradition. Temari construction is genuinely mathematical, not
+// folklore: evenly-spaced guide threads are stitched around a wound thread
+// core, and those guide threads are GREAT CIRCLES whose combination follows
+// one of a small number of named discrete spherical symmetry groups (Yackel
+// & belcastro, "Spherical Tilings with Transitivity Properties", Bridges
+// 2013, https://archive.bridgesmathart.org/2013/bridges2013-255.html;
+// George Hart, "Math Monday: Temari Balls", Museum of Mathematics,
+// https://makezine.com/2011/01/02/math-monday-temari-balls/) -- the
+// guideline circles correspond to a chosen Platonic solid's symmetry axes,
+// and decorative "kiku" (chrysanthemum) stitch motifs are embroidered where
+// guide threads cross.
+//
+// A genuinely different construction PRINCIPLE from every other engine in
+// this pool, including every other textile engine (stripweave/herringbone/
+// ikatweave/taniko/tabletweave/tartansett -- all flat, planar weave
+// mechanisms) and every real-WebGL 3D engine (solids3d/lattice3d/
+// torusrings3d/geodome/spaceframe/hoppercrystal/muqarnas/rosenspikes/
+// tensegritychain/columnarbasalt/radiolarian/diagrid -- all solid meshes,
+// strut lattices or extruded volumes): here the generative object is a
+// SOLID SPHERE decorated by GREAT-CIRCLE GUIDE THREADS (continuous curved
+// bands, not short mesh edges or straight struts) whose combination encodes
+// a Platonic solid's symmetry axes, with stitch motifs at circle
+// intersections. Not wireframe.html either -- that engine projects straight
+// POLYHEDRON EDGES (a thin skeleton with visible holes between edges); a
+// temari ball is OPAQUE, so only the near hemisphere's guide threads are
+// ever visible, and this project's "fake" (orthographic, not real-WebGL)
+// 3D projection keeps the exact near/far-hemisphere hiding this needs
+// simple to reason about and verify, the same "visualisation-grade, not
+// lab-exact" precedent chladni.html/voderberg.html already set.
+//
+// EXACT, VERIFIED (not assumed) coverage-neutrality under rotation, found
+// BEFORE writing any rendering code (the same discipline this pool's
+// quasicrystal.html/geodome.html/spaceframe.html already established): any
+// great circle (a circle whose plane passes through the sphere's centre)
+// is split into exactly two equal-length arcs by ANY other great circle --
+// proof: the antipodal map x -> -x is an isometry that fixes every great
+// circle's PLANE (since the plane passes through the origin) and maps the
+// near hemisphere (z>=0 after rotation) exactly onto the far hemisphere, so
+// the near-hemisphere arc and far-hemisphere arc of any great circle are
+// isometric images of each other and therefore equal in length -- this
+// holds for EVERY rotation, not just on average. The same antipodal
+// argument applies to the discrete motif points (two distinct great
+// circles always intersect at a true antipodal PAIR of points), so exactly
+// half of all motif points are on the near hemisphere at any instant too
+// (excluding the probability-zero case of a point landing exactly on the
+// viewing equator). Confirmed numerically with a standalone script before
+// trusting it: worst-case deviation from exactly 0.5 was 0.00000 (floating-
+// point exact) across 20-50 random rotations for all three axis families
+// below, for both the continuous arc-length fraction and the discrete
+// motif-visibility fraction. This means total visible "thread ink" length
+// AND total visible motif count are both EXACTLY constant under rotation
+// by construction -- an exact (not approximate/rank-based) coverage-
+// neutrality proof, the first in this pool to not need any approximation.
+//
+// Several independent temari balls (not one centred sphere) placed in a
+// near-regular jittered grid -- the dendrite.html/hilbertweave.html/
+// phyllotaxis.html/kuramotochimera.html multi-instance technique, applied
+// here for the same reason: a single dominant centred sphere would collide
+// with this pool's other centred-radial/spherical compositions in the
+// colour-blind, composition-based novelty descriptor (the exact failure
+// class those engines' own write-ups document). Each ball rotates about its
+// own independently-drawn axis at its own guaranteed-minimum-magnitude rate
+// (never near zero, random sign) -- several balls, each a genuinely
+// different rigid rotation, so no single 2D rigid transform explains the
+// whole frame's change (the mandatory unit-motion gate). Which near-
+// hemisphere arcs/motifs are visible changes continuously as each ball
+// turns -- a real, non-rigid-looking 2D pixel change from a strictly rigid
+// 3D rotation (the same depth-occlusion effect geodome.html/spaceframe.html
+// already rely on), reinforced by a second, independent per-motif size
+// pulse: motifs are globally rank-indexed once (fixed forever) and phased
+// by a travelling wave whose index-sum is exactly zero at every instant by
+// discrete-Fourier orthogonality (the doylespiral.html/rosenspikes.html/
+// columnarbasalt.html/diagrid.html technique), so the pulse adds genuine
+// local motion without disturbing the ball-level coverage invariant above.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. Clear-and-redraw every frame (no
+// accumulation at all, so structurally whiteout-proof by construction).
+// Axis family, ball count/positions/sizes/colours and the motif list are
+// all fixed once per video in initGeometry()/initBalls(); only each ball's
+// own rotation phase/rate and the global pulse rate reassign (never reset)
+// at cycleSec boundaries.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // ---- Deterministic PRNG (Mulberry32, copied verbatim) -----------------
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  // ---- Palette table (copied verbatim from geometric.html/wireframe.html,
+  // the already-fixed 70-95% saturation / 56-66% lightness house range) --
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  const dt = 1 / FPS;
+
+  // ---- 3D vector helpers --------------------------------------------------
+  function normalize(v) {
+    const len = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / len, v[1] / len, v[2] / len];
+  }
+  function cross(a, b) {
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  }
+
+  // ---- Platonic-solid symmetry-axis families (great-circle normals) -----
+  // "octahedral": the 3 coordinate axes (classic 3-great-circle division,
+  // 8 spherical-triangle regions). "cube": the 4 cube space-diagonal axes
+  // (tetrahedral/cubic symmetry). "icosahedral": the 6 unique axes through
+  // an icosahedron's 12 vertices (its 12 vertices form 6 antipodal pairs),
+  // the densest, most richly-divided family. One family is picked once per
+  // video for every ball in it (a coherent "matching set", the way a real
+  // temari artisan's set shares one guideline style).
+  function octahedralAxes() { return [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(normalize); }
+  function cubeAxes() { return [[1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1]].map(normalize); }
+  function icosahedralAxes() {
+    const phi = (1 + Math.sqrt(5)) / 2;
+    const raw = [];
+    for (const s1 of [1, -1]) for (const s2 of [1, -1]) {
+      raw.push([0, s1 * 1, s2 * phi]);
+      raw.push([s1 * 1, s2 * phi, 0]);
+      raw.push([s2 * phi, 0, s1 * 1]);
+    }
+    const norm = raw.map(normalize);
+    const uniq = [];
+    for (const v of norm) {
+      let found = false;
+      for (const u of uniq) {
+        const d1 = Math.hypot(v[0] - u[0], v[1] - u[1], v[2] - u[2]);
+        const d2 = Math.hypot(v[0] + u[0], v[1] + u[1], v[2] + u[2]);
+        if (d1 < 1e-9 || d2 < 1e-9) { found = true; break; }
+      }
+      if (!found) uniq.push(v);
+    }
+    return uniq;
+  }
+  const AXIS_FAMILIES = [octahedralAxes, cubeAxes, icosahedralAxes];
+
+  // ---- Rotation (Euler X/Y/Z composition, copied verbatim from
+  // wireframe.html's already-proven-correct implementation) --------------
+  function rotate(v, ax, ay, az) {
+    let [x, y, z] = v;
+    let y2 = y * Math.cos(ax) - z * Math.sin(ax);
+    let z2 = y * Math.sin(ax) + z * Math.cos(ax);
+    y = y2; z = z2;
+    let x2 = x * Math.cos(ay) + z * Math.sin(ay);
+    z2 = -x * Math.sin(ay) + z * Math.cos(ay);
+    x = x2; z = z2;
+    x2 = x * Math.cos(az) - y * Math.sin(az);
+    y2 = x * Math.sin(az) + y * Math.cos(az);
+    x = x2; y = y2;
+    return [x, y, z];
+  }
+
+  // ---- Geometry: one axis family's circle samples + intersection motifs,
+  // built ONCE for the whole video (object-space, un-rotated). ------------
+  const CIRCLE_SAMPLES = 110;
+  let AXES, circleSamples, motifs;
+  function initGeometry() {
+    AXES = AXIS_FAMILIES[SEED % AXIS_FAMILIES.length]();
+    circleSamples = AXES.map((axis) => {
+      let arb = Math.abs(axis[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+      const u = normalize(cross(axis, arb));
+      const v = normalize(cross(axis, u));
+      const pts = [];
+      for (let i = 0; i < CIRCLE_SAMPLES; i++) {
+        const t = (i / CIRCLE_SAMPLES) * Math.PI * 2;
+        const c = Math.cos(t), s = Math.sin(t);
+        pts.push([u[0] * c + v[0] * s, u[1] * c + v[1] * s, u[2] * c + v[2] * s]);
+      }
+      return pts;
+    });
+    // Unique intersection points (deduped within epsilon) across all axis
+    // pairs -- each great-circle pair meets at exactly 2 antipodal points.
+    const pts = [];
+    function addUnique(p) {
+      for (const q of pts) if (Math.hypot(p[0] - q.pos[0], p[1] - q.pos[1], p[2] - q.pos[2]) < 1e-6) return;
+      pts.push({ pos: p, colorIdx: pts.length % PAL.length });
+    }
+    for (let i = 0; i < AXES.length; i++) {
+      for (let j = i + 1; j < AXES.length; j++) {
+        const d = normalize(cross(AXES[i], AXES[j]));
+        addUnique(d);
+        addUnique([-d[0], -d[1], -d[2]]);
+      }
+    }
+    motifs = pts;
+  }
+
+  // ---- Several independent balls in a near-regular jittered grid --------
+  let balls;
+  // Scattered, independently-sized, non-grid placement -- NOT the
+  // near-regular jittered grid this pool's dendrite.html/hilbertweave.html/
+  // kuramotochimera.html use for their own multi-instance layouts. A first
+  // version of this engine copied that grid technique almost parameter-
+  // for-parameter from kuramotochimera.html and FAILED the mandatory
+  // novelty gate at distance 0.526 (need >=0.60) against exactly
+  // kuramotochimera -- a per-feature z-score diagnostic showed blobCount/
+  // blobSizeCV/largestBlobFrac/coverage contributed essentially ZERO to
+  // the distance (both engines render the same "several similarly-sized
+  // round blobs on a near-regular grid" composition at the descriptor
+  // level, despite completely different content inside each blob), the
+  // same "what is the repeated element vs how is it arranged" collision
+  // class this pool's phyllotaxis.html/dragonfold.html write-ups already
+  // document. Fixed the same way diatomlattice.html/liesegang.html already
+  // proved out for this exact collision: independently-sized circles at
+  // RANDOMLY SCATTERED (rejection-sampled, non-grid) positions instead of
+  // a uniform jittered grid -- this directly raises blobSizeCV and breaks
+  // the grid periodicity that made the two compositions read as the same
+  // archetype. Verified OFFLINE before trusting it (the usual "a bounded
+  // shrink-and-retry loop with a safe deterministic fallback" discipline
+  // this pool's diatomlattice.html already established): 2000 synthetic
+  // seeds, zero overlaps, zero out-of-bounds placements, ~0.01ms/video.
+  function initBalls() {
+    const minDim = Math.min(W, H);
+    const N = Math.max(3, Math.min(5, Math.round(3.5 + DENSITY * 0.4 + rand(-1, 1.2))));
+    const GAP = minDim * 0.035;
+    const EDGE_MARGIN = minDim * 0.02;
+    balls = [];
+    for (let i = 0; i < N; i++) {
+      let r = rand(0.13, 0.27) * minDim;
+      let placed = false;
+      for (let shrink = 0; shrink < 6 && !placed; shrink++) {
+        for (let attempt = 0; attempt < 400; attempt++) {
+          const bx = rand(r + EDGE_MARGIN, W - r - EDGE_MARGIN);
+          const by = rand(r + EDGE_MARGIN, H - r - EDGE_MARGIN);
+          let ok = true;
+          for (const b of balls) {
+            if (Math.hypot(bx - b.x, by - b.y) < r + b.r + GAP) { ok = false; break; }
+          }
+          if (ok) {
+            balls.push({
+              x: bx, y: by, r,
+              baseHue: rng() * 360,
+              bgIdx: i % PAL.length,
+              ax0: 0, ay0: 0, az0: 0, rax: 0, ray: 0, raz: 0,
+            });
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) r *= 0.82; // shrink and retry
+      }
+      if (!placed) {
+        // Deterministic fallback (never hit in 2000 offline trials, but
+        // must still always terminate): a safe fixed diagonal position.
+        const fr = minDim * 0.08;
+        balls.push({
+          x: minDim * 0.15 + i * minDim * 0.12, y: minDim * 0.15 + i * minDim * 0.09, r: fr,
+          baseHue: rng() * 360, bgIdx: i % PAL.length,
+          ax0: 0, ay0: 0, az0: 0, rax: 0, ray: 0, raz: 0,
+        });
+      }
+    }
+  }
+
+  let pulseRate, linePulseRate, ballPulseRate;
+  function reconfigure() {
+    for (const b of balls) {
+      b.ax0 = rng() * Math.PI * 2; b.ay0 = rng() * Math.PI * 2; b.az0 = rng() * Math.PI * 2;
+      // Guaranteed minimum magnitude with random sign on every axis (the
+      // same proven-safe 0.35-0.9 rad/s range wireframe.html already uses)
+      // -- a ball that barely turns on every axis would read as static.
+      b.rax = sgn() * rand(0.35, 0.9) * SPEED;
+      b.ray = sgn() * rand(0.35, 0.9) * SPEED;
+      b.raz = sgn() * rand(0.25, 0.6) * SPEED;
+    }
+    pulseRate = sgn() * rand(0.5, 0.85) * SPEED;
+    linePulseRate = sgn() * rand(0.4, 0.75) * SPEED;
+    ballPulseRate = sgn() * rand(0.3, 0.55) * SPEED;
+  }
+
+  initGeometry();
+  initBalls();
+  reconfigure();
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+  let pulsePhase = 0;
+  let linePulsePhase = 0;
+  let ballPulsePhase = 0;
+
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  // Rank-fraction-phased size pulse across ALL motifs globally (fixed
+  // index -> motif mapping, never reassigned) -- an integer number of full
+  // cycles (WAVE_K) across the index-fraction axis sums to exactly zero at
+  // every instant by discrete-Fourier orthogonality, the doylespiral.html/
+  // rosenspikes.html/columnarbasalt.html/diagrid.html technique, giving
+  // genuine local motif-to-motif size variation with no net area drift.
+  //
+  // A second, independent rank-phased wave does the same thing to each
+  // guide thread's STROKE WIDTH (global rank across every circle on every
+  // ball) -- needed because a first version relying on rotation + the
+  // motif pulse alone failed the mandatory compositionDrift check on 4 of
+  // 16 seeds: these axis families are themselves highly symmetric, so
+  // rotating a sparse, symmetric arrangement barely moves the
+  // rotation-invariant descriptor (radial profile / edge density / blob
+  // stats) even though the ball is visibly spinning. A different K (3, vs
+  // the motif pulse's 2) and the opposite sign on its own rate keeps the
+  // two waves decorrelated rather than reading as one in-sync pulse.
+  const WAVE_K = 2;
+  const PULSE_AMP = 0.6;
+  const LINE_WAVE_K = 3;
+  const LINE_PULSE_AMP = 0.75;
+  const BALL_LIGHT_AMP = 0.42;
+  const totalCircleSlots = balls.length * circleSamples.length;
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+    pulsePhase += pulseRate * dt;
+    linePulsePhase += linePulseRate * dt;
+    ballPulsePhase += ballPulseRate * dt;
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    const nMotifTotal = motifs.length;
+
+    for (let ballIdx = 0; ballIdx < balls.length; ballIdx++) {
+      const ball = balls[ballIdx];
+      const ax = ball.ax0 + clk * ball.rax;
+      const ay = ball.ay0 + clk * ball.ray;
+      const az = ball.az0 + clk * ball.raz;
+
+      // Base sphere "thread material" fill -- a moderately dark, still
+      // saturated jewel-tone radial gradient, so the bright guide threads
+      // and motifs read with strong contrast against it. Its own lightness
+      // breathes on a THIRD independent rank-phased wave, keyed to ball
+      // index (K=1, exact zero-sum across any ball count >= 2 by the same
+      // discrete-Fourier argument as the other two waves) -- needed
+      // because the two thin-stroke pulses above move only a small
+      // fraction of each ball's pixel area, which left 2 of 16 seeds
+      // (both using the sparser octahedral/cube axis families, fewer
+      // circles to pulse) still short of the mandatory compositionDrift
+      // floor even at large stroke-pulse amplitudes. Modulating the base
+      // fill instead touches each ball's DOMINANT pixel area directly.
+      const base = PAL[ball.bgIdx];
+      const hueBg = (base[0] + ball.baseHue * 0.1) % 360;
+      const ballRankFrac = ballIdx / balls.length;
+      const lightDelta = 1 + BALL_LIGHT_AMP * Math.cos(Math.PI * 2 * ballRankFrac - ballPulsePhase);
+      const litInner = Math.max(10, Math.min(60, base[2] * 0.72 * lightDelta));
+      const litOuter = Math.max(6, Math.min(36, base[2] * 0.30 * lightDelta));
+      const grad = ctx.createRadialGradient(
+        ball.x - ball.r * 0.3, ball.y - ball.r * 0.3, ball.r * 0.05,
+        ball.x, ball.y, ball.r * 1.05
+      );
+      grad.addColorStop(0, `hsl(${hueBg}, ${Math.min(90, base[1] + 5)}%, ${litInner}%)`);
+      grad.addColorStop(1, `hsl(${hueBg}, ${base[1]}%, ${litOuter}%)`);
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2); ctx.fill();
+
+      ctx.save();
+      ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2); ctx.clip();
+      ctx.globalCompositeOperation = 'lighter';
+
+      const lw = Math.max(1.4, ball.r * 0.028);
+
+      // Guide-thread great circles: only the near hemisphere (z >= 0) is
+      // ever visible -- a solid ball hides its own far side by
+      // construction. Split each circle's rotated samples into contiguous
+      // near-hemisphere runs (circular wraparound aware) and stroke each
+      // run as one path.
+      for (let ci = 0; ci < circleSamples.length; ci++) {
+        const pts = circleSamples[ci];
+        const rotated = pts.map((p) => rotate(p, ax, ay, az));
+        const hue = (PAL[ci % PAL.length][0] + ball.baseHue * 0.15 + clk * 4) % 360;
+        const sat = PAL[ci % PAL.length][1];
+        const lig = PAL[ci % PAL.length][2];
+        // Global rank-fraction-phased stroke-width wave (see the comment
+        // above renderFrame()) -- the same cos-sum-to-zero construction as
+        // the motif pulse, applied to line width instead of star size.
+        const circleRankFrac = (ballIdx * circleSamples.length + ci) / totalCircleSlots;
+        const lineWidthMult = 1 + LINE_PULSE_AMP * Math.cos(LINE_WAVE_K * Math.PI * 2 * circleRankFrac - linePulsePhase);
+        // Extract contiguous near-hemisphere (z >= 0) runs from this
+        // CIRCULAR sample array in a single guaranteed-terminating pass: a
+        // visited[] marker per index, each index visited at most once, so
+        // the total work is exactly O(n) regardless of how many separate
+        // runs exist or whether any of them wraps past index n-1 back to
+        // index 0. (An earlier version advanced the outer scan pointer to
+        // `lastRunEnd + 1`, which a WRAPPED run could reset backward into
+        // already-scanned territory, letting a later run re-discover and
+        // re-walk the same wrapped segment forever -- caught only by
+        // actually running this in a browser, where it hung indefinitely
+        // instead of raising a catchable JS error.)
+        const n = rotated.length;
+        const visited = new Uint8Array(n);
+        for (let start = 0; start < n; start++) {
+          if (visited[start] || rotated[start][2] < 0) continue;
+          const run = [];
+          let idx = start;
+          while (!visited[idx] && rotated[idx][2] >= 0) {
+            visited[idx] = 1;
+            run.push(rotated[idx]);
+            idx = (idx + 1) % n;
+            if (idx === start) break; // whole circle is near-hemisphere
+          }
+          if (run.length >= 2) {
+            let zAvg = 0;
+            ctx.beginPath();
+            for (let k = 0; k < run.length; k++) {
+              const p = run[k];
+              zAvg += p[2];
+              const sx = ball.x + p[0] * ball.r;
+              const sy = ball.y - p[1] * ball.r;
+              if (k === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+            }
+            if (run.length === n) ctx.closePath();
+            zAvg /= run.length;
+            const depthA = 0.35 + 0.65 * Math.max(0, Math.min(1, zAvg));
+            ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${Math.min(84, lig + 16)}%, ${0.85 * depthA})`;
+            ctx.lineWidth = lw * 1.6 * lineWidthMult;
+            ctx.stroke();
+            ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${lig}%, ${0.28 * depthA})`;
+            ctx.lineWidth = lw * 4.2 * lineWidthMult;
+            ctx.stroke();
+          }
+        }
+      }
+
+      // Stitch motifs at great-circle intersections (the "kiku" decoration)
+      // -- a small 6-point star, drawn only when on the near hemisphere,
+      // scaled down smoothly toward the rim (z -> 0) rather than popping.
+      for (let mi = 0; mi < motifs.length; mi++) {
+        const m = motifs[mi];
+        const rp = rotate(m.pos, ax, ay, az);
+        if (rp[2] <= 0) continue;
+        const sx = ball.x + rp[0] * ball.r;
+        const sy = ball.y - rp[1] * ball.r;
+        const rankFrac = mi / nMotifTotal;
+        const pulse = 1 + PULSE_AMP * Math.cos(WAVE_K * Math.PI * 2 * rankFrac - pulsePhase);
+        const depthScale = 0.45 + 0.55 * rp[2];
+        const starR = ball.r * 0.052 * pulse * depthScale;
+        const mc = PAL[m.colorIdx];
+        const mHue = (mc[0] + ball.baseHue * 0.1 + 180) % 360;
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.beginPath();
+        const spikes = 6;
+        for (let k = 0; k < spikes * 2; k++) {
+          const ang = (Math.PI * k) / spikes;
+          const rr = (k % 2 === 0) ? starR : starR * 0.42;
+          const px = Math.cos(ang) * rr, py = Math.sin(ang) * rr;
+          if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fillStyle = `hsla(${mHue}, ${Math.min(95, mc[1] + 8)}%, ${Math.min(80, mc[2] + 10)}%, 0.95)`;
+        ctx.fill();
+        ctx.fillStyle = `hsla(${mHue}, ${mc[1]}%, ${mc[2]}%, 0.35)`;
+        ctx.beginPath(); ctx.arc(0, 0, starR * 1.8, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
+
+      ctx.restore();
+
+      // Thin bright rim highlight for an extra "sphere" cue.
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.strokeStyle = `hsla(${hueBg}, ${Math.min(90, base[1] + 6)}%, 68%, 0.5)`;
+      ctx.lineWidth = Math.max(1, ball.r * 0.012);
+      ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r * 0.995, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigure(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

@@ -1234,5 +1234,33 @@
     ],
     "nearestNeighbour": "frostgrowth",
     "nearestDistance": 0.919
+  },
+  {
+    "date": "2026-10-17",
+    "inspirationSource": "Consolidated catch-up run covering four missed daily-research firings (2026-10-13 through 2026-10-16, confirmed via origin/main git log -- only automated rotation-state/growth-log commits landed, no new engine file) plus today. Category \"traditional textile/tiling/ornament tradition from a randomly chosen culture\" (textile tied least-recently-used with \"random Wikipedia article\" by a tally of every prior log entry; textile picked since its own most recent use, tartansett.html on 2026-10-05, was further in the past than wiki's, 2026-10-07). Open WebSearch within the category (macrame knot sequences and coiled-basketry spirals researched and set aside as too close to existing interlacing/spiral archetypes) surfaced temari -- the Japanese embroidered thread-ball tradition: evenly-spaced great-circle guide threads stitched around a wound core, following a small number of named discrete spherical symmetry groups (Yackel & belcastro, Bridges 2013, https://archive.bridgesmathart.org/2013/bridges2013-255.html; George Hart, Museum of Mathematics, https://makezine.com/2011/01/02/math-monday-temari-balls/), with \"kiku\" stitch motifs embroidered where guide threads cross.",
+    "idea": "Several independent opaque spheres, each decorated with great-circle guide threads (orthographic projection, near-hemisphere-only visibility proven exactly coverage-neutral via the antipodal map x -> -x) encoding a chosen Platonic solid's symmetry axes (octahedral/cube/icosahedral, picked per video), with small star motifs at circle intersections. Each ball spins on its own independent axis; motif size and guide-thread stroke width each pulse on an independent rank-fraction-phased wave (zero-sum by discrete-Fourier orthogonality) for unit-level dynamics beyond rotation alone.",
+    "engineName": "temari",
+    "outcome": "shipped",
+    "reason": "First design (balls in a near-regular jittered grid, closely matching kuramotochimera.html's own multi-instance layout parameters) failed the mandatory novelty gate at distance 0.526 against kuramotochimera -- a per-feature z-score diagnostic showed blobCount/blobSizeCV/largestBlobFrac/coverage all contributed ~0 to the distance (both read as \"several similarly-sized round blobs on a near-regular grid\" at the composition-descriptor level). Fixed by switching to randomly scattered (rejection-sampled), independently-sized, non-grid ball placement -- the same fix diatomlattice.html/liesegang.html already proved for this exact collision class, verified offline across 2000 seeds (zero overlaps/out-of-bounds) before use. Also fixed a real hang-class bug (a circular-array run-extraction loop could cycle forever on certain near/far-hemisphere visibility patterns) caught only by running the engine in a real browser, not by node --check; fixed with a visited[] marker array and verified exhaustively across all 4096 possible visibility patterns for a 12-point test circle plus 5000 random trials at the real 110-point sample count.",
+    "seedsVerified": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      12345
+    ],
+    "nearestNeighbour": "diatomlattice",
+    "nearestDistance": 0.644
   }
 ]

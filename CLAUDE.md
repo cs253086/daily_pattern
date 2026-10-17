@@ -7867,6 +7867,189 @@ the largest nearest-neighbour margins of any engine in the pool, not a
 thin-margin case at all. `murmuration` also forms its own singleton
 archetype group at the pool's perceptual-grouping threshold (0.55/0.6).
 
+## Temari embroidered-sphere engine (`temari.html`) — 2026-10-17
+
+Daily creative-research routine. **This firing is a consolidated catch-up
+run covering a four-day backlog**: the routine fired on 2026-10-13,
+2026-10-14, 2026-10-15 and 2026-10-16 while the bound session was away, and
+none of those firings were executed (confirmed from `origin/main`'s git
+log -- only automated rotation-state/growth-log commits landed in that
+window, no new engine file). One engine, dated 2026-10-17, covers the
+whole backlog plus today, the same "consolidate a multi-day backlog into
+one entry" approach this project already used once (see `murmuration.html`
+/ 2026-10-12 above).
+
+Category was "traditional textile/tiling/ornament tradition from a
+randomly chosen culture" -- picked by a tally of every prior
+creative-research-log entry: textile was tied with "random Wikipedia
+article" as the least-used category in the most recent 10 firings, and
+textile's own most recent use (`tartansett.html`, 2026-10-05) was further
+in the past than wiki's (`strangeattractor.html`, 2026-10-07), so textile
+was picked per the `herringbone.html` precedent of varying categories
+rather than defaulting to a heavily-used one -- despite the pool already
+holding six textile-weave engines (`stripweave`/`herringbone`/
+`ikatweave`/`taniko`/`tabletweave`/`tartansett`), each a genuinely
+different generative mechanism. Rather than force a seventh flat weave
+mechanism (macrame knot sequences and coiled-basketry spirals were both
+researched and set aside as too close to existing interlacing/spiral
+archetypes), an open WebSearch within the category surfaced **temari** --
+the Japanese embroidered thread-ball tradition. Temari construction is
+genuinely mathematical, not folklore: evenly-spaced guide threads are
+stitched around a wound thread core, and those guide threads are GREAT
+CIRCLES whose combination follows a small number of named discrete
+spherical symmetry groups (Yackel & belcastro, "Spherical Tilings with
+Transitivity Properties", Bridges 2013,
+https://archive.bridgesmathart.org/2013/bridges2013-255.html; George
+Hart, "Math Monday: Temari Balls", Museum of Mathematics,
+https://makezine.com/2011/01/02/math-monday-temari-balls/) -- the
+guideline circles correspond to a chosen Platonic solid's symmetry axes,
+and decorative "kiku" (chrysanthemum) stitch motifs are embroidered where
+guide threads cross.
+
+**A genuinely different construction PRINCIPLE from every other engine in
+the pool**, including every other textile engine (all flat, planar weave
+mechanisms) and every real-WebGL 3D engine (`solids3d`/`lattice3d`/
+`torusrings3d`/`geodome`/`spaceframe`/`hoppercrystal`/`muqarnas`/
+`rosenspikes`/`tensegritychain`/`columnarbasalt`/`radiolarian`/`diagrid` --
+all solid meshes, strut lattices or extruded volumes): here the generative
+object is a SOLID SPHERE decorated by GREAT-CIRCLE GUIDE THREADS
+(continuous curved bands, not short mesh edges or straight struts) whose
+combination encodes a Platonic solid's symmetry axes, with stitch motifs
+at circle intersections. Not `wireframe.html` either -- that engine
+projects straight POLYHEDRON EDGES (a thin skeleton with visible holes
+between edges); a temari ball is OPAQUE, so only the near hemisphere's
+guide threads are ever visible, and this project's "fake" (orthographic,
+not real-WebGL) 3D projection keeps the exact near/far-hemisphere hiding
+this needs simple to reason about and verify, the same "visualisation-
+grade, not lab-exact" precedent `chladni.html`/`voderberg.html` already
+set.
+
+**An exact (not approximate) coverage-neutrality proof, found and verified
+OFFLINE before writing any rendering code** (the same discipline this
+pool's `quasicrystal.html`/`geodome.html`/`spaceframe.html` already
+established): any great circle (a circle whose plane passes through the
+sphere's centre) is split into exactly two equal-length arcs by ANY
+rotation of the viewing plane -- proof: the antipodal map x -> -x is an
+isometry that fixes every great circle's PLANE (since the plane passes
+through the origin) and maps the near hemisphere onto the far hemisphere
+exactly, so the near- and far-hemisphere arcs of any great circle are
+isometric images of each other and therefore equal in length, for EVERY
+rotation. The same antipodal argument applies to the discrete motif points
+(two distinct great circles always intersect at a true antipodal PAIR),
+so exactly half of all motif points are on the near hemisphere at any
+instant too. Confirmed numerically before trusting it: worst-case
+deviation from exactly 0.5 was **0.00000** (floating-point exact) across
+20-50 random rotations for all three axis families used (octahedral/3
+circles, cube/4 circles, icosahedral/6 circles). This is the first engine
+in this pool whose coverage-neutrality is an exact proof rather than a
+rank-fraction/discrete-Fourier approximation.
+
+**A real, hang-class bug found only by running the engine in a real
+browser, not by reasoning about the code or by `node --check`.** The first
+implementation walked each circle's rotated sample points with a
+hand-rolled "advance the scan pointer past the end of this run" loop to
+find near-hemisphere arcs. This looked correct and passed `node --check`,
+but in the browser the very first `advanceFrame()` call never returned --
+a `page.evaluate()` call sat at 99%+ CPU for minutes before Puppeteer's
+own protocol eventually reported `Target closed` (the renderer had
+hung/crashed, not thrown a catchable JS error). Root-caused by writing a
+standalone debug harness with explicit per-call timing and
+`console`/`pageerror` listeners (a plain `waitForFunction` timeout alone
+gave no diagnostic signal): a WRAPPED run (one that crosses from the end
+of the sample array back to index 0) could reset the outer scan pointer
+to an index LOWER than where scanning had already reached, letting a
+LATER run re-discover and re-walk the same wrapped segment forever once a
+specific combination of near/far-hemisphere spans lined up -- the exact
+"the outer loop's advance isn't monotonic, so it can cycle" bug class.
+Fixed with a `visited[]` marker array (one pass, each of the ~110 sample
+indices visited at most once, so the work is exactly O(n) regardless of
+how many separate runs exist or whether any wraps). **Verified exhaustively
+before trusting it, not just re-tested the one failing case**: a brute-force
+script enumerated all 4096 possible near/far visibility patterns for a
+12-point circle and confirmed the fixed algorithm terminates and covers
+every point exactly once in every single one, plus 5000 random trials at
+the real n=110 sample count -- zero failures. Lesson for this pool: a
+circular-array run-extraction loop is exactly the kind of "looks obviously
+correct" logic that needs this level of exhaustive, not spot-check,
+verification -- a hang is far more expensive to diagnose than a wrong
+answer, since it produces no error at all.
+
+**Several independent temari balls (not one centred sphere), each
+spinning on its own axis** -- unit-level dynamics built in from the first
+draft per CLAUDE.md's 2026-09-10 standing requirement: several balls, each
+a genuinely different random rigid rotation (its own axis, its own
+guaranteed-minimum-magnitude rate, random sign, the same proven-safe
+0.35-0.9 rad/s range `wireframe.html` already uses), so no single 2D rigid
+transform explains the whole frame's change --
+`unitMotionNonRigidFrac` landed at 0.955-1.0 across the full seed battery
+with no further choreography needed. Reinforced by TWO independent
+rank-fraction-phased pulses (the `doylespiral.html`/`rosenspikes.html`/
+`columnarbasalt.html`/`diagrid.html` zero-sum-by-discrete-Fourier-
+orthogonality technique, verified offline for every ball count 2-5 before
+use): motif star size (globally rank-indexed across every intersection
+point on every ball) and guide-thread stroke width (globally rank-indexed
+across every circle on every ball).
+
+**The mandatory novelty gate FAILED on the first design** (balls placed in
+a near-regular jittered grid, closely copying `kuramotochimera.html`'s own
+multi-instance layout parameters almost verbatim): nearest neighbour was
+**`kuramotochimera` at distance 0.526** -- below the 0.60 minimum. A
+per-feature z-score diagnostic (the same technique `phyllotaxis.html`/
+`hilbertweave.html`'s own novelty iterations already used) showed exactly
+why: `blobCount`/`blobSizeCV`/`largestBlobFrac`/`coverage` all contributed
+essentially ZERO to the distance -- both engines render "several
+similarly-sized round blobs scattered on a near-regular grid" at the
+composition-descriptor level, despite completely different content inside
+each blob (embroidered great circles vs. Kuramoto oscillator wedges), the
+same "what is the repeated element vs how is it arranged" collision class
+`phyllotaxis.html`/`dragonfold.html`'s own write-ups already document.
+Fixed the same way `diatomlattice.html`/`liesegang.html` already proved
+out for this exact collision: independently-sized circles at RANDOMLY
+SCATTERED (rejection-sampled, non-grid) positions instead of a uniform
+jittered grid -- raises `blobSizeCV` directly and breaks the grid
+periodicity that made the two compositions read as the same archetype.
+Verified OFFLINE before trusting it (2000 synthetic seeds: zero overlaps,
+zero out-of-bounds placements, a bounded shrink-and-retry loop with a safe
+deterministic fallback that was never actually hit). Re-measured after the
+redesign: nearest neighbour rose to **diatomlattice at distance
+0.644** -- comfortably clear of the 0.60 threshold. The
+whole quality-gate battery was re-verified clean on the new layout too
+(not just the novelty number), since ball positions/radii feed directly
+into the `compositionDrift`/`fastMotion` checks.
+
+**Verified** (final, scattered-layout design): `validateEngine()` **16/16**
+across seeds 1-15 plus the CLI's actual default seed 12345 (see
+`geodome.html`'s write-up for why that seed matters). Margins comfortable
+throughout: `avgSat` 69.7-80.2 (vs the 22 minimum), zero-to-near-zero
+near-white pixels on every seed (max 0.015 vs the 0.12 ceiling),
+`projectedRise` -23.5 to +22.7 (vs the 50 threshold), `compositionDrift`
+0.019-0.093 (vs the 0.015 minimum, no thin-margin seeds remaining after
+the two rank-phased pulses were added), `unitMotionNonRigidFrac`
+0.955-1.0 (vs the 0.40 minimum), `fastMotion` always comfortably above its
+per-frame floor, `avgMsPerFrame` 14.3-32ms giving `projectedHourRenderMin`
+20.6-46.1min (comfortably inside the CI budget -- this is a plain
+Canvas2D orthographic projection, no WebGL). Visual spot-checks across
+2/25/50/75/95/105% of a 43.5s cycle at several seeds, actually rendering
+PNGs and looking at them, not just reading validator output: vivid, bold,
+immediately-recognisable embroidered thread balls of varying size
+scattered across the frame, clearly visible independent rotation and
+stroke-width/motif-size variation between checkpoints, a clean
+non-jarring reconfigure at the cycle boundary, and distinct axis-family
+(octahedral/cube/icosahedral) and palette combinations across seeds.
+
+**Novelty gate** (final design): measured against all 67 other existing
+engines (the committed fingerprint cache was stale, so the whole pool was
+fingerprinted fresh alongside the candidate -- twice, once for the failed
+grid design and once for the final scattered one -- per this pool's
+established practice; the refreshed cache was not committed, per this
+routine's "touch only the new engine + log + CLAUDE.md" constraint, with
+the same `ENGINE_SUBJECTS` exception this pool's `tensegritychain.html`
+write-up already established). Nearest neighbour is **diatomlattice**
+at distance **0.644** -- a genuine pass reached only after
+the composition-level redesign documented above, not a bare first-draft
+number. `temari` also forms its own singleton archetype group at the
+pool's perceptual-grouping threshold (0.55/0.6).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
