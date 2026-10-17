@@ -1,5 +1,5 @@
 {
-  "last3D": "geodome",
+  "last3D": "hoppercrystal",
   "last2D": "herringbone",
   "lastMandala": "kaleidoscope",
   "recentCuratedDates": [
@@ -7,9 +7,10 @@
     "20261012",
     "20261013",
     "20261015",
-    "20261016"
+    "20261016",
+    "20261017"
   ],
-  "last3DArchetype": "geodome",
+  "last3DArchetype": "hoppercrystal",
   "last2DArchetype": "herringbone",
   "last3DByArchetype": {
     "geodome": "geodome",
@@ -41,5 +42,5 @@
     "grid": "grid",
     "herringbone": "herringbone"
   },
-  "updatedAt": "2026-10-16T13:53:59.708Z"
+  "updatedAt": "2026-10-17T12:51:57.384Z"
 }
