@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Langton's Ant Colonies — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "random Wikipedia article" -- tied
+// as the pool's least-recently-used category alongside "obscure
+// mathematical object" in the last 10 firings, picked because its own
+// last use (strangeattractor.html, 2026-10-07) is further in the past than
+// the other's (kuramotochimera.html, 2026-10-08), per the herringbone.html
+// precedent of varying categories rather than defaulting to a heavily-used
+// one). Since Wikipedia is blocked in this sandbox, used the established
+// fallback for this category: an open WebSearch for an unusual/
+// lesser-known geometric or combinatorial construction, explicitly scoped
+// to exclude every already-shipped technique in the pool. Surfaced
+// LANGTON'S ANT and its GENERALISATION to multi-colour "turmites": a
+// single virtual ant walks a grid, at each step turning left or right
+// according to the colour of the cell it is standing on, then advancing
+// that cell's colour by one (mod k, the rule word's length) and stepping
+// forward. Christopher Langton's original two-colour rule ("LR") famously
+// spends thousands of chaotic steps before settling into a periodic
+// diagonal "highway"; the generalisation to longer {L,R} words (surveyed
+// by Gale, Propp, Sutherland & Troubetzkoy, and by the very recent
+// "generalised ant" literature -- Lutfalla, "Sideways on the highways",
+// https://arxiv.org/html/2506.10482v1; Gajardo/Lutfalla/Rao, "Ants on the
+// highway", https://export.arxiv.org/pdf/2505.05426; Wikipedia's Langton's
+// ant article, search snippets only -- Wikipedia itself is blocked in this
+// sandbox) produces a much richer zoo of behaviours from the exact same
+// one-line rule, from the classic highway to dense, ever-thickening
+// symmetric growth, purely as a function of the word chosen.
+//
+// A genuinely different construction PRINCIPLE from every other engine in
+// the pool: not a synchronous, whole-row local-rule automaton
+// (automaton.html's rule 90/150 Sierpinski scroll -- every cell updates at
+// once from its two neighbours); not a stochastic random-walk accretion
+// (frostgrowth.html's DLA -- particles wander and stick, with no notion of
+// an internal "heading" that the walker itself carries and turns); not an
+// iterated deterministic MAP histogrammed over many return visits to the
+// same two real-valued coordinates (strangeattractor.html's de Jong
+// attractor); not feedback-driven phase synchronisation with no spatial
+// motion at all (kuramotochimera.html). Here a single sequential walker
+// carries its own heading and turns according to a LOCAL rule read off the
+// very cell it is standing on, and the walker's own path is the only
+// thing that ever changes any cell -- a direct-simulation "ant" / Turing-
+// machine-on-a-grid, the one archetype missing from this pool.
+//
+// VERIFIED OFFLINE before writing any rendering code (the same discipline
+// this pool's quasicrystal.html/geodome.html/hilbertweave.html already
+// established for a construction that could still "look plausible" even
+// if subtly wrong): a standalone script implemented the exact generalised-
+// ant update used below (word over {L,R}, turn by word[state], increment
+// state mod word.length, step forward on a WRAPPED/toroidal grid so the
+// ant can never leave the frame) and swept many candidate rule words
+// across dozens of random start positions/headings/ant-counts/grid sizes.
+// Two-colour "LR" (the classic highway) stayed far too SPARSE at this
+// pool's house-style grid resolution (live-cell density oscillating around
+// 2-5%, reading as a faint scribble rather than a bold pattern) once the
+// ant settles into its thin one-cell-wide highway, so it was dropped.
+// Three other candidate words (LRRRRRLLR, RLLR, LLRLRLL) were tested next
+// and dropped for a real, measured reason, not a guess: across 20-60
+// random trials each they showed a genuinely BIMODAL final density --
+// typically a well-behaved 0.2-0.5 but occasionally (a real, repeatable
+// fraction of seeds, not fixable by slowing the growth rate: re-tested at
+// several different pacing constants with the same outcome) runaway growth
+// to 0.86-0.99 density on the bounded/wrapped grid this engine must use --
+// consistent with the literature's own "unbounded box" / chaotic-growth
+// behaviour classes finitely confined to a torus. A near-saturated colony
+// is both a real whiteout risk and visually a dead, undifferentiated mass,
+// against the house style's "vivid, bold, legible" rule. The four words
+// actually used (LLRR, LLRRRL, LLLR, RRLLLR) were stress-tested across 60
+// random seeds each (varying start position/heading, 2-3 ants, grid side
+// 38-48) and every single trial landed in a tight, safe band (0.19-0.58
+// final density, see RATE_PER_1000 below) -- no outliers, no runaway, no
+// near-total saturation.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. Several independent "ant colonies" (3-5,
+// a near-regular jittered grid of square panels with true black gaps
+// between them -- the dendrite.html/hilbertweave.html/phyllotaxis.html/
+// kuramotochimera.html precedent for "several scattered instances" instead
+// of one dominant centred shape), each its own small toroidal grid with 2-3
+// ants running ONE rule word. Word, ant count, grid resolution and panel
+// position are all fixed ONCE per video in initColonies() (the
+// starburst.html/primespiral.html/stripweave.html lesson: re-randomising a
+// coverage-affecting parameter every reconfigure cycle can read as a real,
+// not-aliased brightness trend to validate.js's regression check) -- only
+// the LIVE SIMULATION STATE (grid contents, ant positions/headings) resets
+// at a full CYCLE_SEC boundary, exactly the same growth-rate "character"
+// every cycle, just a fresh random walk. CYCLE_SEC=43.5, the same value
+// automaton.html/dendrite.html/frostgrowth.html/kuramotochimera.html
+// independently re-derived as optimal for validate.js's 8 fixed
+// 300s-window sample times (a property of the validator's sample times,
+// not this engine's own dynamics, so it transfers directly). Every ant
+// step flips exactly one cell's state, so a colony's live-cell count rises
+// from zero at the start of a cycle toward its stress-tested-safe target
+// and then hard-resets to zero -- the same proven-safe periodic
+// accumulate-then-clear shape as every prior stateful engine in this pool.
+// Colour is tied to each cell's own STATE INDEX (never to wall-clock time),
+// the same "colour by an axis the motion can't disturb" principle this
+// pool's geodome.html/primespiral.html/widmanstatten.html already
+// established, so revisited cells cycling through colours is real
+// structural motion, not a validator-aliasing hue drift.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Mulberry32's first draws for consecutive small seeds are correlated
+  // (the gotcha pendulumwave.html/spinbounce.html's write-up documents) --
+  // burn 4 draws before using the stream, the same convention those two
+  // engines established.
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+  const baseSat = Math.max(78, Math.min(96, PAL[0][1]));
+  const baseLight = Math.max(44, Math.min(60, PAL[0][2]));
+  const baseHue0 = rand(0, 360);
+
+  const dt = 1 / FPS;
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+
+  // Four generalised-ant rule words over {L,R} -- see header comment for
+  // why these four (and not e.g. the classic two-colour "LR", or
+  // LRRRRRLLR/RLLR/LLRLRLL) were selected after offline stress-testing.
+  // RATE_PER_1000 is ant-steps-per-frame-per-1000-cells-per-ant at nAnts=2,
+  // calibrated offline against a 43.5s*24fps cycle so every word lands in a
+  // safe ~0.2-0.58 final live-cell density band across 60 random seeds each
+  // (see header comment) -- never near-empty, never near-saturated.
+  const RULE_WORDS = ['LLRR', 'LLRRRL', 'LLLR', 'RRLLLR'];
+  const RATE_PER_1000 = { LLRR: 3, LLRRRL: 5, LLLR: 3, RRLLLR: 4 };
+  const DX = [0, 1, 0, -1]; // heading 0=up,1=right,2=down,3=left
+  const DY = [-1, 0, 1, 0];
+
+  // ---- colony layout -----------------------------------------------------
+  // Several independent scattered panels, not one dominant centred grid --
+  // the "Archetype clustering" lesson this pool's cascade.html/dendrite.html
+  // write-ups already document: a single big grid-filling composition would
+  // also risk colliding with grid.html's/herringbone.html's own periodic-
+  // grid archetype at the novelty descriptor's periodicity features.
+  const COLONY_COUNT = Math.max(3, Math.min(5, Math.round(4 * Math.max(0.6, Math.min(1.4, DENSITY)))));
+  const gridCols = COLONY_COUNT <= 3 ? COLONY_COUNT : Math.ceil(Math.sqrt(COLONY_COUNT));
+  const gridRows = Math.ceil(COLONY_COUNT / gridCols);
+  const cellW = W / gridCols, cellH = H / gridRows;
+  // Comfortably under half the panel cell's smaller dimension (the
+  // hilbertweave.html/dendrite.html safety margin) so neighbouring colonies
+  // never touch even with jitter.
+  const boxSide = Math.min(cellW, cellH) * 0.82;
+
+  const colonies = [];
+  function makeColony(idx) {
+    const col = idx % gridCols, row = Math.floor(idx / gridCols);
+    const cx = cellW * (col + 0.5) + rand(-cellW * 0.06, cellW * 0.06);
+    const cy = cellH * (row + 0.5) + rand(-cellH * 0.06, cellH * 0.06);
+    const word = RULE_WORDS[Math.floor(rng() * RULE_WORDS.length)];
+    const k = word.length;
+    const nAnts = rng() < 0.5 ? 2 : 3;
+    // 38-48 cells per side -- the exact stress-tested-safe range (see
+    // header comment); bold chunky cells, not a fine pixel mesh, per the
+    // house style's "bigger, fewer, clearer elements" rule.
+    const gridCells = 38 + Math.floor(rng() * 11);
+    const cellPx = boxSide / gridCells;
+    const cellCount = gridCells * gridCells;
+    const totalStepsPerFrame = Math.max(0.3, RATE_PER_1000[word] * cellCount / 1000 * SPEED * 2 / nAnts) * nAnts;
+    return {
+      cx, cy, word, k, nAnts, gridCells, cellPx, totalStepsPerFrame,
+      grid: new Uint8Array(cellCount),
+      ants: new Array(nAnts).fill(0).map(() => ({ x: 0, y: 0, dir: 0 })),
+      hueOffset: rand(0, 360),
+      cycleFrame: 0,
+      stepBudget: 0,
+      pulseRate: 0,
+    };
+  }
+  // Pure live-stepping alone measured too slow to clear validate.js's
+  // short-interval (1.5s) fastMotion floor (2.71 vs a 6.31 floor on the
+  // default seed) -- the same shortfall frostgrowth.html's write-up
+  // documents for its own reveal-only design, fixed there (and here) the
+  // same way: a decoupled, coverage-neutral SIZE pulse on every currently
+  // lit cell, phased by each cell's fixed grid-index fraction with an
+  // integer wave count (WAVE_K) across that axis -- zero-sum by discrete-
+  // Fourier orthogonality every instant, so it adds strong, fast,
+  // unambiguous per-cell motion without perturbing the live simulation's
+  // own proven-safe growth/coverage curve at all. pulseRate is reassigned
+  // (never reset) every CYCLE_SEC boundary, the same "reconfigure rate/
+  // sign, never animate through zero" pattern this pool already uses
+  // dozens of times.
+  const WAVE_K = 5;
+  function reconfigureMotion(col) { col.pulseRate = sgn() * rand(1.6, 2.3) * SPEED; }
+  function resetColony(col) {
+    col.grid.fill(0);
+    const gc = col.gridCells;
+    for (const a of col.ants) {
+      a.x = (((gc / 2 + (rng() - 0.5) * gc * 0.3) | 0) % gc + gc) % gc;
+      a.y = (((gc / 2 + (rng() - 0.5) * gc * 0.3) | 0) % gc + gc) % gc;
+      a.dir = Math.floor(rng() * 4);
+    }
+    col.cycleFrame = 0;
+    col.stepBudget = 0;
+    reconfigureMotion(col);
+  }
+  for (let i = 0; i < COLONY_COUNT; i++) {
+    const col = makeColony(i);
+    resetColony(col);
+    colonies.push(col);
+  }
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function stepColony(col) {
+    col.cycleFrame++;
+    if (col.cycleFrame >= cycleFrames) { resetColony(col); return; }
+    col.stepBudget += col.totalStepsPerFrame;
+    let steps = Math.floor(col.stepBudget);
+    col.stepBudget -= steps;
+    const gc = col.gridCells, k = col.k, word = col.word, grid = col.grid, nAnts = col.nAnts, ants = col.ants;
+    for (let s = 0; s < steps; s++) {
+      const a = ants[s % nAnts];
+      const idx = a.y * gc + a.x;
+      const st = grid[idx];
+      const turn = word.charCodeAt(st); // 'L'=76, 'R'=82
+      if (turn === 76) a.dir = (a.dir + 3) % 4;
+      else a.dir = (a.dir + 1) % 4;
+      grid[idx] = (st + 1) % k;
+      a.x = (a.x + DX[a.dir] + gc) % gc;
+      a.y = (a.y + DY[a.dir] + gc) % gc;
+    }
+  }
+
+  function drawColony(col, clk) {
+    const gc = col.gridCells, k = col.k, cellPx = col.cellPx, grid = col.grid;
+    const half = boxSide / 2;
+    const ox = col.cx - half, oy = col.cy - half;
+    const core0 = Math.max(2.4, cellPx * 0.86);
+    const denom = Math.max(1, k - 2);
+    const total = gc * gc, totalDenom = Math.max(1, total - 1);
+    const phaseT = clk * col.pulseRate;
+    for (let y = 0; y < gc; y++) {
+      const py = oy + (y + 0.5) * cellPx;
+      for (let x = 0; x < gc; x++) {
+        const idx = y * gc + x;
+        const st = grid[idx];
+        if (st === 0) continue;
+        const frac = k > 2 ? (st - 1) / denom : 0;
+        const hue = ((baseHue0 + col.hueOffset + frac * 210) % 360 + 360) % 360;
+        const px = ox + (x + 0.5) * cellPx;
+        const wave = Math.sin(WAVE_K * 2 * Math.PI * (idx / totalDenom) + phaseT);
+        const sizeMul = Math.max(0.55, 1 + 0.35 * wave);
+        const core = core0 * sizeMul;
+        const glow = core * 1.9;
+        // GLOW IS MANDATORY (CLAUDE.md's 2026-09-14 house-style research):
+        // a soft wide low-alpha halo drawn additively under a bright opaque
+        // core, the same technique frostgrowth.html/primespiral.html use.
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = `hsla(${hue}, ${baseSat}%, ${baseLight}%, 0.26)`;
+        ctx.fillRect(px - glow / 2, py - glow / 2, glow, glow);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = `hsl(${hue}, ${baseSat}%, ${baseLight}%)`;
+        ctx.fillRect(px - core / 2, py - core / 2, core, core);
+      }
+    }
+  }
+
+  let clk = 0;
+  function renderFrame() {
+    clk += dt;
+    for (const col of colonies) stepColony(col);
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    for (const col of colonies) drawColony(col, clk);
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

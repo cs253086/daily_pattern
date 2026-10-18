@@ -55,6 +55,7 @@ const ENGINE_SUBJECTS = {
   ikatweave: 'Ikat Weave Patterns',
   kaleidoscope: 'Kaleidoscope Patterns',
   kuramotochimera: 'Synchronizing Oscillator Rings',
+  langtonsant: "Langton's Ant Colonies",
   lattice3d: 'Spinning Cube Lattice',
   liesegang: 'Liesegang Rings',
   mashrabiya: 'Kinetic Mashrabiya Screen',

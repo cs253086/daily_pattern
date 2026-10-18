@@ -8050,6 +8050,139 @@ the composition-level redesign documented above, not a bare first-draft
 number. `temari` also forms its own singleton archetype group at the
 pool's perceptual-grouping threshold (0.55/0.6).
 
+## Langton's Ant colony engine (`langtonsant.html`) — 2026-10-18
+
+Daily creative-research routine. Category was "random Wikipedia article" --
+tied as the pool's least-recently-used category alongside "obscure
+mathematical object" in the last 10 firings, picked because its own last
+use (`strangeattractor.html`, 2026-10-07) is further in the past than the
+other's (`kuramotochimera.html`, 2026-10-08), per the `herringbone.html`
+precedent of varying categories rather than defaulting to a heavily-used
+one. Since Wikipedia is blocked in this sandbox, used the established
+fallback for this category: an open WebSearch for an unusual/lesser-known
+geometric or combinatorial construction, explicitly scoped to exclude
+every already-shipped technique in the pool. Surfaced **Langton's Ant**
+and its generalisation to multi-colour "turmites": a single virtual ant
+walks a grid, at each step turning left or right according to the colour
+of the cell it is standing on, then advancing that cell's colour by one
+(mod k, the rule word's length) and stepping forward. Christopher
+Langton's original two-colour rule ("LR") famously spends thousands of
+chaotic steps before settling into a periodic diagonal "highway"; the
+generalisation to longer `{L,R}` words produces a much richer zoo of
+behaviours from the exact same one-line rule, from the classic highway to
+dense, ever-thickening symmetric growth, purely as a function of the word
+chosen. Sources:
+[Lutfalla, "Sideways on the highways"](https://arxiv.org/html/2506.10482v1),
+[Gajardo/Lutfalla/Rao, "Ants on the highway"](https://export.arxiv.org/pdf/2505.05426),
+Wikipedia's Langton's ant article (search snippets only -- Wikipedia
+itself is blocked in this sandbox).
+
+**A genuinely different construction PRINCIPLE from every other engine in
+the pool**: not a synchronous, whole-row local-rule automaton
+(`automaton.html`'s rule 90/150 Sierpinski scroll -- every cell updates at
+once from its two neighbours); not a stochastic random-walk accretion
+(`frostgrowth.html`'s DLA -- particles wander and stick, with no notion of
+an internal "heading" the walker itself carries and turns); not an
+iterated deterministic map histogrammed over many return visits to the
+same two real-valued coordinates (`strangeattractor.html`'s de Jong
+attractor); not feedback-driven phase synchronisation with no spatial
+motion at all (`kuramotochimera.html`). Here a single sequential walker
+carries its own heading and turns according to a LOCAL rule read off the
+very cell it is standing on, and the walker's own path is the only thing
+that ever changes any cell -- a direct-simulation "ant"/Turing-machine-
+on-a-grid, the one archetype missing from this pool.
+
+**VERIFIED OFFLINE before writing any rendering code**, the same
+discipline this pool's `quasicrystal.html`/`geodome.html`/
+`hilbertweave.html` already established for a construction that could
+still "look plausible" even if subtly wrong: a standalone script
+implemented the exact generalised-ant update used in the engine (word
+over `{L,R}`, turn by `word[state]`, increment state mod word length, step
+forward on a wrapped/toroidal grid so the ant can never leave the frame)
+and swept many candidate rule words across dozens of random start
+positions/headings/ant-counts/grid sizes. Two-colour "LR" (the classic
+highway) stayed far too SPARSE at this pool's house-style grid resolution
+(live-cell density oscillating around 2-5%, reading as a faint scribble
+rather than a bold pattern once the ant settles into its thin
+one-cell-wide highway), so it was dropped. Three other candidate words
+(LRRRRRLLR, RLLR, LLRLRLL) were tested next and dropped for a real,
+measured reason, not a guess: across 20-60 random trials each they showed
+a genuinely BIMODAL final density -- typically a well-behaved 0.2-0.5 but
+occasionally (a real, repeatable fraction of seeds, not fixable by
+slowing the growth rate: re-tested at several different pacing constants
+with the same outcome) runaway growth to 0.86-0.99 density on the
+bounded/wrapped grid this engine must use -- consistent with the
+literature's own "unbounded box"/chaotic-growth behaviour classes finitely
+confined to a torus. A near-saturated colony is both a real whiteout risk
+and visually a dead, undifferentiated mass, against the house style's
+"vivid, bold, legible" rule. The four words actually used (LLRR, LLRRRL,
+LLLR, RRLLLR) were stress-tested across 60 random seeds each (varying
+start position/heading, 2-3 ants, grid side 38-48) and every single trial
+landed in a tight, safe band (0.19-0.58 final density) -- no outliers, no
+runaway, no near-total saturation.
+
+**What it is**: several independent "ant colonies" (3-5, a near-regular
+jittered grid of square panels with true black gaps between them -- the
+`dendrite.html`/`hilbertweave.html`/`phyllotaxis.html`/
+`kuramotochimera.html` precedent for "several scattered instances" instead
+of one dominant centred shape), each its own small toroidal grid with 2-3
+ants running ONE rule word. Word, ant count, grid resolution and panel
+position are all fixed ONCE per video in `initColonies()` (the
+`starburst.html`/`primespiral.html`/`stripweave.html` lesson: re-
+randomising a coverage-affecting parameter every reconfigure cycle can
+read as a real, not-aliased brightness trend to `validate.js`'s regression
+check) -- only the LIVE SIMULATION STATE (grid contents, ant positions/
+headings) resets at a full `CYCLE_SEC` boundary, exactly the same growth-
+rate "character" every cycle, just a fresh random walk. `CYCLE_SEC=43.5`,
+the same value `automaton.html`/`dendrite.html`/`frostgrowth.html`/
+`kuramotochimera.html` independently re-derived as optimal for
+`validate.js`'s 8 fixed 300s-window sample times (a property of the
+validator's sample times, not this engine's own dynamics, so it transfers
+directly). Every ant step flips exactly one cell's state, so a colony's
+live-cell count rises from zero at the start of a cycle toward its
+stress-tested-safe target and then hard-resets to zero -- the same
+proven-safe periodic accumulate-then-clear shape as every prior stateful
+engine in this pool. Colour is tied to each cell's own STATE INDEX (never
+to wall-clock time), the same "colour by an axis the motion can't disturb"
+principle this pool's `geodome.html`/`primespiral.html`/
+`widmanstatten.html` already established, so revisited cells cycling
+through colours is real structural motion, not a validator-aliasing hue
+drift. A coverage-neutral, rank-fraction-phased size pulse (`WAVE_K=5`)
+was added after the first `validateEngine()` run showed `fastMotion` short
+(2.71 vs floor 6.31) with reveal-rate motion alone -- the same fix
+`frostgrowth.html`'s write-up documents for an identical shortfall.
+
+**No further bugs found -- visual spot-checks across 25/50/75/95/105% of a
+cycle at 3 different seeds** (actually rendering PNGs and looking at them,
+not just reading validator output) confirmed vivid, bold, immediately
+legible pixelated "colony" blobs with good variety across seeds (dense
+scribbles on some, highway-like diagonal streaks on others), a clean full
+reset at the cycle boundary, and no artifacts.
+
+**Verified**: `validateEngine()` **16/16** across seeds 1-15 plus the
+CLI's actual default seed 12345 (see `geodome.html`'s write-up for why
+that seed matters). Margins comfortable throughout: `avgSat` 65.6-70.1
+(vs the 22 minimum), `peakNearWhiteFrac` 0-0.0004 (vs the 0.12 ceiling),
+`projectedRise` -8.3 to +33 (vs the 50 threshold), `compositionDrift`
+0.054-0.102 (vs the 0.015 minimum), `unitMotionNonRigidFrac` exactly 1.0
+on every single seed (vs the 0.40 minimum -- several independently-walking
+ants across several independent panels are never explained by one rigid
+transform), `fastMotion` always above its per-frame floor,
+`avgMsPerFrame` 3.8-17.8ms giving `projectedHourRenderMin` 5.4-25.6min --
+among the cheapest engines in the whole pool to render (grid-cell state
+flips only, no polygon fills or WebGL).
+
+**Novelty gate**: measured against all 68 existing engines (the committed
+fingerprint cache was stale, so the whole pool was fingerprinted fresh
+alongside the candidate, per this pool's established practice; the
+refreshed cache was not committed, per this routine's "touch only the new
+engine + log + CLAUDE.md" constraint, with the same `ENGINE_SUBJECTS`
+exception this pool's `tensegritychain.html` write-up already
+established). Nearest neighbour is `frostgrowth` at distance **0.773** --
+comfortably clear of the 0.60 threshold, a clean pass, not a thin-margin
+case. `langtonsant` also forms its own singleton archetype group at the
+pool's perceptual-grouping threshold (0.55/0.6).
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

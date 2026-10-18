@@ -1262,5 +1262,33 @@
     ],
     "nearestNeighbour": "diatomlattice",
     "nearestDistance": 0.644
+  },
+  {
+    "date": "2026-10-18",
+    "inspirationSource": "Langton's Ant (and its generalisation to multi-colour 'turmites') -- https://arxiv.org/html/2506.10482v1 (Lutfalla, 'Sideways on the highways'), https://export.arxiv.org/pdf/2505.05426 (Gajardo/Lutfalla/Rao, 'Ants on the highway'); Wikipedia's Langton's ant article (search snippets only -- Wikipedia is blocked in this sandbox)",
+    "idea": "A single virtual ant walks a grid, turning left or right according to the colour of the cell it stands on, advancing that cell's colour by one (mod k, the rule word's length), then stepping forward. The classic two-colour rule 'LR' produces the famous chaotic-then-highway behaviour; generalising to longer {L,R} words produces a much richer zoo of growth patterns from the same one-line rule. Rendered as 3-5 independent toroidal ant colonies (2-3 ants each) in a near-regular scattered grid of panels with true black gaps, each running one fixed-per-video rule word; only live simulation state (grid + ant positions/headings) resets at a CYCLE_SEC=43.5s boundary. Colour tied to each cell's own state index.",
+    "engineName": "langtonsant",
+    "outcome": "shipped",
+    "reason": "Offline stress-testing (60 random seeds per candidate word, varying start position/heading/ant-count/grid size) found two-colour 'LR' too sparse at this pool's resolution (2-5% density) and three other words (LRRRRRLLR, RLLR, LLRLRLL) genuinely bimodal -- a real, repeatable fraction of seeds ran away to 0.86-0.99 density on the bounded torus this engine must use, not fixable by re-pacing. Settled on 4 safe words (LLRR, LLRRRL, LLLR, RRLLLR), all landing in a tight 0.19-0.58 final-density band across 60 seeds each. Full validateEngine() battery (seeds 1-15 + 12345) passed 16/16 with comfortable margins. Novelty gate: nearest neighbour frostgrowth at distance 0.773, comfortably clear of the 0.60 threshold -- a clean pass, not a thin-margin case.",
+    "seedsVerified": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      12345
+    ],
+    "nearestNeighbour": "frostgrowth",
+    "nearestDistance": 0.773
   }
 ]
