@@ -1,6 +1,6 @@
 {
   "last3D": "hoppercrystal",
-  "last2D": "herringbone",
+  "last2D": "hilbertweave",
   "lastMandala": "kaleidoscope",
   "recentCuratedDates": [
     "20261011",
@@ -8,10 +8,11 @@
     "20261013",
     "20261015",
     "20261016",
-    "20261017"
+    "20261017",
+    "20261018"
   ],
   "last3DArchetype": "hoppercrystal",
-  "last2DArchetype": "herringbone",
+  "last2DArchetype": "hilbertweave",
   "last3DByArchetype": {
     "geodome": "geodome",
     "hoppercrystal": "hoppercrystal",
@@ -40,7 +41,8 @@
     "frostgrowth": "frostgrowth",
     "geometric": "geometric",
     "grid": "grid",
-    "herringbone": "herringbone"
+    "herringbone": "herringbone",
+    "hilbertweave": "hilbertweave"
   },
-  "updatedAt": "2026-10-17T12:51:57.384Z"
+  "updatedAt": "2026-10-18T13:08:59.893Z"
 }
