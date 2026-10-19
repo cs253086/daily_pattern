@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Vega Sphere — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC op-art engine, inspired by a random web find (today's
+// creative-research routine, category "random architectural or typographic
+// movement" -- picked as the category with the fewest total uses in the log):
+// VICTOR VASARELY's VEGA series (1950s-60s) and the op-art grid-distortion
+// principle. Sources: The Art Story, Victor Vasarely
+// (https://www.theartstory.org/artist/vasarely-victor/) -- "start with a
+// regular grid, then deform it so the flat surface reads as three-
+// dimensional": in the Vega works a regular checkerboard is pushed so that
+// cells near a centre grow and cells at the rim compress, and a sphere seems
+// to swell out of the flat surface; Bridget Riley's "Movement in Squares"
+// (https://artsandculture.google.com/asset/movement-in-squares-bridget-riley/dwGpQ5o3Dc4FrQ)
+// for the same optical-motion effect from a plain grid of contrasting cells.
+//
+// A genuinely different construction PRINCIPLE from every other engine in
+// the pool: the cells are FILLED, ABUTTING, alternating light/dark quads of
+// one fixed lattice, and the only thing that changes is a smooth DOMAIN WARP
+// of that lattice -- several independent radial "sphere" lenses (Vega-style
+// bulges and dimples) that breathe in and out. Not a tiling that is computed
+// once and merely rotated (quasicrystal/voronoimosaic/voderberg/truchet), not
+// a grid of spinning polygons with outline strokes (grid/geometric), not a
+// band or thread weave (herringbone/stripweave/tartansett), not a field
+// sampled from a formula (chladni/moire/phasespikes). The lattice's own
+// topology is never changed; only its geometry is bent.
+//
+// GEOMETRY, verified OFFLINE before writing any rendering code (the same
+// discipline this pool's quasicrystal/geodome/spaceframe engines follow):
+//   - Each lens maps p -> c + (p-c)*h(r) inside radius R, with
+//     h = 1 + k(1-u)^2, u = (r/R)^2, and h = 1 outside. This is C1 at the
+//     rim. The radial Jacobian is 1 + k(1-u)(1-5u), the tangential one h, so
+//     the map stays a bijection (positive Jacobian) for |k| < ~1.25; we
+//     drive k = K sin(...) with K = 0.5, a 2.5x safety margin.
+//   - Lenses have disjoint supports: home separation >= 2.8R and orbit
+//     amplitude 0.25R (centres can close by at most 0.71R, leaving >= 2.09R > 2R), so no two
+//     supports ever overlap at any instant.
+//   - Coverage / brightness: the warp is a bijection of the frame, so total
+//     painted area is exactly constant. The light/dark split is a
+//     checkerboard, i.e. an ALTERNATING sum of cell areas. A smooth warp
+//     (lenses several cells wide) makes that alternating sum vanish to
+//     leading order, so the light fraction stays ~50% at every instant -- no
+//     brightness trend by construction, measured with validate.js below.
+//
+// UNIT-LEVEL MOTION: each lens breathes independently (own rate with a
+// guaranteed minimum magnitude and random sign, own phase), so neighbouring
+// cells swell and shrink against each other -- genuinely non-rigid. No
+// whole-field rotation or scroll is used (per truchet.html's lesson).
+//
+// Colour is fixed per cell by its domain index (never by its warped
+// position), so the palette is a stable property of the lattice and the
+// only per-frame motion is geometric. Hard full redraw every frame: no
+// accumulation, structurally whiteout-proof.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Burn-in: consecutive small seeds give correlated first outputs.
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+  function hsl2rgb(h, s, l) {
+    s /= 100; l /= 100;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = l - c / 2;
+    let r, g, b;
+    const hh = ((h % 360) + 360) % 360;
+    if (hh < 60) { r = c; g = x; b = 0; }
+    else if (hh < 120) { r = x; g = c; b = 0; }
+    else if (hh < 180) { r = 0; g = c; b = x; }
+    else if (hh < 240) { r = 0; g = x; b = c; }
+    else if (hh < 300) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+    return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+  }
+
+  // Domain: the frame in units where the half-height is 1 and the half-width
+  // is A = W/H, so the lattice is drawn at true aspect with no distortion.
+  const A = W / H;
+  const SUB = 4;          // sub-segments per cell edge: smooth bulges, crisp straight cell lines
+  const LUM_LIGHT = 58;   // light cells: vivid, saturated, mid-light
+  const LUM_DARK = 16;    // dark cells: deep saturated tone of the same hue
+
+  // ---- Lattice (fixed once per video) --------------------------------
+  // M rows of cells over the full height; N columns chosen so cells are
+  // essentially square. Bold, few cells: the house style's "bigger, fewer,
+  // clearer" rule.
+  const density = Math.max(0.7, Math.min(1.4, DENSITY));
+  const M = Math.max(5, Math.round(randInt(6, 9) / density));
+  const S = 2 / M;                       // cell height in domain units
+  const N = Math.max(4, Math.round(A * M));
+  const SX = (2 * A) / N;                // cell width in domain units (~S)
+  const LENS_K = 0.6;                    // bulge/dimple amplitude (|k| < 1.25 keeps the map a bijection)
+  const RIP = 0.13;                      // ripple amplitude as a fraction of cell size (see waves below)
+  const LENS_MIN = Math.max(2, Math.round(randInt(4, 6) * density));
+
+  // Cell colours: fixed per (i,j) by domain index. Light cells take a hue
+  // from the palette (cycled in a fixed pattern); dark cells take the SAME
+  // hue at a deep lightness, so each light cell has a dark neighbour of its
+  // own colour family -- the Vega-style light/dark op-art contrast.
+  // The lattice is drawn one cell BEYOND the frame on every side: the ripple
+  // below can move points by up to ~0.35 cell, so a one-cell margin keeps the
+  // warped lattice covering every pixel (no black slivers at the edges).
+  const mod = (a, n) => ((a % n) + n) % n;
+  const hueFor = (i, j) => PAL[mod(i + 2 * j, PAL.length)][0];
+  const lightRGB = [];
+  const darkRGB = [];
+  for (let j = -1; j <= M; j++) for (let i = -1; i <= N; i++) {
+    const h = hueFor(i, j);
+    const key = (j + 1) * (N + 2) + (i + 1);
+    lightRGB[key] = hsl2rgb(h, 90, LUM_LIGHT);
+    darkRGB[key] = hsl2rgb(h, 90, LUM_DARK);
+  }
+
+  // ---- Lenses (re-rolled per cycle, coverage-neutral by construction) ---
+  let lenses = [];
+  let R = 0;
+  function reconfigureLenses() {
+    R = rand(1.5, 2.2) * S;
+    lenses = [];
+    for (let tries = 0; tries < 3000 && lenses.length < LENS_MIN; tries++) {
+      const x = rand(-A + R, A - R);
+      const y = rand(-1 + R, 1 - R);
+      if (lenses.every((l) => Math.hypot(l.x - x, l.y - y) >= 2.8 * R)) {
+        lenses.push({
+          x, y,
+          ax: sgn() * rand(0.4, 0.8), ay: sgn() * rand(0.4, 0.8),
+          px: rand(0, Math.PI * 2), py: rand(0, Math.PI * 2),
+          // breathing: guaranteed minimum magnitude, random sign
+          w: sgn() * rand(0.9, 1.5) * SPEED,
+          f: rand(0, Math.PI * 2),
+        });
+      }
+    }
+  }
+
+  // Global travelling RIPPLE: three plane waves of random direction and
+  // wavelength 3.5-5.5 cells displace the whole lattice (amplitude RIP*lambda/2pi,
+  // so the peak lattice strain |a k| = RIP stays small). Each wave is a smooth,
+  // zero-mean displacement, so the warp stays a bijection and the alternating
+  // checkerboard area sum still cancels to leading order. This is what makes
+  // EVERY cell move against its neighbours, not just the few inside a lens.
+  let waves = [];
+  function reconfigureRipple() {
+    waves = [];
+    for (let m = 0; m < 3; m++) {
+      const lam = rand(3.5, 5.5) * S;
+      const th = rand(0, Math.PI * 2);
+      const psi = rand(0, Math.PI * 2);
+      const kmag = (2 * Math.PI) / lam;
+      waves.push({
+        kx: Math.cos(th) * kmag, ky: Math.sin(th) * kmag,
+        ux: Math.cos(psi), uy: Math.sin(psi),
+        amp: RIP * lam / (2 * Math.PI),
+        w: sgn() * rand(1.0, 1.6) * SPEED,
+        f: rand(0, Math.PI * 2),
+      });
+    }
+  }
+
+  // Warp of one domain point at time t: ripple first, then the lenses. Lens
+  // centres orbit a fixed home by 0.25R; with home separation >= 2.8R,
+  // supports never overlap, so the sum of displacements equals the
+  // composition of the lens maps. Both stages are bijections, so the
+  // composition is too.
+  let cxs = [], cys = [], ks = [];
+  let clkNow = 0;
+  function lensState(t) {
+    clkNow = t;
+    cxs = new Array(lenses.length);
+    cys = new Array(lenses.length);
+    ks = new Array(lenses.length);
+    for (let n = 0; n < lenses.length; n++) {
+      const l = lenses[n];
+      cxs[n] = l.x + 0.25 * R * Math.cos(l.ax * t + l.px);
+      cys[n] = l.y + 0.25 * R * Math.sin(l.ay * t + l.py);
+      ks[n] = LENS_K * Math.sin(l.w * t + l.f);
+    }
+  }
+  const outX = { v: 0 }, outY = { v: 0 };
+  function warp(px0, py0) {
+    let px = px0, py = py0;
+    for (const w of waves) {
+      const sv = Math.sin(w.kx * px0 + w.ky * py0 - w.w * clkNow + w.f) * w.amp;
+      px += w.ux * sv; py += w.uy * sv;
+    }
+    let qx = px, qy = py;
+    const R2 = R * R;
+    for (let n = 0; n < lenses.length; n++) {
+      const dx = px - cxs[n], dy = py - cys[n];
+      const r2 = dx * dx + dy * dy;
+      if (r2 < R2) {
+        const u = r2 / R2;
+        const h = 1 + ks[n] * (1 - u) * (1 - u);
+        qx += dx * (h - 1);
+        qy += dy * (h - 1);
+      }
+    }
+    outX.v = qx; outY.v = qy;
+  }
+  const toPx = (x) => (x + A) / (2 * A) * W;
+  const toPy = (y) => (1 - y) / 2 * H;
+
+  // ---- Render --------------------------------------------------------
+  reconfigureLenses();
+  reconfigureRipple();
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+  const dt = 1 / FPS;
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function drawCell(i, j, rgb) {
+    const x0 = -A + i * SX, x1 = x0 + SX;
+    const y0 = -1 + j * S, y1 = y0 + S;
+    const pts = [];
+    const edge = (ax, ay, bx, by) => {
+      for (let k = 0; k < SUB; k++) {
+        const f = k / SUB;
+        warp(ax + (bx - ax) * f, ay + (by - ay) * f);
+        pts.push([toPx(outX.v), toPy(outY.v)]);
+      }
+    };
+    edge(x0, y0, x1, y0);
+    edge(x1, y0, x1, y1);
+    edge(x1, y1, x0, y1);
+    edge(x0, y1, x0, y0);
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k][0], pts[k][1]);
+    ctx.closePath();
+    const css = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+    ctx.fillStyle = css;
+    ctx.fill();
+    // Same-colour hairline: hides antialiasing seams between abutting cells
+    // without drawing any visible outline.
+    ctx.strokeStyle = css;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    lensState(clk);
+    for (let j = -1; j <= M; j++) {
+      for (let i = -1; i <= N; i++) {
+        const dark = mod(i + j, 2) === 1;
+        const key = (j + 1) * (N + 2) + (i + 1);
+        drawCell(i, j, dark ? darkRGB[key] : lightRGB[key]);
+      }
+    }
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureLenses(); reconfigureRipple(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

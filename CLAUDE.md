@@ -8183,6 +8183,79 @@ comfortably clear of the 0.60 threshold, a clean pass, not a thin-margin
 case. `langtonsant` also forms its own singleton archetype group at the
 pool's perceptual-grouping threshold (0.55/0.6).
 
+## Vega sphere op-art engine (`vegasphere.html`) — 2026-10-19
+
+Daily creative-research routine. Category was "random architectural or
+typographic movement", picked because it had the fewest total uses in the
+log (7, last used 2026-10-10). An open WebSearch surfaced **Victor Vasarely's
+Vega series** and the op-art grid-distortion principle: start from a regular
+checkerboard, then deform it so the flat surface reads as a bulging sphere
+(cells grow near the centre and compress at the rim). Bridget Riley's
+"Movement in Squares" was the companion reference for the same optical-motion
+effect from a plain alternating grid. Sources:
+[The Art Story, Victor Vasarely](https://www.theartstory.org/artist/vasarely-victor/),
+[Google Arts & Culture, Movement in Squares](https://artsandculture.google.com/asset/movement-in-squares-bridget-riley/dwGpQ5o3Dc4FrQ),
+[Vasarely & Op Art overview](https://buffaloakg.org/learn-discover/educators/lesson-plans/victor-vasarely-op-art).
+
+**What it is**: a filled, abutting, alternating light/dark checkerboard of
+one fixed lattice (about 6-9 rows, bold cells), warped by a smooth domain
+map. The warp is a global travelling RIPPLE (three plane waves, random
+direction and 3.5-5.5-cell wavelength) plus 3-5 Vega-style radial LENSES
+(each maps p to c + (p-c)(1 + k(1-u)^2) inside radius R, bulging for k>0
+and dimpling for k<0, with k breathing sinusoidally). The lattice topology
+is never changed, only its geometry. A genuinely different construction
+from every other engine in the pool: not a computed-once tiling that is
+only rotated (quasicrystal, voronoimosaic, voderberg, truchet), not an
+outlined polygon grid (grid, geometric), not a woven band or thread (the
+textile engines), not a sampled formula (chladni, moire).
+
+**Verified OFFLINE before writing render code**: the lens map has a
+positive Jacobian for |k| < ~1.25 (radial factor 1 + k(1-u)(1-5u), tangential
+h), and with home separation >= 2.8R and orbit amplitude 0.25R the supports
+never overlap. A finite-difference Jacobian sweep of the full ripple+lens
+composition (4 trials, 90 simulated seconds) gave a minimum of 0.148 (a
+bijection, so no folds). Coverage/brightness: the warp is a bijection, so
+painted area is exactly constant. The light/dark split is an ALTERNATING sum
+of cell areas, which a smooth warp cancels to leading order; the measured
+light-area imbalance was at most 0.75% of the frame.
+
+**Two real defects found by running the battery and looking, not by reasoning:**
+1. **Lenses alone could not move the frame.** With 1-5 small lenses covering
+   a minority of the frame, `validateEngine()` failed fastMotion on all 11
+   tested seeds (0.9-7.1 against floors of 6-8) and compositionDrift on 8 of
+   them (0.0059-0.0145). The motion was real but local. Fixed with the global
+   travelling ripple (RIP = 0.13 of the cell size, peak strain |a k| = RIP so
+   the map stays a bijection): every cell now moves against its neighbours.
+   fastMotion went to 13.7-27.3 on all 16 seeds, and drift cleared on all.
+2. **The ripple pulled the lattice boundary inward, leaving black slivers at
+   the frame edges**, visible on a rendered 95% frame (the domain edge no
+   longer mapped onto the frame edge). Fixed by drawing the lattice one cell
+   beyond the frame on every side; the ripple moves points by at most ~0.35
+   cell, so the warped lattice always covers every pixel.
+
+**Verified** (final design): `validateEngine()` **16/16** across seeds 1-15
+plus the CLI's default seed 12345, and `node src/validate.js` passes on
+12345 (CLI verdict ok). Margins: `avgSat` 86.5-88.6 (vs the 22 minimum),
+zero near-white pixels, `projectedRise` -4.6 to +12.1 (vs the 50 threshold),
+`compositionDrift` 0.0202-0.0553 (vs the 0.015 minimum; the closest seeds 9
+and 11 sit at 0.0202), `unitMotionNonRigidFrac` exactly 1.0 on every seed,
+`fastMotion` 13.7-27.3 against per-seed floors of ~6-8,
+`avgMsPerFrame` 9-18 (`projectedHourRenderMin` 13-25 min, well inside the CI
+budget). Frames rendered and looked at across 25/50/75/95% of the 43.5s cycle
+at seeds 20261019, 3 and 12345: bold, saturated light/dark cells, visible
+independent bulging near the lenses and a rippling lattice everywhere else,
+no edge slivers after the fix.
+
+**Novelty gate**: measured against all 70 engines in `engines/manual/`
+(whole pool fingerprinted fresh, refreshed cache not committed). Nearest
+neighbour is `tessellation` at distance **1.072**, comfortably clear of the
+0.60 threshold and close to the pool's own median pair distance (1.320). The
+composition-level distinctness comes from the filled, warped light/dark
+lattice, not from any single new parameter.
+
+`ENGINE_SUBJECTS`: `vegasphere: 'Bulging Op Art Checkerboard'` in
+`src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

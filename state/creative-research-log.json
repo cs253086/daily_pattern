@@ -1290,5 +1290,16 @@
     ],
     "nearestNeighbour": "frostgrowth",
     "nearestDistance": 0.773
+  },
+  {
+    "date": "2026-10-19",
+    "inspirationSource": "Victor Vasarely's Vega series and the op-art grid-distortion principle: start from a regular checkerboard and deform it so the flat surface reads as a bulging sphere (cells grow near the centre, compress at the rim). Sources: https://www.theartstory.org/artist/vasarely-victor/ ; Bridget Riley, Movement in Squares, https://artsandculture.google.com/asset/movement-in-squares-bridget-riley/dwGpQ5o3Dc4FrQ ; https://buffaloakg.org/learn-discover/educators/lesson-plans/victor-vasarely-op-art",
+    "idea": "A filled, abutting, alternating light/dark checkerboard of one fixed lattice (6-9 rows), warped by a smooth domain map: a global travelling ripple (three plane waves) plus 3-5 Vega-style radial lenses (bulge/dimple, breathing sinusoidally). The lattice topology never changes; only its geometry bends. Verified offline: lens map is a bijection (Jacobian min 0.148 on the full ripple+lens composition), light/dark area imbalance <=0.75% of the frame (alternating-sum cancellation). Two defects found by running the battery and looking: lenses alone could not move the frame (fastMotion failed on all 11 early seeds) -> fixed with the global ripple; ripple pulled the lattice boundary inward, leaving black slivers at the frame edges -> fixed by drawing the lattice one cell beyond the frame.",
+    "engineName": "vegasphere",
+    "outcome": "shipped",
+    "reason": "validateEngine 16/16 (seeds 1-15 + 12345), CLI validate ok, novelty nearest neighbour tessellation at 1.072 (pool median pair 1.320), frames looked at across 25/50/75/95% of the 43.5s cycle at 3 seeds. ENGINE_SUBJECTS entry added.",
+    "seedsVerified": "1-15, 12345",
+    "nearestNeighbour": "tessellation",
+    "nearestDistance": 1.072
   }
 ]
