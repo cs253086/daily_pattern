@@ -171,5 +171,17 @@
     "outcome": "skipped",
     "goalReached": false,
     "note": "Owner: please paste a current Studio subscriber count. The bot is working from a 13-day-old number."
+  },
+  {
+    "date": "2026-10-20",
+    "subscribersKnown": 16,
+    "goal": 500,
+    "change": null,
+    "filesChanged": [],
+    "rationale": "Daily firing. state/subscriber-updates.json latest is still the 2026-10-06 owner-reported count of 16, now 14 days old, so it is stale and the 500 goal is not reached. No new owner input. origin/main advanced to a1f05d9 (research-routine sandpile log entry, no engine shipped, no growth-code change). No change is clearly actionable on current evidence, and no fresh external research this firing. Shipping on a hunch would muddy the log.",
+    "verified": "git fetch origin main && git reset --hard origin/main synced to a1f05d9; read state/subscriber-updates.json (latest 16, 2026-10-06) and state/growth-log.json (14 entries, last 2026-10-19).",
+    "outcome": "skipped",
+    "goalReached": false,
+    "note": "Owner: please paste a current YouTube Studio subscriber count. The bot is working from a 14-day-old number. Four firings (2026-10-13 to 10-16) were missed and are not in the log."
   }
 ]
