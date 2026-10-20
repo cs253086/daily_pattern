@@ -1301,5 +1301,16 @@
     "seedsVerified": "1-15, 12345",
     "nearestNeighbour": "tessellation",
     "nearestDistance": 1.072
+  },
+  {
+    "date": "2026-10-20",
+    "inspirationSource": "Abelian sandpile model (Bak, Tang & Wiesenfeld 1987; Dhar's abelian-group result): grains on a grid topple when a site holds four or more, sending one to each neighbour, with grains lost off the edge; the stable state is order-independent and a single pile stabilises into a self-similar fractal. Sources: https://en.wikipedia.org/wiki/Abelian_sandpile_model (search snippets only, Wikipedia blocked in this sandbox); https://arxiv.org/pdf/1602.03424 (The Abelian Sandpile Model on Fractal Graphs); https://www2.math.uconn.edu/~teplyaev/cornell4/Russ.pdf (Russ Thompson, abelian sandpile on fractals). Category: obscure mathematical object / crystal system / physical phenomenon (least recently used, last 2026-10-08).",
+    "idea": "Render several scattered panels, each an independent abelian sandpile driven by two off-centre grain sources, colour by height level (0 black, 1/2/3 three hues), with a full reset each cycleSec and a coverage-neutral WAVE_K size pulse for fast local motion. Two off-centre sources were introduced to break the D4-symmetric mandala a single source produces.",
+    "engineName": null,
+    "outcome": "skipped",
+    "reason": "Skipped after four design rounds. Offline checks passed (stability, exact mass conservation, abelian property verified on 5 random drop sets; ~1 ms/frame). Validation passed 16/16 on the round-2 design (seeds 1-15 + 12345, projectedRise 8-29, fastMotion 2x floor, unitMotionNonRigidFrac 0.998-1.0, avgMsPerFrame 3-16). Novelty and look failed the bar: round 1 (2x2 equal grid, one source per panel) scored 0.437 vs langtonsant (mirror/two-fold symmetry of the frame-level grid, mirrorUD/mirrorLR/rotSym2). Round 2 (scattered unequal panels, two sources, 260 px) scored 0.610 vs diatomlattice, a thin pass, and its panels read as small round pixel bubbles that do not fill the frame. Round 3 (340 px panels) fell to 0.547 vs temari; round 4 (280 px, higher drop rate so piles reach panel edges) fell to 0.461 vs temari. Round-based diagnosis: the round silhouette of a sandpile pile is the shared trait with round-window engines (diatomlattice, temari); size and drop-rate levers moved novelty the wrong way. Higher drop rates saturate panels into a churning camouflage texture; lower rates leave small round blobs. Not shipped: no engine file committed.",
+    "seedsVerified": "1-15, 12345",
+    "nearestNeighbour": "temari",
+    "nearestDistance": 0.461
   }
 ]
