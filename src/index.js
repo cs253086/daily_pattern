@@ -865,6 +865,7 @@ async function main() {
     // one production uploads land on ("Pattern Flow", confirmed from the
     // upload response in the job log); src/upload.js warns if that changes.
     titleStyle: process.env.TITLE_STYLE,
+    subCtaTop: process.env.SUB_CTA_TOP !== '0',
     channelId: process.env.YT_CHANNEL_ID || 'UCh2l3pS4l1J0mInJ23FjKsg',
     longPlaylistId: process.env.YT_PLAYLIST_LONG,
   });

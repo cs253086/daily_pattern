@@ -183,5 +183,23 @@
     "outcome": "skipped",
     "goalReached": false,
     "note": "Owner: please paste a current YouTube Studio subscriber count. The bot is working from a 14-day-old number. Four firings (2026-10-13 to 10-16) were missed and are not in the log."
+  },
+  {
+    "date": "2026-10-20",
+    "subscribersKnown": 17,
+    "goal": 500,
+    "change": "Subscribe link moved above the fold in long-form descriptions (src/metadata.js): 'Subscribe for a new pattern every day: <link>' now sits directly under the hook line instead of after three paragraphs. Escape hatch SUB_CTA_TOP=0.",
+    "filesChanged": [
+      "src/metadata.js",
+      "src/index.js",
+      "CLAUDE.md",
+      "state/subscriber-updates.json",
+      "state/growth-log.json"
+    ],
+    "rationale": "Owner reports 17 subscribers, flat for ~two weeks (14 on 09-25, 16 on 10-06, 17 now). Research pass 2026-10-20: plateau fixes repeatedly cite a clear niche, keyword titles, thumbnail CTR, and an explicit subscribe ask; long-form is the conversion engine. Our only subscribe link sat below the Show-more fold, so most viewers never saw it. Chosen as the single smallest reversible in-scope lever with a plausible mechanism; no clear evidence it will move the number, so the owner should judge it by the count over 2-3 weeks.",
+    "verified": "node --check on src/metadata.js and src/index.js; buildMetadata long description: one channel link with SUB_CTA_TOP default, one without (subCtaTop:false); DRY_RUN=1 DURATION=8 node src/index.js completes end to end (no upload); rotation-state drift from the dry run reverted before commit.",
+    "outcome": "shipped",
+    "goalReached": false,
+    "note": "Owner: the research sources were vendor blogs with unverified numbers. Studio-only follow-ups worth doing: check the subscriber-by-content report to find which videos convert, and set a channel trailer. Missed firings 2026-10-13 to 10-16 are still not in the log."
   }
 ]

@@ -310,8 +310,15 @@ export function buildMetadata(info = {}) {
     ? `https://www.youtube.com/playlist?list=${info.longPlaylistId}`
     : undefined;
 
+  // Subscribe ask above the fold (2026-10-20): the only subscribe link used to
+  // sit after three paragraphs, below the "Show more" fold where most viewers
+  // never reach it. Long-form videos are the conversion engine (Shorts mostly
+  // bring reach), so the ask goes straight under the hook. SUB_CTA_TOP=0
+  // (info.subCtaTop === false) restores the old bottom-only placement.
+  const subCtaTop = !!subscribeUrl && info.subCtaTop !== false;
   const description = [
     hook,
+    subCtaTop ? `Subscribe for a new pattern every day: ${subscribeUrl}` : undefined,
     '',
     visualParagraph,
     '',
@@ -322,7 +329,7 @@ export function buildMetadata(info = {}) {
     musicCreditLine,
     '',
     `New ${mood.toLowerCase()} ${subject.toLowerCase()} every day — subscribe so you never miss tomorrow's.`,
-    subscribeUrl ? `Subscribe: ${subscribeUrl}` : undefined,
+    subscribeUrl && !subCtaTop ? `Subscribe: ${subscribeUrl}` : undefined,
     playlistUrl ? `Every full-length video so far: ${playlistUrl}` : undefined,
     '',
     '#generativeart #screensaver #ambient #relaxing #hypnotic',

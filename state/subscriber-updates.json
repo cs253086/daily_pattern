@@ -16,5 +16,11 @@
     "subscribers": 16,
     "source": "owner-reported",
     "notes": "Owner, verbatim: \"the number of subscription stays 16. so...\" -- a real confirmed count, and a complaint that it's stagnant (barely above the 14 baseline from 2026-09-25, 11 days earlier). Also the first direct evidence that the daily subscriber-growth-research trigger (trig_01MzFMv1sC8AAo9UwZkKRNoB, created 2026-10-02) has produced no effect: it has fired at least 4 times since creation but never pushed a growth-log.json entry or a code change -- see the same date's growth-log.json entry for the investigation."
+  },
+  {
+    "date": "2026-10-20",
+    "subscribers": 17,
+    "source": "owner-reported",
+    "notes": "Owner, verbatim: \"currently 17, but it has been 17 for a long time... we should research and do something about it.\" Stagnant for an extended period. Owner asked for research and a concrete action."
   }
 ]

@@ -8256,6 +8256,8 @@ lattice, not from any single new parameter.
 `ENGINE_SUBJECTS`: `vegasphere: 'Bulging Op Art Checkerboard'` in
 `src/metadata.js`.
 
+- **Subscribe ask above the fold, 2026-10-20 (owner: "currently 17, but it's been 17 for a long time... research and do something about it").** Owner-reported count went 14 (2026-09-25) -> 16 (2026-10-06) -> 17 (2026-10-20), flat for two weeks. Research (WebSearch, 2026-10-20; vendor-blog sources, numbers unverified): Shorts mostly drive reach, long-form videos are the subscriber-conversion engine; the common fixes for a plateau are a clear niche, keyword-led titles, better thumbnails, and an explicit subscribe ask. Our long-form description had its only subscribe link after three paragraphs, below the "Show more" fold. Change: `src/metadata.js` puts `Subscribe for a new pattern every day: <link>` directly under the hook line (the bottom "Subscribe:" line is dropped when the top one is used so the link appears once). Escape hatch: repo variable `SUB_CTA_TOP=0` (`info.subCtaTop === false`) restores the old bottom placement. Verified: `buildMetadata()` long description has exactly one channel link on and one off; `DRY_RUN=1 DURATION=8 node src/index.js` completes end to end (title and thumbnail produced, no upload). Not done this session, logged for the owner: a Studio-side check of which videos convert best (subscriber-by-content report) and a Studio-only channel trailer. Measure the change by the owner's subscriber count over the next 2-3 weeks; it is one change, so cause and effect stay legible.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
