@@ -1312,5 +1312,16 @@
     "seedsVerified": "1-15, 12345",
     "nearestNeighbour": "temari",
     "nearestDistance": 0.461
+  },
+  {
+    "date": "2026-10-21",
+    "inspirationSource": "Ammonite suture lines: the frilled septum-to-shell junctions of ammonite shells, whose lobes are themselves frilled (lobes within lobes), giving a fractal-like, power-scaled complexity. Sources: https://www.nature.com/articles/srep33689 (Suture pattern formation in ammonites and the unknown rear mantle structure); https://link.springer.com/article/10.1023/A:1014847007351 (First and Second Orders of Suture Complexity in Ammonites: fractal analysis); https://www.science.org/doi/10.1126/sciadv.adh0480 (Fractal-like geometry as an evolutionary response to predation?). Category: a random featured image (least recently used; previous uses were pollen, orb-weaver web, angelfish, butterfly wing, radiolarian, diatom). Search snippets only.",
+    "idea": "Nested, geometrically spaced closed septa (ratio Q between successive radii) whose radii are modulated by a self-similar lobe function: triangle-wave harmonics with counts n, 3n, 9n, each harmonic's weight and rotation rate independent, a travelling radial breathing wave across the septa, and a per-septum phase twist. Built as a painter's-order stack of filled septum disks with alternating light/dark bands. Chosen to give crisp serrated sutures rather than soft ripples (a sine-based first draft read as organic blobs, against house rule 2).",
+    "engineName": null,
+    "outcome": "skipped",
+    "reason": "Skipped after about eight design rounds. Offline geometry checks held (no septum crossing when Q > (1+A)(1+B)/((1-A)(1-B)); band areas exactly invariant under lobe phase because the mean of the lobe function is zero). Rendered frames looked vivid and crisp once the sine lobes became triangle waves, but the design is a single concentric septum stack, so the rotation-invariant descriptor barely changes over time. Quality gate: compositionDrift stayed at 0.006-0.020 across seeds 1-15 and 12345 in every round that kept the band-area invariance (the binding failure; threshold 0.015). Making the mean radius of each septum move (radial breathing, B=0.12) raised drift only to 0.015-0.033 on the passing seeds and produced a brightness-trend failure on seed 2 (projected +56.6). fastMotion was marginal (2.3-4.0 vs floors of 4.9-5.4) until rotation rates and frill amplitude were raised, after which it passed. Novelty gate not measured because the quality gate did not pass. Not shipped: no engine file committed.",
+    "seedsVerified": "1, 2, 6, 7, 12345 (partial battery; the full 1-15 + 12345 battery was not completed on the final design)",
+    "nearestNeighbour": null,
+    "nearestDistance": null
   }
 ]
