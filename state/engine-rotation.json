@@ -1,5 +1,5 @@
 {
-  "last3D": "muqarnas",
+  "last3D": "radiolarian",
   "last2D": "hilbertweave",
   "lastMandala": "kaleidoscope",
   "recentCuratedDates": [
@@ -10,9 +10,10 @@
     "20261016",
     "20261017",
     "20261018",
-    "20261020"
+    "20261020",
+    "20261021"
   ],
-  "last3DArchetype": "muqarnas",
+  "last3DArchetype": "radiolarian",
   "last2DArchetype": "hilbertweave",
   "last3DByArchetype": {
     "geodome": "geodome",
@@ -25,7 +26,8 @@
     "rosenspikes": "rosenspikes",
     "tensegritychain": "tensegritychain",
     "columnarbasalt": "columnarbasalt",
-    "diagrid": "diagrid"
+    "diagrid": "diagrid",
+    "radiolarian": "radiolarian"
   },
   "last2DByArchetype": {
     "arcrings": "arcrings",
@@ -45,5 +47,5 @@
     "herringbone": "herringbone",
     "hilbertweave": "hilbertweave"
   },
-  "updatedAt": "2026-10-20T14:14:10.735Z"
+  "updatedAt": "2026-10-21T14:27:37.810Z"
 }
