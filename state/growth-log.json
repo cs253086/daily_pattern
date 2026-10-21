@@ -201,5 +201,15 @@
     "outcome": "shipped",
     "goalReached": false,
     "note": "Owner: the research sources were vendor blogs with unverified numbers. Studio-only follow-ups worth doing: check the subscriber-by-content report to find which videos convert, and set a channel trailer. Missed firings 2026-10-13 to 10-16 are still not in the log."
+  },
+  {
+    "date": "2026-10-21",
+    "subscribers": 17,
+    "change": "none",
+    "outcome": "skipped",
+    "goalReached": false,
+    "rationale": "The 2026-10-20 subscribe-link-above-the-fold change has had about one day to take effect. Adding a second change now would make the 2-3 week read on that change unreliable. Owner-reported count is still 17, so there is nothing new to act on.",
+    "verified": "No code changed; state/growth-log.json entry only.",
+    "note": "Next firing: keep the subscribe change unchanged and check the owner-reported count once more new data arrives."
   }
 ]
