@@ -84,6 +84,7 @@ const ENGINE_SUBJECTS = {
   tartansett: 'Tartan Plaid Weave',
   temari: 'Embroidered Temari Spheres',
   tensegritychain: 'Floating Tensegrity Chain',
+  prismbloom: 'Layered Glowing Polygons',
   tessellation: 'Recursive Tessellation',
   torusrings3d: 'Glowing 3D Rings',
   truchet: 'Truchet Tile Maze',
