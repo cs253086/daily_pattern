@@ -54,8 +54,8 @@
   // Three depth layers: near (large, bright, fast), mid, far (small, dim, slow).
   const LAYERS = [
     { scale: 1.00, cells: 7, alpha: 1.00, rate: 0.30, sway: 0.010 },
-    { scale: 0.70, cells: 11, alpha: 0.75, rate: 0.22, sway: 0.016 },
-    { scale: 0.46, cells: 17, alpha: 0.55, rate: 0.16, sway: 0.022 },
+    { scale: 0.70, cells: 8, alpha: 0.75, rate: 0.22, sway: 0.016 },
+    { scale: 0.46, cells: 9, alpha: 0.55, rate: 0.16, sway: 0.022 },
   ];
 
   const layers = LAYERS.map((L, li) => {
@@ -106,7 +106,7 @@
     ctx.strokeStyle = `hsla(${hue}, 100%, 66%, ${0.32 * alpha})`;
     ctx.lineWidth = width * 2.4;
     polygon(x, y, R, sides, rot, scale);
-    ctx.strokeStyle = `hsla(${hue}, 100%, 82%, ${0.95 * alpha})`;
+    ctx.strokeStyle = `hsla(${hue}, 100%, 76%, ${0.9 * alpha})`;
     ctx.lineWidth = width;
     polygon(x, y, R, sides, rot, scale);
   }
@@ -130,7 +130,9 @@
         const rot = it.rot0 + layer.dir * it.rate * t * L.rate * 4;
         const pulse = 1 + 0.16 * Math.sin(2 * Math.PI * it.pulseRate * 0.1 * t + it.pulsePhase);
         strokeGlow(x, y, it.R * pulse, it.sides, rot, 1, it.hue, it.width, L.alpha);
-        strokeGlow(x, y, it.R * pulse, it.sides, -rot * 1.5, it.inner, (it.hue + 40) % 360, it.width * 0.7, L.alpha * 0.8);
+        ctx.strokeStyle = `hsla(${(it.hue + 40) % 360}, 100%, 70%, ${0.7 * L.alpha})`;
+        ctx.lineWidth = it.width * 0.7;
+        polygon(x, y, it.R * pulse, it.sides, -rot * 1.5, it.inner);
       }
     }
     ctx.globalCompositeOperation = 'source-over';
