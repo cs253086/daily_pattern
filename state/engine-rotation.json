@@ -1,7 +1,7 @@
 {
   "last3D": "radiolarian",
   "last2D": "hilbertweave",
-  "lastMandala": "kaleidoscope",
+  "lastMandala": "spirograph",
   "recentCuratedDates": [
     "20261011",
     "20261012",
@@ -11,7 +11,8 @@
     "20261017",
     "20261018",
     "20261020",
-    "20261021"
+    "20261021",
+    "20261022"
   ],
   "last3DArchetype": "radiolarian",
   "last2DArchetype": "hilbertweave",
@@ -47,5 +48,5 @@
     "herringbone": "herringbone",
     "hilbertweave": "hilbertweave"
   },
-  "updatedAt": "2026-10-21T14:27:37.810Z"
+  "updatedAt": "2026-10-22T14:27:48.315Z"
 }
