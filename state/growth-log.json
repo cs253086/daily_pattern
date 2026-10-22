@@ -211,5 +211,17 @@
     "rationale": "The 2026-10-20 subscribe-link-above-the-fold change has had about one day to take effect. Adding a second change now would make the 2-3 week read on that change unreliable. Owner-reported count is still 17, so there is nothing new to act on.",
     "verified": "No code changed; state/growth-log.json entry only.",
     "note": "Next firing: keep the subscribe change unchanged and check the owner-reported count once more new data arrives."
+  },
+  {
+    "date": "2026-10-22",
+    "subscribersKnown": 17,
+    "goal": 500,
+    "change": null,
+    "filesChanged": [],
+    "outcome": "skipped",
+    "goalReached": false,
+    "rationale": "No action. The subscribe-link-above-the-fold change (2026-10-20) is only two days old, and the owner's count is still the 2026-10-20 value of 17. Shipping another change now would blur the 2-3 week read on that change. Note: the owner-reported count is about two days old, which is within the staleness window.",
+    "verified": "Synced to origin/main (7bb027e). Read state/subscriber-updates.json and state/growth-log.json. No code changed.",
+    "note": "Owner-only Studio follow-ups still open: subscriber-by-content report to see which videos convert, and a channel trailer."
   }
 ]
