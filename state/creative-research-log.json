@@ -1323,5 +1323,16 @@
     "seedsVerified": "1, 2, 6, 7, 12345 (partial battery; the full 1-15 + 12345 battery was not completed on the final design)",
     "nearestNeighbour": null,
     "nearestDistance": null
+  },
+  {
+    "date": "2026-10-22",
+    "inspirationSource": "Pavement cells: the jigsaw-shaped epidermal cells of leaves, whose walls are lobed so neighbouring cells interlock (ROP-GTPase-driven lobing). Category: random natural structure (last used 2026-10-12). Source note: the WebSearch run for this category returned mechanochemical/Turing pattern reviews and mud-crack papers (https://arxiv.org/pdf/1211.6762, https://physicstoday.aip.org/features/cracking-mud-freezing-dirt-and-breaking-rocks) rather than pavement-cell sources; the pavement-cell principle was chosen from prior botany knowledge and is NOT verified against a fetched source. Mud-crack T-to-Y junction networks were rejected as too close to columnarbasalt.html.",
+    "idea": "A Voronoi tiling of a jittered hex-offset seed set where every SHARED wall is displaced by one lobe vector D(t)=A*sin(pi t)*osc(t)*u, with u fixed per seed pair and osc a per-pair sinusoid, so both neighbouring cells displace the wall identically (tiling stays gap-free) and walls breathe in and out independently. Seeds orbit slowly; black walls. Two composition drafts: (1) full-bleed single mosaic, (2) the same tiling seen through 3-5 scattered circular windows with black negative space.",
+    "engineName": null,
+    "outcome": "skipped",
+    "reason": "Novelty gate failed on both drafts, and the one allowed composition-level iteration was used. Draft 1 (full-bleed mosaic): nearest neighbour liesegang at 0.435 (vs 0.60 minimum); the full-coverage, no-black-gap composition collapsed several descriptor features to the same values. Draft 2 (3-5 scattered circular windows with black gaps, the lever that fixed diatomlattice/foamcoarsen): nearest neighbour diatomlattice at 0.520, because it is the same scattered-disk-of-cells composition family. Quality gate not completed: a 16-seed validateEngine battery was started on draft 1 and was killed when the novelty gate failed, and on draft 2 it was not finished. Visual checks (frames 0 and 240 of draft 2) looked clean with no gaps at the shared walls, but this is not evidence the gates pass. Not shipped: no engine file committed, no ENGINE_SUBJECTS entry committed.",
+    "seedsVerified": "none (quality gate not completed; visual check only, seed 20260710)",
+    "nearestNeighbour": "diatomlattice (windowed draft 0.520); liesegang (full-bleed draft 0.435)",
+    "nearestDistance": 0.52
   }
 ]
