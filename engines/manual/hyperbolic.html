@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hyperbolic Tiling — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a random web find (today's
+// creative-research routine, category "random Wikipedia article" -- the
+// fallback used because Wikipedia is blocked in this sandbox): the
+// HYPERBOLIC PLANE tiled by regular heptagons, {7,3} -- three heptagons
+// meet at every vertex, the construction behind M.C. Escher's "Circle Limit"
+// woodcuts. Sources: Dunham, "A Circle Limit III Backbone Arc Formula",
+// Bridges 2008 (https://archive.bridgesmathart.org/2008/bridges2008-341.pdf);
+// Hyperbolic transformations notes (https://homepages.gac.edu/~hvidsten/geom-text/web-chapters/hyper-transf.pdf);
+// Escher and hyperbolic geometry (https://www.yellowpigs.net/classes/escher.html).
+//
+// A genuinely different construction PRINCIPLE from every other engine in
+// the pool: a NON-EUCLIDEAN tiling. The tiles are built by repeated
+// reflection across geodesics of the Poincare disk model (circle arcs
+// orthogonal to the rim, or diameters), so the tile count grows
+// exponentially toward the rim while the tiles shrink in Euclidean size.
+// Motion is a continuous disk automorphism (a Mobius "boost" of the disk,
+// z -> (z-a)/(1-conj(a) z)), which is an isometry of the hyperbolic plane.
+// Its Euclidean footprint is a non-rigid, strongly compressive flow: tiles
+// swell where the boost pushes them toward the rim-free centre and shrink on
+// the far side, which reads as the whole tiling gliding through itself.
+//
+// GEOMETRY, verified OFFLINE before writing any rendering code (the same
+// discipline quasicrystal/geodome/spaceframe follow):
+//   - Base heptagon centred at the origin, circumradius (hyperbolic) from
+//     cosh R = cot(pi/7) cot(pi/3); Euclidean radius tanh(R/2) = 0.3007.
+//   - The interior angle of the base heptagon, measured between its two
+//     geodesic edges at a vertex, is exactly 120 degrees (= 2 pi / 3, three
+//     tiles per vertex).
+//   - Reflection across an edge's geodesic (inversion in the orthogonal circle
+//     through its two endpoints, or a Euclidean line reflection for a diameter)
+//     maps the base heptagon to its neighbour. Verified after generation:
+//     interior vertices have degree exactly 3, every interior edge is shared
+//     by exactly 2 tiles, and the Euclidean area of the tiles sums to 99.1% of
+//     the disk (the missing part is the thin rim beyond the generation radius).
+//
+// Framing: the disk's rim is placed OUTSIDE the frame (corners at |z| ~ 0.93),
+// so the screen is a window onto the tiling and every pixel is covered. An
+// earlier version showed the whole rim inside a black frame; it read as a
+// centred silhouette (novelty 0.249 vs geodome) and was rejected. A full-frame
+// variant with thin outlines collided with schlieren (0.453); widening the
+// geodesic gaps to a stained-glass seam (2.2% of the disk radius) cleared the
+// novelty gate (0.683 vs cascade).
+//
+// Coverage: a Mobius disk automorphism maps the unit disk to itself and the
+// tiling covers it, so the total tile area is exactly constant at every instant. Colours are fixed per tile (greedy 6-colouring in generation order),
+// so the palette is a stable property of the tile identity, never of its
+// position -- the same "colour by an axis the motion can't disturb" rule
+// geodome/spaceframe/hoppercrystal use.
+//
+// UNIT-LEVEL MOTION: the boost's Euclidean footprint differs strongly from
+// tile to tile, so every tile is deformed non-rigidly against its neighbours.
+// The boost centre traces a two-frequency Lissajous-like path (two rotating
+// phasors, magnitude 0.30 and 0.10, each with a guaranteed-minimum rate and
+// random sign, reconfigured at cycle boundaries without resetting phase).
+// |a| <= 0.40 by construction, so the map never approaches the rim.
+//
+// Hard full redraw every frame: no accumulation, structurally whiteout-proof.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Burn-in: consecutive small seeds give correlated first outputs.
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['jewel', 'neon', 'sunset', 'ocean', 'ember', 'aurora', 'gold'];
+  const palettes = {
+    jewel:  [[350, 85, 58], [30, 92, 58], [55, 92, 60], [150, 70, 48], [200, 88, 58], [270, 72, 60]],
+    neon:   [[0, 95, 60], [60, 95, 58], [120, 90, 55], [180, 95, 55], [240, 95, 64], [300, 92, 62]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60], [5, 90, 52]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62], [165, 85, 54]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62], [0, 85, 48]],
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58], [100, 85, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62], [25, 80, 50]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    // Default: the three palettes whose colours sit closest in Rec.709 luma
+    // (luma spread 87-114 vs 124-149 for the rest). Tiles change their on-screen
+    // share as the boost moves, so a wide luma spread would read as a slow drift.
+    return ['ocean', 'aurora', 'sunset'][SEED % 3];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+  const K = PAL.length;
+  function hsl2css(h, s, l) {
+    s /= 100; l /= 100;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = l - c / 2;
+    let r, g, b;
+    const hh = ((h % 360) + 360) % 360;
+    if (hh < 60) { r = c; g = x; b = 0; }
+    else if (hh < 120) { r = x; g = c; b = 0; }
+    else if (hh < 180) { r = 0; g = c; b = x; }
+    else if (hh < 240) { r = 0; g = x; b = c; }
+    else if (hh < 300) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+    return `rgb(${Math.round((r + m) * 255)},${Math.round((g + m) * 255)},${Math.round((b + m) * 255)})`;
+  }
+  const colCSS = PAL.map((p) => hsl2css(p[0], p[1], p[2]));
+
+  // ---- Hyperbolic {7,3} tiling (built once per video) ---------------------
+  const P = 7;                                   // heptagons
+  const RC = Math.acosh(1 / Math.tan(Math.PI / P) / Math.tan(Math.PI / 3)); // cosh R = cot(pi/p) cot(pi/q)
+  const RHO = Math.tanh(RC / 2);                 // Euclidean radius in the Poincare disk
+  const RMAX = 0.997;                            // generation radius (Euclidean, centroid)
+  const key = (x, y) => Math.round(x * 1e6) + ',' + Math.round(y * 1e6);
+
+  // Geodesic through P0,P1 of the disk: either a circle orthogonal to the rim
+  // or (when it passes through the origin) a diameter.
+  function geodesic(px, py, qx, qy) {
+    const mx = (px + qx) / 2, my = (py + qy) / 2;
+    const dx = qx - px, dy = qy - py; const L = Math.hypot(dx, dy);
+    const nx = -dy / L, ny = dx / L;
+    const d2 = (px - mx) ** 2 + (py - my) ** 2;
+    const mn = mx * nx + my * ny, m2 = mx * mx + my * my;
+    if (Math.abs(mn) < 1e-9) return { line: true, px, py, nx, ny };
+    const t = (1 + d2 - m2) / (2 * mn);
+    return { line: false, cx: mx + t * nx, cy: my + t * ny, s: Math.sqrt(d2 + t * t) };
+  }
+  function reflectAcross(z, g) {
+    if (g.line) {
+      const d = (z[0] - g.px) * g.nx + (z[1] - g.py) * g.ny;
+      return [z[0] - 2 * d * g.nx, z[1] - 2 * d * g.ny];
+    }
+    const dx = z[0] - g.cx, dy = z[1] - g.cy;
+    const k = g.s * g.s / (dx * dx + dy * dy);
+    return [g.cx + k * dx, g.cy + k * dy];
+  }
+
+  const vx0 = [], vy0 = [];                      // base vertex coordinates
+  const vmap = new Map();
+  const vid = (x, y) => {
+    const k = key(x, y);
+    let i = vmap.get(k);
+    if (i === undefined) { i = vx0.length; vx0.push(x); vy0.push(y); vmap.set(k, i); }
+    return i;
+  };
+  const tileV = [];                              // per tile: 7 vertex ids in cyclic order
+  const tileE = [];                              // per tile: 7 edge ids, edge i joins v[i] -> v[i+1]
+  const edgeA = [], edgeB = [], edgeMx = [], edgeMy = [];   // per edge: endpoints + arc midpoint (base)
+  const edgeMap = new Map();
+  const edgeTiles = [];                          // per edge: tiles touching it
+  const tmap = new Set();
+
+  function edgeId(a, b) {
+    const lo = Math.min(a, b), hi = Math.max(a, b);
+    const k = lo + ',' + hi;
+    let e = edgeMap.get(k);
+    if (e === undefined) {
+      e = edgeA.length;
+      edgeMap.set(k, e);
+      edgeA.push(a); edgeB.push(b);
+      edgeTiles.push([]);
+      // Arc midpoint of the geodesic between a and b (on the geodesic, between them).
+      const ax = vx0[a], ay = vy0[a], bx = vx0[b], by = vy0[b];
+      const g = geodesic(ax, ay, bx, by);
+      const mx = (ax + bx) / 2, my = (ay + by) / 2;
+      if (g.line) { edgeMx.push(mx); edgeMy.push(my); }
+      else {
+        const ux = mx - g.cx, uy = my - g.cy; const L = Math.hypot(ux, uy);
+        edgeMx.push(g.cx + g.s * ux / L); edgeMy.push(g.cy + g.s * uy / L);
+      }
+    }
+    return e;
+  }
+
+  // Colour: greedy in generation order, avoiding colours of already-coloured
+  // neighbours (tiles sharing an edge). Fixed per tile forever.
+  const tileCol = [];
+  function addTile(poly) {
+    let cx = 0, cy = 0;
+    for (const p of poly) { cx += p[0]; cy += p[1]; }
+    cx /= P; cy /= P;
+    const ck = key(cx, cy);
+    if (tmap.has(ck)) return false;
+    tmap.add(ck);
+    const ids = poly.map((p) => vid(p[0], p[1]));
+    const eds = [];
+    for (let i = 0; i < P; i++) eds.push(edgeId(ids[i], ids[(i + 1) % P]));
+    const t = tileV.length;
+    tileV.push(ids); tileE.push(eds);
+    const used = new Set();
+    for (const e of eds) for (const o of edgeTiles[e]) used.add(tileCol[o]);
+    let c = 0;
+    while (c < K && used.has(c)) c++;
+    if (c >= K) c = (t * 7 + 3) % K;   // rare: all colours around; take a deterministic one
+    tileCol.push(c);
+    for (const e of eds) edgeTiles[e].push(t);
+    return true;
+  }
+  (function buildTiling() {
+    const base = [];
+    for (let k = 0; k < P; k++) {
+      const a = 2 * Math.PI * k / P;
+      base.push([RHO * Math.cos(a), RHO * Math.sin(a)]);
+    }
+    const queue = [base];
+    addTile(base);
+    for (let qi = 0; qi < queue.length; qi++) {
+      const poly = queue[qi];
+      for (let e = 0; e < P; e++) {
+        const a = poly[e], b = poly[(e + 1) % P];
+        const g = geodesic(a[0], a[1], b[0], b[1]);
+        const child = poly.map((p) => reflectAcross(p, g));
+        let cx = 0, cy = 0;
+        for (const p of child) { cx += p[0]; cy += p[1]; }
+        if (Math.hypot(cx / P, cy / P) > RMAX) continue;
+        if (addTile(child)) queue.push(child);
+      }
+    }
+  })();
+  const NV = vx0.length, NE = edgeA.length, NT = tileV.length;
+  // Group tiles by colour, for one fill path per colour per frame.
+  const byCol = PAL.map(() => []);
+  for (let t = 0; t < NT; t++) byCol[tileCol[t]].push(t);
+
+  // ---- Per-frame state -----------------------------------------------------
+  const vx = new Float64Array(NV), vy = new Float64Array(NV);
+  const mx = new Float64Array(NE), my = new Float64Array(NE);
+  // The disk is scaled so the whole frame sits inside its rim (corners at
+  // |z| ~ 0.93): the tiling fills the frame edge to edge, no black silhouette.
+  const RPX = Math.hypot(W, H) / 2 / 0.93;
+  const CX = W / 2, CY = H / 2;
+  const LINE_W = Math.max(2, RPX * 0.022);
+
+  // Mobius disk automorphism z -> (z - a) / (1 - conj(a) z), applied to points.
+  function mobius(x, y, ax, ay, out, idx) {
+    const nr = x - ax, ni = y - ay;
+    const dr = 1 - (ax * x + ay * y), di = -(ax * y - ay * x);
+    const den = dr * dr + di * di;
+    out[0][idx] = (nr * dr + ni * di) / den;
+    out[1][idx] = (ni * dr - nr * di) / den;
+  }
+  const outV = [vx, vy], outE = [mx, my];
+
+  // Boost centre: two rotating phasors with guaranteed minimum rates and random sign.
+  const A1 = 0.30, A2 = 0.10;
+  let th1 = rand(0, 2 * Math.PI), th2 = rand(0, 2 * Math.PI);
+  let w1 = 0, w2 = 0;
+  function reconfigure() {
+    w1 = sgn() * rand(0.7, 1.1);
+    w2 = sgn() * rand(0.35, 0.6);
+  }
+  reconfigure();
+
+  const dt = SPEED / FPS;
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  // Pre-advance so the first frame is not the untouched base tiling.
+  let ax = 0, ay = 0;
+  function boostCentre() {
+    ax = A1 * Math.cos(th1) + A2 * Math.cos(th2);
+    ay = A1 * Math.sin(th1) + A2 * Math.sin(th2);
+  }
+
+  function drawFrame() {
+    for (let i = 0; i < NV; i++) mobius(vx0[i], vy0[i], ax, ay, outV, i);
+    for (let e = 0; e < NE; e++) mobius(edgeMx[e], edgeMy[e], ax, ay, outE, e);
+    const sx = (x) => CX + RPX * x;
+    const sy = (y) => CY + RPX * y;
+
+    // Fill tiles, one path per colour.
+    for (let c = 0; c < K; c++) {
+      const list = byCol[c];
+      if (!list.length) continue;
+      ctx.beginPath();
+      for (const t of list) {
+        const v = tileV[t], ed = tileE[t];
+        const v0 = v[0];
+        ctx.moveTo(sx(vx[v0]), sy(vy[v0]));
+        for (let i = 0; i < P; i++) {
+          const e = ed[i];
+          const vb = v[(i + 1) % P];
+          const cxq = 2 * mx[e] - (vx[v[i]] + vx[vb]) / 2;
+          const cyq = 2 * my[e] - (vy[v[i]] + vy[vb]) / 2;
+          ctx.quadraticCurveTo(sx(cxq), sy(cyq), sx(vx[vb]), sy(vy[vb]));
+        }
+        ctx.closePath();
+      }
+      ctx.fillStyle = colCSS[c];
+      ctx.fill();
+    }
+
+    // Geodesic edges as dark gaps. The gap width is set in HYPERBOLIC terms:
+    // each edge's Euclidean width is LINE_W times the local Jacobian of the
+    // boost at its midpoint. The gap pattern is then an isometry invariant, so
+    // the share of the frame it covers does not swing as the boost moves.
+    const buckets = new Map();
+    const ia = 1 - (ax * ax + ay * ay);
+    for (let e = 0; e < NE; e++) {
+      const x0 = edgeMx[e], y0 = edgeMy[e];
+      const dr = 1 - (ax * x0 + ay * y0), di = ax * y0 - ay * x0;
+      const sc = ia / (dr * dr + di * di);
+      const w = Math.max(0.5, Math.round(LINE_W * sc * 2) / 2);
+      let arr = buckets.get(w);
+      if (arr === undefined) { arr = []; buckets.set(w, arr); }
+      arr.push(e);
+    }
+    ctx.strokeStyle = '#000';
+    ctx.lineJoin = 'round';
+    for (const [w, arr] of buckets) {
+      ctx.beginPath();
+      for (const e of arr) {
+        const a = edgeA[e], b = edgeB[e];
+        const cxq = 2 * mx[e] - (vx[a] + vx[b]) / 2;
+        const cyq = 2 * my[e] - (vy[a] + vy[b]) / 2;
+        ctx.moveTo(sx(vx[a]), sy(vy[a]));
+        ctx.quadraticCurveTo(sx(cxq), sy(cyq), sx(vx[b]), sy(vy[b]));
+      }
+      ctx.lineWidth = w;
+      ctx.stroke();
+    }
+
+  }
+
+  function step() {
+    th1 += w1 * dt;
+    th2 += w2 * dt;
+    boostCentre();
+    cycleFrame++;
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigure(); }
+  }
+
+  boostCentre();
+  window.advanceFrame = function () {
+    drawFrame();
+    step();
+    window.currentFrame++;
+  };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.currentFrame = 0;
+  window.TOTAL_FRAMES = Math.round(DURATION * FPS);
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

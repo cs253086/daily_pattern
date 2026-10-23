@@ -8258,6 +8258,83 @@ lattice, not from any single new parameter.
 
 - **Subscribe ask above the fold, 2026-10-20 (owner: "currently 17, but it's been 17 for a long time... research and do something about it").** Owner-reported count went 14 (2026-09-25) -> 16 (2026-10-06) -> 17 (2026-10-20), flat for two weeks. Research (WebSearch, 2026-10-20; vendor-blog sources, numbers unverified): Shorts mostly drive reach, long-form videos are the subscriber-conversion engine; the common fixes for a plateau are a clear niche, keyword-led titles, better thumbnails, and an explicit subscribe ask. Our long-form description had its only subscribe link after three paragraphs, below the "Show more" fold. Change: `src/metadata.js` puts `Subscribe for a new pattern every day: <link>` directly under the hook line (the bottom "Subscribe:" line is dropped when the top one is used so the link appears once). Escape hatch: repo variable `SUB_CTA_TOP=0` (`info.subCtaTop === false`) restores the old bottom placement. Verified: `buildMetadata()` long description has exactly one channel link on and one off; `DRY_RUN=1 DURATION=8 node src/index.js` completes end to end (title and thumbnail produced, no upload). Not done this session, logged for the owner: a Studio-side check of which videos convert best (subscriber-by-content report) and a Studio-only channel trailer. Measure the change by the owner's subscriber count over the next 2-3 weeks; it is one change, so cause and effect stay legible.
 
+## Hyperbolic {7,3} tiling engine (`hyperbolic.html`) — 2026-10-23
+
+Daily creative-research routine. Category was "random Wikipedia article" (the
+fallback, since Wikipedia is blocked here), picked because it was the least
+recently used category and the other candidates were used on 10-17..10-22.
+An open WebSearch for an unusual geometric construction surfaced the
+Poincare-disk tiling by regular heptagons, three per vertex (the {7,3} tiling
+behind Escher's Circle Limit). Sources: Dunham, "A Circle Limit III Backbone
+Arc Formula", Bridges 2008 (https://archive.bridgesmathart.org/2008/bridges2008-341.pdf);
+Hyperbolic transformations notes (https://homepages.gac.edu/~hvidsten/geom-text/web-chapters/hyper-transf.pdf);
+Escher and hyperbolic geometry (https://www.yellowpigs.net/classes/escher.html).
+
+**What it is**: the first NON-EUCLIDEAN engine in the pool. Tiles are built by
+reflecting the base heptagon across its geodesic edges (inversion in the
+orthogonal circle through the edge endpoints, or a line reflection for a
+diameter). Each frame a Mobius disk automorphism z -> (z-a)/(1-conj(a) z),
+with a the sum of two phasors (|a| <= 0.40), flows the whole tiling through
+itself. Colours are fixed per tile (greedy colouring in generation order).
+
+**Geometry, verified offline first**: cosh R = cot(pi/7) cot(pi/3) gives the
+base heptagon's Euclidean circumradius tanh(R/2) = 0.3007. Measured interior
+angle between geodesic edges = 120.000 degrees. Generation to Euclidean
+radius 0.996 gives 1429 tiles, 5215 vertices, every interior vertex of degree
+exactly 3, every interior edge shared by exactly 2 tiles, and tile area summing
+to 99.1% of the disk. A first generation attempt exploded (16M vertices): the
+bug was a diameter edge (a geodesic through the origin) treated as a circle with
+infinite radius; the fix is a line reflection for that case.
+
+**Framing and novelty, measured through four rounds**:
+1. Whole disk visible inside a black frame: novelty 0.249 vs `geodome`
+   (a centred round silhouette on black).
+2. Disk scaled so the frame sits inside its rim, thin outlines: 0.453 vs
+   `schlieren` (full-frame colour regions with dark lines).
+3. Same, with the gaps widened to a stained-glass seam: 0.683 vs `cascade`.
+4. Gap width set in hyperbolic terms (each edge's Euclidean width scales with
+   the local Jacobian of the boost), so the gap pattern is an isometry
+   invariant and its frame share does not swing with the flow. This cut the
+   brightness-trend projection on seed 1 from 47.5 to 46.8 with the same
+   palette, and the palette change below took it to 7.3.
+
+**Palette, a real iteration**: the 'neon' palette (default for seed 1) has a
+Rec.709 luma spread of 146 across its six colours, and the boost moves each
+colour's on-screen share, so seed 1 read as a slow brightness drift (rise
+46.8, one unit below the 50 gate). Equalising luma by lightness nudging made
+the palette murky (yellow went olive), so it was rejected. The shipped default
+picks from ocean, aurora and sunset (luma spread 87-114), which keep vivid
+colour. Seed-to-palette mapping: `['ocean','aurora','sunset'][SEED % 3]`; the
+`palette=` URL param still reaches all seven.
+
+**Verified** (final design): `validateEngine()` 16/16 on seeds 1-15 plus the
+CLI's default seed 12345, PASS on every seed. Margins: `avgSat` 83.7-85.7 (vs
+22), `peakNearWhiteFrac` 0, `projectedRise` -61 to +16.5 (vs 50), `compositionDrift`
+0.042-0.085 (vs 0.015), `unitMotionNonRigidFrac` 0.437-0.568 (vs 0.40, the
+thinnest margin: the boost's rigid-looking core near the centre limits the
+non-rigid share, so the 0.40 gate needed the hyperbolic-invariant seams and a
+modest |a| to clear), `fastMotion` 40-81 vs floors of 5.5-8.5, speed 29-49 ms
+per frame in the 4-way parallel battery and 30.3 ms (`projectedHourRenderMin`
+43.6) on the quiet CLI run at seed 12345. Frames rendered and looked at across
+the cycle at seeds 1, 3 and 12345 (960x540): a bold, saturated heptagon mosaic
+with curved seams, cells swelling and shrinking against neighbours as the boost
+moves, no whiteout and no empty edges.
+
+**Novelty gate** (final design): measured against all 73 engines in
+`engines/manual/` (the committed fingerprint cache was stale, so the whole pool
+was fingerprinted fresh alongside the candidate; the refreshed cache was not
+committed). Nearest neighbour is `reactiondiffusion` at distance **0.668**
+(next: `cascade` 0.686, `diatomlattice` 0.699). A clean pass above 0.60, reached
+after the four framing/gap rounds above, not a bare first draft.
+
+**Caveat for the owner**: the frame now sits inside the disk's rim, so the
+circular Escher silhouette is not visible; what shows is the boost-driven
+heptagon mosaic. Restoring the visible rim would need a novelty fix against
+`geodome` (round silhouette on black), which round 1 showed is a real
+collision.
+
+`ENGINE_SUBJECTS`: `hyperbolic: 'Hyperbolic Tiling'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

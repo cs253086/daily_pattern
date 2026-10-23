@@ -52,6 +52,7 @@ const ENGINE_SUBJECTS = {
   herringbone: 'Herringbone Weave',
   hilbertweave: 'Hilbert Curve Weave',
   hoppercrystal: 'Hopper Crystal Staircase',
+  hyperbolic: 'Hyperbolic Tiling',
   ikatweave: 'Ikat Weave Patterns',
   kaleidoscope: 'Kaleidoscope Patterns',
   kuramotochimera: 'Synchronizing Oscillator Rings',
