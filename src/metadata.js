@@ -77,6 +77,7 @@ const ENGINE_SUBJECTS = {
   tartansett: 'Tartan Plaid Weave',
   tensegritychain: 'Floating Tensegrity Chain',
   prismbloom: 'Layered Glowing Polygons',
+  fluidmarble: 'Swirling Neon Dye Marble',
   tessellation: 'Recursive Tessellation',
   torusrings3d: 'Glowing 3D Rings',
   truchet: 'Truchet Tile Maze',
