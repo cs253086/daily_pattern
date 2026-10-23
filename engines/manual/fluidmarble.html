@@ -51,15 +51,16 @@
   const sgn = () => (rng() < 0.5 ? -1 : 1);
 
   // ---- fluid solver (Stam, stable fluids) -----------------------------
-  const GW = 128, GH = 72;
+  const GW = 224, GH = 126;
   const SZ = (GW + 2) * (GH + 2);
   const IX = (i, j) => i + (GW + 2) * j;
   const mk = () => new Float32Array(SZ);
   let U = mk(), V = mk(), U0 = mk(), V0 = mk(), PP = mk(), DV = mk();
   const D = [mk(), mk(), mk()], D0 = [mk(), mk(), mk()];
-  const DT = 0.12;
-  const VISC = 0.00002, DIFF = 0.00008;
-  const DYE_DECAY = 0.955;
+  const DT = 0.10;
+  const VISC = 0.000005, DIFF = 0.000012;
+  const DYE_DECAY = 0.962;
+  const VORT = 2.2; // vorticity confinement: keeps swirls crisp
 
   function setBnd(b, x) {
     for (let i = 1; i <= GW; i++) {
@@ -77,7 +78,7 @@
   }
 
   function linSolve(b, x, x0, a, c) {
-    for (let k = 0; k < 6; k++) {
+    for (let k = 0; k < 8; k++) {
       for (let j = 1; j <= GH; j++) {
         for (let i = 1; i <= GW; i++) {
           x[IX(i, j)] = (x0[IX(i, j)] + a * (x[IX(i - 1, j)] + x[IX(i + 1, j)] + x[IX(i, j - 1)] + x[IX(i, j + 1)])) / c;
@@ -129,8 +130,28 @@
     setBnd(1, u); setBnd(2, v);
   }
 
+  // Vorticity confinement: re-injects the curl a diffusive solver loses, so
+  // dye folds into tight, sharp swirls instead of soft blobs.
+  function vorticity(u, v) {
+    const cw = new Float32Array(SZ);
+    for (let j = 1; j <= GH; j++) for (let i = 1; i <= GW; i++) {
+      cw[IX(i, j)] = 0.5 * ((v[IX(i + 1, j)] - v[IX(i - 1, j)]) - (u[IX(i, j + 1)] - u[IX(i, j - 1)])) * GW;
+    }
+    for (let j = 2; j < GH; j++) for (let i = 2; i < GW; i++) {
+      const id = IX(i, j);
+      const dx = 0.5 * (Math.abs(cw[IX(i + 1, j)]) - Math.abs(cw[IX(i - 1, j)]));
+      const dy = 0.5 * (Math.abs(cw[IX(i, j + 1)]) - Math.abs(cw[IX(i, j - 1)]));
+      const len = Math.sqrt(dx * dx + dy * dy) + 1e-6;
+      const nx = dx / len, ny = dy / len;
+      const f = VORT * cw[id] / GW;
+      u[id] += DT * f * ny;
+      v[id] -= DT * f * nx;
+    }
+  }
+
   function stepFluid() {
     diffuse(1, U0, U, VISC, DT); diffuse(2, V0, V, VISC, DT);
+    vorticity(U0, V0);
     project(U0, V0, U, V);
     advect(1, U, U0, U0, V0, DT); advect(2, V, V0, U0, V0, DT);
     project(U, V, U0, V0);
@@ -151,13 +172,13 @@
   let injectors = [];
   function initInjectors() {
     injectors = [];
-    const n = 7 + Math.floor(rng() * 3);
+    const n = 12 + Math.floor(rng() * 4);
     for (let k = 0; k < n; k++) {
       injectors.push({
         ax: rand(0.30, 0.46), ay: rand(0.28, 0.42),
         w1: sgn() * rand(0.22, 0.45), w2: sgn() * rand(0.18, 0.40),
         p1: rand(0, 6.283), p2: rand(0, 6.283),
-        gain: rand(0.9, 1.5),
+        gain: rand(0.9, 1.5), spin: sgn() * rand(0.5, 1.2),
         cA: NEON[Math.floor(rng() * NEON.length)],
         cB: NEON[Math.floor(rng() * NEON.length)],
         cp: rand(0, 6.283), cr: sgn() * rand(0.2, 0.5),
@@ -188,6 +209,7 @@
       const py = 0.5 + q.ay * Math.sin(ph2);
       const vx = q.ax * q.w1 * Math.cos(ph1) * q.gain;
       const vy = q.ay * q.w2 * Math.cos(ph2) * q.gain;
+      const spin = q.spin * Math.sin(q.p1 * 0.5 + q.w1 * tt * 1.7);
       const ci = Math.floor(px * GW) + 1, cj = Math.floor(py * GH) + 1;
       const mix = 0.5 + 0.5 * Math.sin(q.cp + q.cr * tt);
       const col = [0, 1, 2].map((c) => (q.cA[c] * mix + q.cB[c] * (1 - mix)) / 255);
@@ -197,9 +219,10 @@
           if (i < 1 || j < 1 || i > GW || j > GH) continue;
           const w = Math.exp(-(di * di + dj * dj) / 3.5);
           const id = IX(i, j);
-          U[id] += vx * w * 0.06;
-          V[id] += vy * w * 0.06;
-          for (let c = 0; c < 3; c++) D[c][id] += col[c] * w * 0.42;
+          const rx = di, ry = dj, rr = Math.sqrt(rx * rx + ry * ry) + 0.5;
+          U[id] += (vx - spin * ry / rr * 0.5) * w * 0.05;
+          V[id] += (vy + spin * rx / rr * 0.5) * w * 0.05;
+          for (let c = 0; c < 3; c++) D[c][id] += col[c] * w * 1.1;
         }
       }
     }
@@ -232,10 +255,15 @@
       for (let i = 1; i <= GW; i++) {
         const id = IX(i, j);
         const o = ((j - 1) * GW + (i - 1)) * 4;
-        for (let c = 0; c < 3; c++) {
-          const v = 1 - Math.exp(-2.4 * D[c][id]);
-          px[o + c] = 255 * v;
-        }
+        const r0 = D[0][id], g0 = D[1][id], b0 = D[2][id];
+        const m = Math.max(r0, g0, b0, 1e-6);
+        const lum = 1 - Math.exp(-1.8 * m);
+        // Scale the whole pixel together so saturated hue survives instead
+        // of blowing out to white where colours overlap.
+        const k = lum / m;
+        px[o] = 255 * Math.min(1, r0 * k);
+        px[o + 1] = 255 * Math.min(1, g0 * k);
+        px[o + 2] = 255 * Math.min(1, b0 * k);
         px[o + 3] = 255;
       }
     }
