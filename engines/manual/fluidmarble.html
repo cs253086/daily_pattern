@@ -51,7 +51,7 @@
   const sgn = () => (rng() < 0.5 ? -1 : 1);
 
   // ---- fluid solver (Stam, stable fluids) -----------------------------
-  const GW = 224, GH = 126;
+  const GW = 192, GH = 108;
   const SZ = (GW + 2) * (GH + 2);
   const IX = (i, j) => i + (GW + 2) * j;
   const mk = () => new Float32Array(SZ);
