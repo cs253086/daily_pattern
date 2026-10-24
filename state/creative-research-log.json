@@ -1345,5 +1345,16 @@
     "seedsVerified": "1-15,12345",
     "nearestNeighbour": "reactiondiffusion",
     "nearestDistance": 0.668
+  },
+  {
+    "date": "2026-10-24",
+    "inspirationSource": "Miura-ori rigid-folding crease pattern (Koryo Miura, 1985 ISAS report on packaging large membranes; Schenk & Guest, 'Geometry of Miura-folded metamaterials', PNAS 110 (2013) 3276-3281, https://www.pnas.org/doi/10.1073/pnas.1217998110). Category: a random featured image was NOT used; picked 'random architectural or typographic movement' as an under-used category. Search snippets only for the kinematics; the featured-image WebSearch surfaced lichen/diatom/McCormack leads but none verified.",
+    "idea": "Miura-ori zigzag sheet of parallelogram panels: alternate rows offset in opposite directions by a travelling fold wave, with exact constant panel area (ux*vy fixed) and breathing panel width; hairline creases; colour fixed per panel.",
+    "engineName": null,
+    "outcome": "skipped",
+    "reason": "Built as engines/manual/miurafold.html and not shipped. Novelty gate passed (0.989 vs ikatweave, 1.051 vs herringbone), but the visual read is close to herringbone/chevron brick lattices and the Miura fold identity is weak on screen. Quality battery (seeds 1-15 + 12345) failed on seed 12 with a brightness-trend projection of +57.8 luma (threshold 50) after two earlier rounds fixed bold stroke ink (seeds 2, 4, 14) and palette luma spread (seed 14); 15/16 passing. Not iterated further this session. Engine file removed; no repo engine change.",
+    "seedsVerified": "1-15 + 12345 (15/16 pass; fail seed 12)",
+    "nearestNeighbour": "ikatweave.html",
+    "nearestDistance": 0.989
   }
 ]
