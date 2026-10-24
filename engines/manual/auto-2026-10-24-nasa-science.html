@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Canvas2D Comet Rings</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: black; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="artCanvas"></canvas>
+
+    <script>
+        // --- Global State and Constants ---
+        window.READY = false;
+        window.TOTAL_FRAMES = 0;
+        window.currentFrame = 0;
+
+        let canvas;
+        let ctx;
+        let width, height, fps, duration, speed, density, cycleSec;
+        let seed;
+        let rng;
+
+        let currentTotalTime = 0; // In seconds
+        let rings = [];
+        let palette = [];
+        let numRings;
+
+        let globalRotationRateX, globalRotationRateY;
+        let cameraOrbitSpeed;
+
+        const RESET_INTERVAL_FRAMES_DEFAULT = 90 * 24; // 90 seconds * 24 fps
+        let resetIntervalFrames;
+
+        // --- PRNG (Mulberry32) ---
+        function mulberry32(seed) {
+            return function() {
+                seed |= 0;
+                seed = seed + 0x6D2B79F5 | 0;
+                let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+                t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+                return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+        }
+
+        // --- Color Utilities ---
+        function hslToRgb(h, s, l) {
+            let c = (1 - Math.abs(2 * l - 1)) * s,
+                x = c * (1 - Math.abs((h / 60) % 2 - 1)),
+                m = l - c / 2,
+                r = 0, g = 0, b = 0;
+
+            if (0 <= h && h < 60) {
+                r = c; g = x; b = 0;
+            } else if (60 <= h && h < 120) {
+                r = x; g = c; b = 0;
+            } else if (120 <= h && h < 180) {
+                r = 0; g = c; b = x;
+            } else if (180 <= h && h < 240) {
+                r = 0; g = x; b = c;
+            } else if (240 <= h && h < 300) {
+                r = x; g = 0; b = c;
+            } else if (300 <= h && h < 360) {
+                r = c; g = 0; b = x;
+            }
+            r = Math.round((r + m) * 255);
+            g = Math.round((g + m) * 255);
+            b = Math.round((b + m) * 255);
+
+            return `rgb(${r},${g},${b})`;
+        }
+
+        function createPalette() {
+            palette = [];
+            // Base hues, inspired by blue and red tones of APOD
+            // Spread at least 40-60 degrees apart
+            let baseHue = Math.floor(rng() * 360);
+            let hue1 = (baseHue + Math.floor(rng() * 30 - 15)) % 360; // Blueish
+            let hue2 = (baseHue + 120 + Math.floor(rng() * 30 - 15)) % 360; // Reddish/magenta
+            let hue3 = (baseHue + 240 + Math.floor(rng() * 30 - 15)) % 360; // Yellowish/green
+
+            const hues = [hue1, hue2, hue3];
+            // Add a couple more complementary/analogous hues
+            hues.push((hue1 + 60) % 360);
+            hues.push((hue2 + 60) % 360);
+
+            // Ensure saturation and lightness are vibrant
+            for (let i = 0; i < 5; i++) {
+                let h = hues[i];
+                let s = (70 + rng() * 25) / 100; // 70-95% saturation
+                let l = (40 + rng() * 30) / 100; // 40-70% lightness
+                palette.push({ h: h, s: s, l: l });
+            }
+        }
+
+        // --- Scene Elements ---
+        class Ring {
+            constructor(id) {
+                this.id = id;
+                this.initialOffset = [
+                    (rng() * 2 - 1) * 0.4 * density * width,
+                    (rng() * 2 - 1) * 0.4 * density * height,
+                    (rng() * 2 - 1) * 10 * density
+                ];
+                this.targetOffset = [
+                    (rng() * 2 - 1) * 0.4 * density * width,
+                    (rng() * 2 - 1) * 0.4 * density * height,
+                    (rng() * 2 - 1) * 10 * density
+                ];
+                this.offset = [...this.initialOffset]; // Current position
+                this.morphProgress = rng(); // 0-1 for morphing between initial and target
+                this.morphSpeed = (0.05 + rng() * 0.1) * speed; // Rate of morph progress per second
+
+                this.initialRotation = [rng() * Math.PI * 2, rng() * Math.PI * 2];
+                this.targetRotation = [rng() * Math.PI * 2, rng() * Math.PI * 2];
+                this.rotation = [...this.initialRotation];
+                this.rotationSpeed = [
+                    (0.4 + rng() * 1.0) * (rng() > 0.5 ? 1 : -1) * speed, // X rotation rate
+                    (0.4 + rng() * 1.0) * (rng() > 0.5 ? 1 : -1) * speed  // Y rotation rate
+                ];
+                this.localRotationSpeed = [
+                    (0.4 + rng() * 1.0) * (rng() > 0.5 ? 1 : -1) * speed, // X rotation rate
+                    (0.4 + rng() * 1.0) * (rng() > 0.5 ? 1 : -1) * speed  // Y rotation rate
+                ];
+
+                this.radius = (0.05 + rng() * 0.15) * Math.min(width, height) * density;
+                this.thickness = (0.005 + rng() * 0.01) * Math.min(width, height);
+                this.segmentCount = Math.floor(4 + rng() * 8); // 4 to 12 segments for the ring shape
+
+                this.colorIndex = Math.floor(rng() * palette.length);
+                this.pulseAmplitude = 0.05 + rng() * 0.05;
+                this.pulseSpeed = (0.5 + rng() * 1.5) * speed; // Hz for pulse
+            }
+
+            update(dt, totalTime) {
+                // Morphing position
+                this.morphProgress = (this.morphProgress + this.morphSpeed * dt) % 1;
+                const easedProgress = 0.5 - 0.5 * Math.cos(this.morphProgress * Math.PI * 2); // Smooth easing
+                this.offset[0] = this.initialOffset[0] + (this.targetOffset[0] - this.initialOffset[0]) * easedProgress;
+                this.offset[1] = this.initialOffset[1] + (this.targetOffset[1] - this.initialOffset[1]) * easedProgress;
+                this.offset[2] = this.initialOffset[2] + (this.targetOffset[2] - this.initialOffset[2]) * easedProgress;
+
+                // If progress resets, pick new target
+                if (this.morphProgress < this.morphSpeed * dt) { // Detect wrap around
+                    this.initialOffset = [...this.targetOffset];
+                    this.targetOffset = [
+                        (rng() * 2 - 1) * 0.4 * density * width,
+                        (rng() * 2 - 1) * 0.4 * density * height,
+                        (rng() * 2 - 1) * 10 * density
+                    ];
+                }
+
+                // Global rotation
+                this.rotation[0] += this.rotationSpeed[0] * dt;
+                this.rotation[1] += this.rotationSpeed[1] * dt;
+
+                // Pulse effect on radius (local dynamics)
+                let currentRadius = this.radius * (1 + this.pulseAmplitude * Math.sin(totalTime * this.pulseSpeed));
+                return currentRadius;
+            }
+
+            draw(context, currentRadius, rotationZ) {
+                context.save();
+
+                context.translate(this.offset[0], this.offset[1]);
+                // Depth-based scaling (simple perspective approx for Canvas2D)
+                const scaleFactor = 1 / (1 + this.offset[2] / (width * 0.2)); // Z affects scale
+                context.scale(scaleFactor, scaleFactor);
+
+                context.rotate(this.rotation[0] + globalRotationRateX * currentTotalTime); // X-axis rotation
+                context.rotate(this.rotation[1] + globalRotationRateY * currentTotalTime); // Y-axis rotation
+                context.rotate(rotationZ); // Per-ring rotation around its own Z-axis
+
+                const color = palette[this.colorIndex];
+                const baseColor = hslToRgb(color.h, color.s, color.l);
+
+                // Draw multiple layers for glow effect
+                const numGlowLayers = 4;
+                for (let i = 0; i < numGlowLayers; i++) {
+                    const glowAlpha = 0.02 + 0.01 * (numGlowLayers - i - 1); // Fades out
+                    const glowWidth = this.thickness + i * (this.thickness * 0.7);
+                    context.strokeStyle = `hsla(${color.h}, ${color.s * 100}%, ${color.l * 100}%, ${glowAlpha})`;
+                    context.lineWidth = glowWidth;
+                    context.lineCap = 'round';
+                    context.lineJoin = 'round';
+                    context.beginPath();
+                    for (let j = 0; j < this.segmentCount; j++) {
+                        const angle1 = (j / this.segmentCount) * Math.PI * 2;
+                        const angle2 = ((j + 1) / this.segmentCount) * Math.PI * 2;
+                        const x1 = currentRadius * Math.cos(angle1);
+                        const y1 = currentRadius * Math.sin(angle1);
+                        const x2 = currentRadius * Math.cos(angle2);
+                        const y2 = currentRadius * Math.sin(angle2);
+                        if (j === 0) {
+                            context.moveTo(x1, y1);
+                        } else {
+                            context.lineTo(x1, y1);
+                        }
+                        if (j === this.segmentCount - 1) {
+                            context.lineTo(x2, y2);
+                        }
+                    }
+                    context.closePath();
+                    context.stroke();
+                }
+
+                // Draw the bright core
+                context.strokeStyle = `rgba(255, 255, 255, 0.8)`; // Bright center
+                context.lineWidth = this.thickness * 0.3;
+                context.lineCap = 'round';
+                context.lineJoin = 'round';
+                context.beginPath();
+                for (let j = 0; j < this.segmentCount; j++) {
+                    const angle1 = (j / this.segmentCount) * Math.PI * 2;
+                    const angle2 = ((j + 1) / this.segmentCount) * Math.PI * 2;
+                    const x1 = currentRadius * Math.cos(angle1);
+                    const y1 = currentRadius * Math.sin(angle1);
+                    const x2 = currentRadius * Math.cos(angle2);
+                    const y2 = currentRadius * Math.sin(angle2);
+                    if (j === 0) {
+                        context.moveTo(x1, y1);
+                    } else {
+                        context.lineTo(x1, y1);
+                    }
+                    if (j === this.segmentCount - 1) {
+                        context.lineTo(x2, y2);
+                    }
+                }
+                context.closePath();
+                context.stroke();
+
+                context.restore();
+            }
+        }
+
+        // --- Scene Initialization ---
+        function initializeSceneData() {
+            rng = mulberry32(seed);
+
+            // Global rotation rates for the whole system (lively pace)
+            globalRotationRateX = (0.2 + rng() * 0.8) * (rng() > 0.5 ? 1 : -1) * speed; // radians per second
+            globalRotationRateY = (0.2 + rng() * 0.8) * (rng() > 0.5 ? 1 : -1) * speed; // radians per second
+            cameraOrbitSpeed = (0.05 + rng() * 0.2) * (rng() > 0.5 ? 1 : -1) * speed; // radians per second
+
+            numRings = Math.floor(10 + rng() * 15 * density); // 10 to 25 rings
+            rings = [];
+
+            createPalette();
+
+            for (let i = 0; i < numRings; i++) {
+                rings.push(new Ring(i));
+            }
+        }
+
+        // --- Main Animation Loop ---
+        function updateScene(dt) {
+            currentTotalTime += dt;
+
+            // Clear the canvas to black with a slight fade
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.05)'; // Gentle fade
+            ctx.fillRect(0, 0, width, height);
+
+            // Mandatory hard reset
+            if (window.currentFrame > 0 && window.currentFrame % resetIntervalFrames === 0) {
+                console.log("Performing hard reset (full clear to black).");
+                ctx.fillStyle = 'black';
+                ctx.fillRect(0, 0, width, height);
+                // Optionally, re-initialize parts of the scene for new arrangements
+                // For this engine, continuous morphing is handled per-ring, so a full re-init is not strictly needed for composition evolution.
+                // However, we can subtly shift the global parameters.
+                globalRotationRateX = (0.2 + rng() * 0.8) * (rng() > 0.5 ? 1 : -1) * speed;
+                globalRotationRateY = (0.2 + rng() * 0.8) * (rng() > 0.5 ? 1 : -1) * speed;
+                cameraOrbitSpeed = (0.05 + rng() * 0.2) * (rng() > 0.5 ? 1 : -1) * speed;
+                // Shift palette hues slightly
+                for(let i = 0; i < palette.length; i++) {
+                    palette[i].h = (palette[i].h + rng() * 30 - 15 + 360) % 360; // Shift hue by +/- 15 degrees
+                    palette[i].s = (70 + rng() * 25) / 100; // Resample saturation
+                    palette[i].l = (40 + rng() * 30) / 100; // Resample lightness
+                }
+            }
+
+            // Camera offset for whole-scene translation
+            const cameraOffsetScale = Math.min(width, height) * 0.1;
+            const cameraOffsetX = Math.sin(currentTotalTime * cameraOrbitSpeed * 0.5) * cameraOffsetScale;
+            const cameraOffsetY = Math.cos(currentTotalTime * cameraOrbitSpeed * 0.5) * cameraOffsetScale;
+
+            ctx.save();
+            ctx.translate(width / 2 + cameraOffsetX, height / 2 + cameraOffsetY); // Center the system and add camera orbit
+            ctx.globalCompositeOperation = 'lighter'; // Additive blending for glow
+
+            // Sort rings by Z-depth for correct drawing (closer rings on top)
+            rings.sort((a, b) => b.offset[2] - a.offset[2]);
+
+            // Global rotation for the whole system
+            const systemRotationZ = (globalRotationRateX + globalRotationRateY) * currentTotalTime * 0.5; // Combine for a general spin
+
+            rings.forEach(ring => {
+                const currentRadius = ring.update(dt, currentTotalTime);
+                ring.draw(ctx, currentRadius, systemRotationZ + ring.localRotationSpeed[0] * currentTotalTime); // Each ring adds its own local spin
+            });
+
+            ctx.restore();
+        }
+
+        // --- External API ---
+        window.advanceFrame = function() {
+            if (!window.READY) return;
+
+            const dt = 1 / fps;
+            updateScene(dt);
+            window.currentFrame++;
+        };
+
+        window.advanceFrames = function(n) {
+            for (let i = 0; i < n; i++) {
+                window.advanceFrame();
+            }
+        };
+
+        // --- Initialization ---
+        function parseURLParams() {
+            const params = new URLSearchParams(window.location.search);
+            seed = parseInt(params.get('seed')) || 20261024; // Default seed from prompt
+            width = parseInt(params.get('width')) || 1920;
+            height = parseInt(params.get('height')) || 1080;
+            fps = parseInt(params.get('fps')) || 24;
+            duration = parseInt(params.get('duration')) || 3600; // seconds
+            speed = parseFloat(params.get('speed')) || 1.0;
+            density = parseFloat(params.get('density')) || 1.0;
+            cycleSec = parseFloat(params.get('cycleSec')) || 90; // Default 90 seconds
+        }
+
+        function init() {
+            parseURLParams();
+
+            canvas = document.getElementById('artCanvas');
+            canvas.width = width;
+            canvas.height = height;
+            ctx = canvas.getContext('2d');
+
+            ctx.imageSmoothingEnabled = true; // For smoother glow/lines
+
+            window.TOTAL_FRAMES = Math.round(duration * fps);
+            resetIntervalFrames = Math.round(cycleSec * fps);
+
+            initializeSceneData();
+
+            window.READY = true;
+            console.log("Initialization complete. READY is true.");
+        }
+
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
