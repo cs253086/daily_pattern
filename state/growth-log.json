@@ -247,5 +247,17 @@
     "rationale": "No action. The subscribe-link-above-the-fold change (2026-10-20) is four days old, and the latest owner-reported count is still 17 from 2026-10-20. No new owner data. Judging it needs the 2-3 week read; a second change now would blur that.",
     "verified": "Synced to origin/main (8cd5aab). Read state/subscriber-updates.json and state/growth-log.json. No code changed.",
     "note": "Owner action that would unblock the next real decision: a fresh Studio subscriber count (state/subscriber-updates.json) and the subscriber-by-content report. Still open: channel trailer."
+  },
+  {
+    "date": "2026-10-25",
+    "subscribersKnown": 17,
+    "goal": 500,
+    "change": null,
+    "filesChanged": [],
+    "outcome": "skipped",
+    "goalReached": false,
+    "rationale": "No action. The subscribe-link-above-the-fold change (2026-10-20) is five days old. The latest owner-reported count is still 17 from 2026-10-20, with no new owner data. A second change now would blur the 2-3 week read on the first.",
+    "verified": "Synced to origin/main (e679ce5). Read state/subscriber-updates.json and state/growth-log.json. No code changed.",
+    "note": "Staleness: the owner count is five days old. The next useful input is a fresh Studio subscriber count in state/subscriber-updates.json, plus the subscriber-by-content report. Channel trailer still open for the owner."
   }
 ]
