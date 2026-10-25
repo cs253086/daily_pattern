@@ -115,13 +115,27 @@ const MANDALA_TAGS = ['mandala', 'kaleidoscope', 'sacred geometry', 'mandala scr
 // not the rendered visual, so it would produce actively wrong titles; the one
 // thing genuinely known about them is whether they render real lit 3D (see
 // isWebGLEngine() in src/index.js, which passes engineIs3D through).
-const GENERIC_SUBJECT_3D = 'Lit 3D Geometry';
-const GENERIC_SUBJECT_2D = 'Generative Geometry';
+// A single generic subject per dimension made every Gemini day's title the same
+// two-word phrase, and the title memory (mood + subject) ran out of fresh
+// combinations after six days, so the same title came back (2026-10-24, user
+// report). Fallbacks are therefore a pool of subjects that are all still true
+// of any lit/flat engine, and buildMetadata() picks a subject + mood pair that
+// is not in recent memory.
+const GENERIC_SUBJECTS_3D = [
+  'Lit 3D Geometry', 'Glowing 3D Forms', 'Rotating 3D Structures', 'Floating 3D Geometry',
+];
+const GENERIC_SUBJECTS_2D = [
+  'Generative Geometry', 'Abstract Geometric Patterns', 'Geometric Light Patterns',
+  'Shifting Geometric Forms', 'Layered Geometric Mosaic', 'Geometric Motion Art',
+];
 
-function subjectFor(engineName, engineIs3D) {
+// Every subject this engine may be titled with, in preference order. Known
+// engines have exactly one; unlisted engines (the Gemini auto-* files) get the
+// generic pool for their dimension.
+function subjectCandidatesFor(engineName, engineIs3D) {
   const name = String(engineName || '').trim();
   const known = ENGINE_SUBJECTS[name];
-  if (known) return known;
+  if (known) return [known];
   // 13 curated engines added 2026-09-10..25 shipped without an entry, so
   // e.g. the 2026-09-27 Doyle spiral video was titled "Generative Geometry".
   // Only Gemini's auto-* engines are expected to land here; say so loudly
@@ -129,7 +143,7 @@ function subjectFor(engineName, engineIs3D) {
   if (name && !name.startsWith('auto-')) {
     console.warn(`[metadata] no ENGINE_SUBJECTS entry for curated engine "${name}" -- title falls back to a generic subject; add one in src/metadata.js`);
   }
-  return engineIs3D ? GENERIC_SUBJECT_3D : GENERIC_SUBJECT_2D;
+  return engineIs3D ? GENERIC_SUBJECTS_3D : GENERIC_SUBJECTS_2D;
 }
 
 const USE_CASES = [
@@ -224,9 +238,14 @@ function writeRecentTitles(recent) {
 // MOODS.length times inside the memory window -- the archetype-aware engine
 // rotation makes that very unlikely, but the fallback keeps this total
 // rather than throwing).
-function pickMood(subject, seedHash, recent) {
-  const fresh = MOODS.filter((m) => !recent.includes(`${m} ${subject}`));
-  const from = fresh.length > 0 ? fresh : MOODS;
+// Picks the (mood, subject) pair. Every pair from the candidate subjects is
+// considered; the seed hash chooses among the pairs that are not in recent
+// memory, so a generic subject can't stay stuck behind one mood cycle.
+function pickMoodAndSubject(subjects, seedHash, recent) {
+  const pairs = [];
+  for (const subject of subjects) for (const mood of MOODS) pairs.push({ mood, subject });
+  const fresh = pairs.filter((p) => !recent.includes(`${p.mood} ${p.subject}`));
+  const from = fresh.length > 0 ? fresh : pairs;
   return pick(from, seedHash);
 }
 
@@ -241,9 +260,10 @@ export function buildMetadata(info = {}) {
   // repeating a recently-published title (see ENGINE_SUBJECTS / pickMood).
   // `persistTitle: false` lets a caller preview a title without consuming it
   // from the recent-memory window (used by the verification scripts).
-  const subject = subjectFor(info.engineName, info.engineIs3D);
   const recent = readRecentTitles();
-  const mood = pickMood(subject, h, recent);
+  const { mood, subject } = pickMoodAndSubject(
+    subjectCandidatesFor(info.engineName, info.engineIs3D), h, recent,
+  );
   const useCase = pick(USE_CASES, h >>> 6);
   if (info.persistTitle !== false) {
     writeRecentTitles([`${mood} ${subject}`, ...recent.filter((t) => t !== `${mood} ${subject}`)]);
