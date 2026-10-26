@@ -54,6 +54,7 @@ const ENGINE_SUBJECTS = {
   hoppercrystal: 'Hopper Crystal Staircase',
   hyperbolic: 'Hyperbolic Tiling',
   ikatweave: 'Ikat Weave Patterns',
+  juliabands: 'Julia Set Escape Bands',
   kaleidoscope: 'Kaleidoscope Patterns',
   kuramotochimera: 'Synchronizing Oscillator Rings',
   langtonsant: "Langton's Ant Colonies",
