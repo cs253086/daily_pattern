@@ -222,7 +222,12 @@ function extractHtml(text) {
 const RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function callGemini({ apiKey, model, prompt, maxAttempts = 3 }) {
+// Gemini 503 "high demand" outages last minutes, not seconds: the 2026-10-26
+// run gave up after ~8s and fell back to a curated engine. Six attempts with
+// waits of 2s, 6s, 18s, 54s, 120s (~3.5 min total) ride out a typical outage.
+const backoffMs = (attempt) => Math.min(2000 * 3 ** (attempt - 1), 120000);
+
+async function callGemini({ apiKey, model, prompt, maxAttempts = 6 }) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const body = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -253,7 +258,7 @@ async function callGemini({ apiKey, model, prompt, maxAttempts = 3 }) {
       // Network failure — retry.
       lastErr = new Error(`Gemini fetch failed: ${e.message}`);
       if (attempt < maxAttempts) {
-        const wait = 2000 * Math.pow(3, attempt - 1);
+        const wait = backoffMs(attempt);
         console.warn(`[generate] attempt ${attempt} network error; retrying in ${wait}ms`);
         await sleep(wait);
         continue;
@@ -262,7 +267,7 @@ async function callGemini({ apiKey, model, prompt, maxAttempts = 3 }) {
     }
 
     if (RETRY_STATUSES.has(res.status) && attempt < maxAttempts) {
-      const wait = 2000 * Math.pow(3, attempt - 1); // 2s, 6s, 18s
+      const wait = backoffMs(attempt);
       console.warn(`[generate] attempt ${attempt} got ${res.status}; retrying in ${wait}ms`);
       await sleep(wait);
       continue;
