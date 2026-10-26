@@ -8335,6 +8335,61 @@ collision.
 
 `ENGINE_SUBJECTS`: `hyperbolic: 'Hyperbolic Tiling'` in `src/metadata.js`.
 
+## Julia set escape-band engine (`juliabands.html`) — 2026-10-26
+
+Daily creative-research routine. Category was "obscure mathematical object /
+physical phenomenon". An open WebSearch for a structural principle not yet in
+the pool surfaced the escape-time construction of Julia sets: iterate
+z -> z*z + c from every point of the complex plane and classify each point by
+how quickly |z| diverges. Sources (search snippets): Wikibooks, "Fractals/
+Iterations in the complex plane/Julia set"
+(https://en.wikibooks.org/wiki/Fractals/Iterations_in_the_complex_plane/Julia_set),
+and the escape-criterion survey (https://pmc.ncbi.nlm.nih.gov/articles/PMC13252796/).
+
+**What it is**: the pool's first complex-dynamics engine. Every pixel is
+classified by an escape count from its own starting point (no orbit
+accumulation, unlike `strangeattractor.html`), and the only generative variable
+is the complex parameter c = R*e^{i*theta}, with theta advancing at a
+guaranteed-minimum-magnitude random-sign rate. The loop crosses both connected
+and dust Julia sets, so the boundary reorganises non-rigidly.
+
+**Brightness neutrality by construction**: the continuous smooth escape value
+is binned (4096 bins) and RANK-QUANTISED into K=12 equal-area exterior bands
+every frame, so each band always holds 1/K of the exterior pixels. Ties were the
+first problem: with integer counts one count can hold a large share of the
+frame, which read as a +81 luma trend in the first validator run; the smooth
+value removed them (projected rise +3.6 at seed 12345). The interior (pixels
+that never escape) gets one colour whose LIGHTNESS is bisected so its luma
+equals the mean band luma, so the interior share cannot drive mean brightness.
+A first interior colour at fixed lightness gave the same +81 trend.
+
+**Hue rotation as the second motion source**: the 12 band hues are spaced
+evenly around the full colour wheel and the set rotates at 14-23 deg/s. Evenly
+spaced hues make the summed luma almost invariant to the rotation phase, so the
+motion changes each contour ring's colour without moving brightness. This was
+added after seed 9 failed the unit-motion gate (63% of the 0.25s change
+explained by one rigid transform) with the contour-only design. Final design
+clears it (min unitMotionNonRigidFrac 0.755 across seeds).
+
+**Verified**: `validateEngine()` 16/16 across seeds 1-15 plus 12345, and the CLI
+default (`node src/validate.js`, seed 12345) passes. Margins across the battery:
+`avgSat` 83-94 (vs 22 minimum), `peakNearWhiteFrac` 0, `projectedRise` -27 to
++22 (vs 50), `compositionDrift` 0.051-0.119 (vs 0.015), `unitMotionNonRigidFrac`
+0.755-0.99 (vs 0.40), `fastMotion` 24-40 against floors of 4.5-5.0,
+`avgMsPerFrame` 16-27 (about 28 min projected per hour). Rendered and looked at
+PNGs at several cycle fractions and seeds: vivid, crisp rainbow contour bands
+around a filigree Julia boundary, no whiteout, no clipping, and visible
+boundary reorganisation across the loop. The interior is coloured rather than
+black, so the frame has no black negative space.
+
+**Novelty gate**: measured against all engines in `engines/manual/` (the pool
+was fingerprinted fresh on seeds 1 and 7, frames 200/600/1000, the committed
+cache was not updated). Nearest neighbour is `auto-2026-08-29-eclipse-pair` at
+distance **0.772** (next: `auto-2026-10-01-nasa-science` 0.934,
+`tensegritychain` 0.974). Clean pass above 0.60.
+
+`ENGINE_SUBJECTS`: `juliabands: 'Julia Set Escape Bands'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

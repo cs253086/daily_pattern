@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generative Art Screensaver</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: black; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="glcanvas"></canvas>
+    <script>
+        // --- Global Variables and Configuration ---
+        const urlParams = new URLSearchParams(window.location.search);
+        const DEFAULT_WIDTH = 1920;
+        const DEFAULT_HEIGHT = 1080;
+        const DEFAULT_FPS = 24;
+        const DEFAULT_DURATION = 3600; // 1 hour
+        const DEFAULT_SPEED = 1;
+        const DEFAULT_DENSITY = 1;
+
+        const canvas = document.getElementById('glcanvas');
+        const width = parseInt(urlParams.get('width')) || DEFAULT_WIDTH;
+        const height = parseInt(urlParams.get('height')) || DEFAULT_HEIGHT;
+        const seed = parseInt(urlParams.get('seed')) || Math.floor(mulberry32() * 1000000); // Use seeded PRNG for initial seed too
+        const fps = parseInt(urlParams.get('fps')) || DEFAULT_FPS;
+        const duration = parseFloat(urlParams.get('duration')) || DEFAULT_DURATION;
+        const speed = parseFloat(urlParams.get('speed')) || DEFAULT_SPEED;
+        const density = parseFloat(urlParams.get('density')) || DEFAULT_DENSITY;
+        const cycleSec = parseFloat(urlParams.get('cycleSec')) || 90; // Default to 90 seconds for resets/evolution
+
+        canvas.width = width;
+        canvas.height = height;
+
+        window.currentFrame = 0;
+        window.TOTAL_FRAMES = Math.round(duration * fps);
+        window.READY = false;
+
+        let ctx = null; // Use Canvas2D context
+
+        // Seeded PRNG (Mulberry32)
+        let prng_state = seed;
+        function mulberry32() {
+            prng_state |= 0;
+            prng_state = prng_state + 0x6D2B79F5 | 0;
+            let t = Math.imul(prng_state ^ prng_state >>> 15, 1 | prng_state);
+            t = t + Math.imul(t ^ t >>> 7, 61 | t) | 0;
+            return ((t ^ t >>> 14) >>> 0) / 4294967296;
+        }
+
+        // --- Scene Elements ---
+        const paletteCount = 4 + Math.floor(mulberry32() * 3); // 4-6 colors
+        let baseHue = mulberry32() * 360;
+        let palette = [];
+
+        const numParticles = Math.floor(50 + mulberry32() * 100 * density); // 50-150 particles
+        const particles = [];
+
+        const numLayers = Math.floor(3 + mulberry32() * 3); // 3-5 layers
+        const layers = [];
+
+        // --- Color Helper ---
+        function getHSLColor(h, s, l, a = 1) {
+            return `hsla(${h % 360}, ${s}%, ${l}%, ${a})`;
+        }
+
+        // --- Initialization and Scene Setup ---
+        function initScene() {
+            ctx = canvas.getContext('2d');
+            if (!ctx) {
+                console.error("Failed to get 2D rendering context.");
+                return;
+            }
+
+            ctx.globalCompositeOperation = 'lighter'; // Additive blending
+            ctx.filter = 'none'; // Ensure no canvas-wide filter is active
+
+            // Initialize palette
+            baseHue = mulberry32() * 360;
+            palette = [];
+            for (let i = 0; i < paletteCount; i++) {
+                let hue = (baseHue + i * (360 / paletteCount) + (mulberry32() - 0.5) * 40) % 360; // Spread hues with some jitter
+                if (hue < 0) hue += 360;
+                palette.push(hue);
+            }
+
+            // Initialize particles
+            particles.length = 0;
+            for (let i = 0; i < numParticles; i++) {
+                const angle = mulberry32() * Math.PI * 2;
+                const radius = (mulberry32() * 0.3 + 0.1) * Math.min(width, height) / 2; // Particle spread
+                particles.push({
+                    x: width / 2 + Math.cos(angle) * radius,
+                    y: height / 2 + Math.sin(angle) * radius,
+                    targetX: (mulberry32() * width * 0.8 + width * 0.1),
+                    targetY: (mulberry32() * height * 0.8 + height * 0.1),
+                    dx: (mulberry32() * 2 - 1) * 50 * speed, // pixels/sec
+                    dy: (mulberry32() * 2 - 1) * 50 * speed,
+                    radius: (mulberry32() * 3 + 1) * density, // 1-4 pixels base radius
+                    rotRate: (mulberry32() * 1.0 + 0.4) * (mulberry32() > 0.5 ? 1 : -1) * speed, // rad/sec
+                    currentRot: mulberry32() * Math.PI * 2,
+                    hueIndex: Math.floor(mulberry32() * paletteCount),
+                    morphPhase: mulberry32() * Math.PI * 2,
+                    morphSpeed: (mulberry32() * 0.8 + 0.4) * speed, // radians per second for morph
+                });
+            }
+
+            // Initialize layers (concentric rotating rings/shapes)
+            layers.length = 0;
+            for (let i = 0; i < numLayers; i++) {
+                layers.push({
+                    radius: ((i + 1) / numLayers) * Math.min(width, height) * 0.3 + Math.min(width, height) * 0.1, // Growing radius
+                    rotRate: (mulberry32() * 0.8 + 0.4) * (mulberry32() > 0.5 ? 1 : -1) * speed, // rad/sec
+                    currentRot: mulberry32() * Math.PI * 2,
+                    hueIndex: Math.floor(mulberry32() * paletteCount),
+                    segments: Math.floor(3 + mulberry32() * 7), // 3-9 segments
+                    segmentLength: (mulberry32() * 0.1 + 0.05) * Math.min(width, height), // length of the 'spokes' or segments
+                    waveSpeed: (mulberry32() * 0.5 + 0.2) * speed, // radians per second for wave
+                    waveAmplitude: (mulberry32() * 0.05 + 0.02) * Math.min(width, height), // amplitude of radial wave
+                    pulseSpeed: (mulberry32() * 0.6 + 0.3) * speed, // radians per second for pulse
+                    pulseAmplitude: (mulberry32() * 0.2 + 0.1) // 10-20% scale pulse
+                });
+            }
+        }
+
+        // --- Drawing ---
+        function drawScene() {
+            const dt_scaled = 1 / fps; // dt in seconds
+
+            // Black background clear
+            ctx.globalCompositeOperation = 'source-over'; // Temporarily switch to opaque
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, width, height);
+            ctx.globalCompositeOperation = 'lighter'; // Back to additive
+
+            const time = window.currentFrame / fps;
+
+            // Draw layers (concentric rotating shapes with waves)
+            layers.forEach(layer => {
+                const layerHue = palette[layer.hueIndex];
+                const saturation = 75 + Math.sin(time * layer.pulseSpeed) * 10; // 65-85% sat
+                const lightness = 40 + Math.sin(time * layer.pulseSpeed * 0.7) * 10; // 30-50% light
+
+                ctx.save();
+                ctx.translate(width / 2, height / 2);
+                ctx.rotate(layer.currentRot);
+
+                const baseScale = 1 + Math.sin(time * layer.pulseSpeed) * layer.pulseAmplitude;
+
+                for (let i = 0; i < layer.segments; i++) {
+                    const angle = (i / layer.segments) * Math.PI * 2;
+                    const wavePhase = (angle * 3 + time * layer.waveSpeed); // Wave across segments
+                    const waveOffset = Math.sin(wavePhase) * layer.waveAmplitude;
+
+                    const pX1 = Math.cos(angle) * (layer.radius + waveOffset) * baseScale;
+                    const pY1 = Math.sin(angle) * (layer.radius + waveOffset) * baseScale;
+                    const pX2 = Math.cos(angle) * (layer.radius + waveOffset + layer.segmentLength) * baseScale;
+                    const pY2 = Math.sin(angle) * (layer.radius + waveOffset + layer.segmentLength) * baseScale;
+
+                    // Glow effect: wide, blurred, low-alpha stroke
+                    ctx.beginPath();
+                    ctx.moveTo(pX1, pY1);
+                    ctx.lineTo(pX2, pY2);
+                    ctx.lineWidth = 10 * density;
+                    ctx.strokeStyle = getHSLColor(layerHue, saturation, lightness, 0.04);
+                    ctx.stroke();
+
+                    // Inner glow: slightly narrower, higher alpha
+                    ctx.beginPath();
+                    ctx.moveTo(pX1, pY1);
+                    ctx.lineTo(pX2, pY2);
+                    ctx.lineWidth = 5 * density;
+                    ctx.strokeStyle = getHSLColor(layerHue, saturation, lightness, 0.08);
+                    ctx.stroke();
+
+                    // Core stroke: thin, near-full opacity
+                    ctx.beginPath();
+                    ctx.moveTo(pX1, pY1);
+                    ctx.lineTo(pX2, pY2);
+                    ctx.lineWidth = 2 * density;
+                    ctx.strokeStyle = getHSLColor(layerHue, saturation + 10, lightness + 10, 0.9);
+                    ctx.stroke();
+                }
+                ctx.restore();
+            });
+
+
+            // Draw particles
+            particles.forEach(p => {
+                const particleHue = palette[p.hueIndex];
+                const saturation = 70 + Math.sin(time * p.morphSpeed) * 15; // Vary saturation
+                const lightness = 50 + Math.sin(time * p.morphSpeed * 0.8) * 10; // Vary lightness
+
+                ctx.save();
+                ctx.translate(p.x, p.y);
+                ctx.rotate(p.currentRot);
+
+                const scalePulse = 1 + Math.sin(time * p.morphSpeed + p.morphPhase) * 0.2;
+                const r = p.radius * scalePulse;
+
+                // Glow effect 1: wide, blurred, low-alpha circle
+                ctx.beginPath();
+                ctx.arc(0, 0, r * 2.5, 0, Math.PI * 2);
+                ctx.fillStyle = getHSLColor(particleHue, saturation, lightness, 0.03);
+                ctx.fill();
+
+                // Glow effect 2: slightly narrower, higher alpha circle
+                ctx.beginPath();
+                ctx.arc(0, 0, r * 1.5, 0, Math.PI * 2);
+                ctx.fillStyle = getHSLColor(particleHue, saturation, lightness, 0.08);
+                ctx.fill();
+
+                // Core circle: thin, near-full opacity
+                ctx.beginPath();
+                ctx.arc(0, 0, r, 0, Math.PI * 2);
+                ctx.fillStyle = getHSLColor(particleHue, saturation + 10, lightness + 10, 0.9);
+                ctx.fill();
+
+                ctx.restore();
+            });
+        }
+
+        // --- Update Logic ---
+        function updateScene() {
+            const dt_scaled = 1 / fps; // dt in seconds
+            const time = window.currentFrame / fps;
+
+            // Global rotation for the entire scene
+            const globalRotSpeed = (mulberry32() * 0.1 + 0.05) * (mulberry32() > 0.5 ? 1 : -1) * speed; // rad/sec
+            // This is handled by updating individual elements relative to the center
+
+            const prevCycle = Math.floor((time - dt_scaled) / cycleSec);
+            const currentCycle = Math.floor(time / cycleSec);
+
+            if (currentCycle !== prevCycle) {
+                // Hard reset: re-randomize positions and other parameters
+                // This ensures composition evolves significantly over time without brightness swings.
+                // It ensures total geometry is stable, only its arrangement changes.
+
+                // Re-seed PRNG for consistent starts per cycle
+                prng_state = seed + currentCycle * 1000;
+                
+                baseHue = mulberry32() * 360;
+                palette = [];
+                for (let i = 0; i < paletteCount; i++) {
+                    let hue = (baseHue + i * (360 / paletteCount) + (mulberry32() - 0.5) * 40) % 360;
+                    if (hue < 0) hue += 360;
+                    palette.push(hue);
+                }
+
+                particles.forEach(p => {
+                    p.targetX = (mulberry32() * width * 0.8 + width * 0.1);
+                    p.targetY = (mulberry32() * height * 0.8 + height * 0.1);
+                    p.dx = (mulberry32() * 2 - 1) * 50 * speed;
+                    p.dy = (mulberry32() * 2 - 1) * 50 * speed;
+                    p.rotRate = (mulberry32() * 1.0 + 0.4) * (mulberry32() > 0.5 ? 1 : -1) * speed;
+                    p.hueIndex = Math.floor(mulberry32() * paletteCount);
+                    p.morphPhase = mulberry32() * Math.PI * 2;
+                    p.morphSpeed = (mulberry32() * 0.8 + 0.4) * speed;
+                });
+
+                layers.forEach(layer => {
+                    layer.rotRate = (mulberry32() * 0.8 + 0.4) * (mulberry32() > 0.5 ? 1 : -1) * speed;
+                    layer.segments = Math.floor(3 + mulberry32() * 7);
+                    layer.hueIndex = Math.floor(mulberry32() * paletteCount);
+                    layer.waveSpeed = (mulberry32() * 0.5 + 0.2) * speed;
+                    layer.waveAmplitude = (mulberry32() * 0.05 + 0.02) * Math.min(width, height);
+                    layer.pulseSpeed = (mulberry32() * 0.6 + 0.3) * speed;
+                    layer.pulseAmplitude = (mulberry32() * 0.2 + 0.1);
+                });
+            }
+
+            // Update particle positions
+            particles.forEach(p => {
+                const evolutionFactor = 0.05 * speed; // How fast particles morph to new targets
+                p.x += (p.targetX - p.x) * evolutionFactor * dt_scaled;
+                p.y += (p.targetY - p.y) * evolutionFactor * dt_scaled;
+
+                // Ensure particles stay within bounds
+                if (p.x < 0 || p.x > width) p.dx *= -1;
+                if (p.y < 0 || p.y > height) p.dy *= -1;
+                
+                p.currentRot += p.rotRate * dt_scaled;
+            });
+
+            // Update layer rotations
+            layers.forEach(layer => {
+                layer.currentRot += layer.rotRate * dt_scaled;
+            });
+        }
+
+        // --- Main Initialization ---
+        async function init() {
+            initScene();
+            window.READY = true;
+            console.log('Engine initialized and ready.');
+        }
+
+        window.advanceFrame = function() {
+            if (!window.READY) {
+                console.warn('advanceFrame called before engine is READY.');
+                return;
+            }
+
+            if (window.currentFrame >= window.TOTAL_FRAMES) {
+                // Simulation ended
+                return;
+            }
+
+            updateScene();
+            drawScene();
+            window.currentFrame++;
+        };
+
+        window.advanceFrames = function(n) {
+            for (let i = 0; i < n; i++) {
+                window.advanceFrame();
+            }
+        };
+
+        // Call init to set up the scene and mark window.READY
+        init();
+    </script>
+</body>
+</html>
