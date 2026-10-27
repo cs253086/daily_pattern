@@ -1,9 +1,8 @@
 {
-  "last3D": "radiolarian",
+  "last3D": "rosenspikes",
   "last2D": "hilbertweave",
   "lastMandala": "ziggurat",
   "recentCuratedDates": [
-    "20261013",
     "20261015",
     "20261016",
     "20261017",
@@ -12,9 +11,10 @@
     "20261021",
     "20261022",
     "20261023",
-    "20261026"
+    "20261026",
+    "20261027"
   ],
-  "last3DArchetype": "radiolarian",
+  "last3DArchetype": "rosenspikes",
   "last2DArchetype": "hilbertweave",
   "last3DByArchetype": {
     "geodome": "geodome",
@@ -48,5 +48,5 @@
     "herringbone": "herringbone",
     "hilbertweave": "hilbertweave"
   },
-  "updatedAt": "2026-10-26T16:01:37.635Z"
+  "updatedAt": "2026-10-27T15:18:08.975Z"
 }
