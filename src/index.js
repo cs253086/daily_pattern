@@ -489,6 +489,9 @@ function curatedOr(reason, seed) {
 //      Gemini for today's engine and run it through the quality gate — on any
 //      failure, fall back to Bloom;
 //   3. otherwise, Bloom.
+// Gemini repair rounds after the first attempt (2026-10-27): 3 attempts in total.
+const MAX_REPAIRS = 2;
+
 async function chooseEngine(cli, imageInfo) {
   const seed = cli.seed ?? (process.env.SEED || defaultSeedStr());
 
@@ -556,24 +559,34 @@ async function chooseEngine(cli, imageInfo) {
     if (gen.wantWebGL) {
       console.log('[index] first attempt was WebGL and failed -- repairing as Canvas2D instead of retrying WebGL.');
     }
-    console.log('[index] asking Gemini to repair…');
-    const previousHtml = await readFile(gen.path, 'utf8');
-    const gen2 = await generateEngine({
-      ...genOpts,
-      wantWebGL: gen.wantWebGL ? false : undefined,
-      repair: { previousHtml, reasons: result.reasons },
-    });
-    result = await validateEngine(gen2.path, validateOpts);
-    if (result.ok) {
-      console.log(`[index] repaired engine passed (peakStd=${result.stats.peakStd.toFixed(1)}, motion=${result.stats.motion.toFixed(1)}, ${result.stats.avgMsPerFrame}ms/frame, ~${result.stats.projectedHourRenderMin}min for 1h).`);
-      return {
-        engine: gen2.path, source: 'gemini-repaired', themeHint: gen2.themeHint, date: gen2.date,
-      };
+    // Up to MAX_REPAIRS repair rounds (2026-10-27). Each round gets the
+    // previous attempt's file and the validator's reasons. If every attempt
+    // fails, the day is SKIPPED (no video uploaded) rather than falling back
+    // to a curated engine, which is what made repeats appear on screen.
+    let current = gen;
+    let reasons = result.reasons;
+    for (let round = 1; round <= MAX_REPAIRS; round++) {
+      console.log(`[index] asking Gemini to repair (attempt ${round + 1} of ${MAX_REPAIRS + 1})…`);
+      const previousHtml = await readFile(current.path, 'utf8');
+      const next = await generateEngine({
+        ...genOpts,
+        wantWebGL: gen.wantWebGL ? false : undefined,
+        repair: { previousHtml, reasons },
+      });
+      result = await validateEngine(next.path, validateOpts);
+      if (result.ok) {
+        console.log(`[index] repaired engine passed (peakStd=${result.stats.peakStd.toFixed(1)}, motion=${result.stats.motion.toFixed(1)}, ${result.stats.avgMsPerFrame}ms/frame, ~${result.stats.projectedHourRenderMin}min for 1h).`);
+        return {
+          engine: next.path, source: 'gemini-repaired', themeHint: next.themeHint, date: next.date,
+        };
+      }
+      await logEngineSnippet(`repair attempt ${round}`, next.path);
+      current = next;
+      reasons = result.reasons;
     }
-    await logEngineSnippet('repair attempt', gen2.path);
-    return curatedOr(`generated engine failed validation after repair: ${result.reasons.join('; ')}`, seed);
+    return { skip: true, reason: `generated engine failed validation after ${MAX_REPAIRS + 1} attempts: ${reasons.join('; ')}` };
   } catch (e) {
-    return curatedOr(`generation error: ${e.message}`, seed);
+    return { skip: true, reason: `generation error: ${e.message}` };
   }
 }
 
@@ -746,7 +759,12 @@ async function main() {
     }
   }
 
-  const { engine, source, themeHint, date } = await chooseEngine(cli, imageInfo);
+  const choice = await chooseEngine(cli, imageInfo);
+  if (choice.skip) {
+    console.warn(`[index] SKIPPING today's video: ${choice.reason}. Nothing rendered or uploaded.`);
+    return;
+  }
+  const { engine, source, themeHint, date } = choice;
   const engineName = path.basename(engine, '.html');
 
   // Resolve config once so render + metadata agree on seed/duration.
