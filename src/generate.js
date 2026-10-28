@@ -109,6 +109,24 @@ function todayUTC() {
 
 // Wrap the base prompt with the previous (failed) attempt and the validator's
 // reasons so Gemini can produce a corrected file in one more shot.
+// Concrete, reason-specific fixes for the repair prompt (2026-10-28). Generic
+// "make it vivid" advice was ignored by Gemini; these name the exact change.
+function repairFixes(reasons) {
+  const text = reasons.join(' | ').toLowerCase();
+  const blocks = [];
+  if (text.includes('near-max brightness') || text.includes('blown out') || text.includes('solid white')) {
+    blocks.push('FIX FOR WHITE-OUT: too many pixels are near-white. Lower every fill lightness to 40-55%, cut glow-stroke alpha to 0.15-0.25, remove any globalCompositeOperation "lighter" fills, draw fewer and smaller overlapping shapes, and keep only a few tiny bright highlights. Most of the frame must be deep saturated colour on black.');
+  }
+  if (text.includes('pale') || text.includes('saturation')) {
+    blocks.push('FIX FOR PALE COLOUR: the colours are too grey. Set every hsl() saturation to 80-100% and lightness to 45-60%. Do not use white, grey, or low-saturation colours except for tiny highlights.');
+  }
+  if (text.includes('shadersource') || text.includes('webglshader') || text.includes('page errors') || text.includes('readyerror') || text.includes('is not defined') || text.includes('before initialization')) {
+    blocks.push('FIX FOR THE RUNTIME ERROR: check every createShader, createProgram and createBuffer result for null and throw a clear Error if one is null. Declare every helper and variable above the first line that uses it, and call init() only at the very end of the file.');
+  }
+  if (blocks.length === 0) return '';
+  return '\n' + blocks.join('\n\n') + '\n';
+}
+
 export function buildRepairPrompt({ seed, date, themeHint, wantWebGL, previousHtml, reasons }) {
   const base = buildPrompt({ seed, date, themeHint, wantWebGL });
   const trimmed = previousHtml.length > 18000
@@ -121,6 +139,7 @@ Your previous attempt FAILED the quality gate for these reasons:
 ${reasons.map((r, i) => `  ${i + 1}. ${r}`).join('\n')}
 
 Below is your previous attempt verbatim. Produce a new COMPLETE HTML file that fixes the listed problems while still satisfying every requirement above. Output only the corrected file.
+${repairFixes(reasons)}
 
 --- PREVIOUS ATTEMPT BEGIN ---
 ${trimmed}
@@ -150,6 +169,7 @@ Output ONLY the raw HTML document. Start with <!DOCTYPE html>. No markdown, no c
 
 === VISUAL RICHNESS (REQUIRED — this is what makes it watchable) ===
 - VIVID AND CLEAR is the top priority. Colors must read as punchy and saturated (HSL saturation roughly 70-95%), never pale, muddy, or pastel-washed. Shapes must be bold and legible at a glance — prefer FEWER, BIGGER, CLEARER elements over many small/thin/cluttered ones. A viewer should be able to tell what's on screen instantly, not squint at a fine haze.
+- NUMERIC BUDGET, checked automatically and rejected if broken (2026-10-28: three real attempts failed here): (a) every fill and stroke colour uses HSL lightness between 40% and 60%, and saturation between 75% and 100%; (b) per-shape alpha for glow strokes is at most 0.25, and the bright core stroke alpha is at most 0.8; (c) at most about 20 overlapping shapes may share one small area, and never draw more than about 60 shapes per frame in total; (d) do not use globalCompositeOperation 'lighter' for more than one pass per shape; use the default 'source-over' for fills; (e) the background is pure black and the canvas is cleared every frame. Pale, washed-out colour (average saturation under 25%) and blown-out white (more than 12% of pixels near-white) both fail. Design for deep saturated colour on black, with white only on a few tiny highlights.
 - The frame must look DENSE and LAYERED at any moment past the first few seconds, but density must not come at the cost of clarity — layer a few clearly-readable big shapes/structures, not hundreds of tiny indistinct ones.
 - Use a coherent multi-color PALETTE derived from the seed (3–6 related hues spread at least 40-60 degrees apart in hue so they read as genuinely different colors, not shades of one hue), not a single hue. Modulate hue/saturation/brightness over time so colors gently shift across the cycle.
 - Vary scale: include both small fine detail AND large-scale structure in the same frame so there's foreground and background. Avoid a single dominant blob.
@@ -193,6 +213,7 @@ If you do use WebGL, three renderer-specific requirements are CRITICAL:
 2. Headless software WebGL in this environment has been observed to occasionally fire a spurious context-lost event within the first fraction of a second after the context is created, even for completely correct code -- roughly half the time, and never observed to recur later once past the first couple of frames. Handle this at startup, before setting window.READY to true: listen for the context-lost event and call preventDefault on it (required for the context to become restorable), listen for the context-restored event and re-create every GL resource from scratch when it fires, and wait a short delay (a few hundred milliseconds is enough) after creating the context before declaring READY, so a possible early loss has time to fire and be recovered rather than silently rendering on a dead context.
 3. Clear both the color buffer and the depth buffer to opaque black at the start of every single frame, and enable depth testing for correct occlusion between shapes. This clear is a hardware buffer reset, not a compositing fade, so it is structurally immune to the whiteout/accumulation problem described above -- always prefer it over any fade-based approach for a 3D engine.
 4. HARD RULE, ORDER OF DECLARATIONS (this has failed in real runs, most recently on 2026-10-27 with "ReferenceError: Cannot access 'mat4' before initialization"). JavaScript const and let names exist from the top of the script but hold no value until their declaration line runs. So every helper, including the 4x4 matrix helper, every shader source string, and every buffer, program and array variable, must be declared with its full definition ABOVE the first line that calls it. Required layout, top to bottom: (a) canvas and context setup; (b) all helper functions and constants, including mat4; (c) shader source strings; (d) functions that build GL resources (initGL, buildGeometry); (e) the render loop function; (f) window.advanceFrame and window.advanceFrames; (g) a single init call as the very last statement, which then sets window.READY. Never call a function from above a declaration it depends on. Before you output the file, check every name you use: find its declaration line and confirm that line comes before the first use.
+5. SHADER AND PROGRAM CREATION MUST BE CHECKED (2026-10-28: a run failed on "parameter 1 is not of type WebGLShader"). Every gl.createShader(), gl.createProgram() and gl.createBuffer() result must be checked for null before it is used. If a result is null, throw new Error with a clear message instead of continuing. Never pass a variable to gl.shaderSource, gl.compileShader, gl.attachShader or gl.linkProgram unless it was just created by the matching create call in the same function. Check gl.getShaderParameter(shader, gl.COMPILE_STATUS) and gl.getProgramParameter(program, gl.LINK_STATUS) after compiling and linking, and throw with gl.getShaderInfoLog or gl.getProgramInfoLog if either fails.
 One more thing worth knowing: a real per-pixel lighting model naturally makes the same scene look brighter or dimmer depending on which faces point toward the camera and light, and how much objects overlap and occlude each other. If you randomise things like orbit radius, object scale, or object count every time the scene resets, that alone can swing the average frame brightness enough to look like a fake trend to the automated brightness check, even though nothing is actually accumulating. Keep values that affect how much of the frame is covered (object scale, orbit radius, camera distance) fixed or only mildly varied instead; randomise rotation rates, orbit speed, phase offsets, and colors -- those add plenty of variety without swinging overall coverage. Keep total geometry modest (well under a thousand triangles) for the performance budget above.
 
 === CREATIVE DIRECTION FOR TODAY (${date}) ===
