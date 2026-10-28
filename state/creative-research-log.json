@@ -1378,5 +1378,16 @@
     "seedsVerified": "12345 only (fails motion and compositionDrift); seeds 1-15 not run",
     "nearestNeighbour": null,
     "nearestDistance": null
+  },
+  {
+    "date": "2026-10-28",
+    "inspirationSource": "Hele-Shaw viscous fingering / Saffman-Taylor instability (radial cell, tip-splitting fingers): https://arxiv.org/pdf/2402.01924 ; https://www.flowvis.org/media/2014/2014TeamSecond/Reports/Vigneshwaran_Selvaraju.pdf (found via a 'random featured image' WebSearch; a generic macro-photo search first returned only photo-book listings)",
+    "idea": "Radial Saffman-Taylor fingering: a less-viscous fluid displaces a more-viscous one in a radial Hele-Shaw cell, and the interface grows fingers that split at their tips, producing a self-similar branching front with a characteristic finger-width ratio. Candidate render: several independent radial fronts, each advanced by a moving-interface simulation.",
+    "engineName": null,
+    "outcome": "skipped",
+    "reason": "A faithful render needs a moving-interface simulation (level-set or Laplacian growth front with tip-splitting). That cannot be built and verified across seeds 1-15 plus 12345, with the validator and a mandatory novelty gate, in this session. A parametric stand-in (sinusoidal radial fingers) would misrepresent the physics and would sit close to starburst/arcrings. Idea kept for a future day.",
+    "seedsVerified": "none",
+    "nearestNeighbour": null,
+    "nearestDistance": null
   }
 ]
