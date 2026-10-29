@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Kolam Dot Loops — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "traditional textile/tiling/ornament
+// tradition from a randomly chosen culture"). An open WebSearch surfaced
+// KOLAM, the South Indian floor-drawn art: a continuous line woven around a
+// rectangular grid of dots, every dot encircled by a loop, and every
+// crossing of the line drawn over-or-under in a checkerboard alternation so
+// the whole drawing reads as one interlaced knot. Sources:
+// https://en.wikipedia.org/wiki/Kolam (search snippets only -- Wikipedia is
+// blocked in this sandbox), https://arxiv.org/pdf/2507.02874 (even-ordered
+// dot-pattern kolam construction), https://arxiv.org/pdf/2304.14134
+// (symmetry classification of sikku kolams), http://www.sahapedia.org/
+// significance-of-kolam-tamil-culture (rules: lines never touch a dot, they
+// are drawn around it; the path closes on itself).
+//
+// A genuinely different construction PRINCIPLE from every other engine in the
+// pool: no polygon fill, no substitution tiling, no wave field, no growth
+// process. The generative object is a KNOT DIAGRAM: each dot carries a loop,
+// each lattice edge carries an X-crossing of two bowed strands, and the
+// over/under choice at each crossing is a parity rule on the lattice. Only
+// the bow of each strand moves (coverage-neutral breathing), plus a bright
+// highlight that chases along every strand. Motion is therefore pure strand
+// deformation and light travelling along interlaced line work.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. The clear is an opaque full-canvas black
+// fill every frame, so nothing ever accumulates. Lattice, rings, strand
+// endpoints and the over/under parity are fixed ONCE per video; only bow
+// phases and chase phases move, and the per-cycle reconfigure only reassigns
+// rates and signs.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Mulberry32's first outputs for consecutive small seeds are correlated
+  // (see CLAUDE.md's pendulumwave note); discard a few draws.
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  const dt = 1 / FPS;
+
+  // ---- Lattice, rings and strands: computed ONCE per video ----------------
+  // Columns C from DENSITY (6..12, a bold, legible dot count); rows R chosen
+  // so the dot cells are near-square and the lattice fills the frame.
+  let C, R, sx, sy, dots, edges, rr, hue0, ringRate, ringPhase0;
+  let rad = null;
+  function initKnot() {
+    C = Math.max(6, Math.min(12, Math.round(9 * DENSITY)));
+    sx = W / C;
+    R = Math.max(3, Math.round(H / sx));
+    sy = H / R;
+    rr = 0.19 * Math.min(sx, sy);
+    hue0 = rng() * 360;
+    ringRate = sgn() * rand(0.6, 0.9) * SPEED;
+    ringPhase0 = rand(0, Math.PI * 2);
+
+    dots = [];
+    for (let j = 0; j < R; j++) for (let i = 0; i < C; i++) {
+      dots.push({ x: (i + 0.5) * sx, y: (j + 0.5) * sy, i, j });
+    }
+    const idx = (i, j) => j * C + i;
+
+    // Each lattice edge is an X-crossing of two bowed strands. The two
+    // strands leave the rings at angles theta +/- A (horizontal edges use
+    // A_H, vertical edges A_V) and are point-symmetric about the edge
+    // midpoint, so both pass exactly through that midpoint.
+    const A_H = 48 * Math.PI / 180;
+    const A_V = 18 * Math.PI / 180;
+    edges = [];
+    const addEdge = (p, q, horiz) => {
+      const th = horiz ? 0 : Math.PI / 2;
+      const A = horiz ? A_H : A_V;
+      const mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2;
+      // Parity decides which strand is OVER at this crossing (checkerboard
+      // over/under, the characteristic interlace of a kolam knot).
+      const parity = horiz ? (p.i + p.j) & 1 : (p.i + p.j + 1) & 1;
+      for (let s = -1; s <= 1; s += 2) {
+        const ang = th + s * A;
+        const u = { x: Math.cos(ang), y: Math.sin(ang) };
+        edges.push({
+          pIdx: idx(p.i, p.j), qIdx: idx(q.i, q.j), u, mx, my, s,
+          over: (s === 1) === (parity === 0),
+          hue: hue0 + (idx(p.i, p.j) * 37 + (horiz ? 0 : 19)) % 360,
+          // Per-strand bow breathing: its own rate (guaranteed minimum
+          // magnitude, random sign) and phase. Reassigned per cycle.
+          bowRate: 0, bowPhase: rand(0, Math.PI * 2),
+          chaseRate: 0, chasePhase: rand(0, 1),
+          paletteIdx: (idx(p.i, p.j) + (horiz ? 0 : 2) + s + 4) % PAL.length,
+        });
+      }
+    };
+    for (let j = 0; j < R; j++) for (let i = 0; i < C; i++) {
+      const p = dots[idx(i, j)];
+      if (i + 1 < C) addEdge(p, dots[idx(i + 1, j)], true);
+      if (j + 1 < R) addEdge(p, dots[idx(i, j + 1)], false);
+    }
+  }
+
+  function reconfigureMotion() {
+    ringRate = sgn() * rand(0.6, 0.9) * SPEED;
+    for (const e of edges) {
+      e.bowRate = sgn() * rand(0.7, 1.2) * SPEED;
+      e.chaseRate = sgn() * rand(0.09, 0.16) * SPEED;
+    }
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  let clk = 0;
+
+  initKnot();
+  reconfigureMotion();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  // ---- Strand geometry, recomputed per frame from the bow phase -----------
+  const NS = 44;             // samples per strand
+  const MID = (NS - 1) / 2;  // crossing sample index (t = 0.5)
+  const BOW_BASE = 0.32;     // bow length as a fraction of the lattice cell
+  function strandPoints(e, t) {
+    const bowAmt = BOW_BASE * (1 + 0.6 * Math.sin(e.bowRate * t + e.bowPhase));
+    const L = Math.min(sx, sy) * bowAmt * e.s;
+    const dp = dots[e.pIdx], dq = dots[e.qIdx];
+    const P0x = dp.x + rad[e.pIdx] * e.u.x, P0y = dp.y + rad[e.pIdx] * e.u.y;
+    const P3x = dq.x - rad[e.qIdx] * e.u.x, P3y = dq.y - rad[e.qIdx] * e.u.y;
+    const vx = P0x - e.mx, vy = P0y - e.my;
+    const vl = Math.hypot(vx, vy) || 1;
+    // Perpendicular to the strand's own chord direction (chord = P0 -> M).
+    const nx = -vy / vl, ny = vx / vl;
+    const c1x = e.mx + vx * 0.45 + nx * L, c1y = e.my + vy * 0.45 + ny * L;
+    const c2x = e.mx - vx * 0.45 - nx * L, c2y = e.my - vy * 0.45 - ny * L;
+    const pts = new Array(NS);
+    for (let k = 0; k < NS; k++) {
+      const u = k / (NS - 1), w = 1 - u;
+      const a = w * w * w, b = 3 * w * w * u, c = 3 * w * u * u, d = u * u * u;
+      pts[k] = [
+        a * P0x + b * c1x + c * c2x + d * P3x,
+        a * P0y + b * c1y + c * c2y + d * P3y,
+      ];
+    }
+    return pts;
+  }
+
+  function strandColor(e, lightBoost) {
+    const base = PAL[e.paletteIdx];
+    const h = ((base[0] + e.hue) % 360 + 360) % 360;
+    return `hsl(${h}, ${base[1]}%, ${Math.min(80, base[2] + lightBoost)}%)`;
+  }
+
+  function strokePiece(pts, i0, i1, width, color) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(pts[i0][0], pts[i0][1]);
+    for (let k = i0 + 1; k <= i1; k++) ctx.lineTo(pts[k][0], pts[k][1]);
+    ctx.stroke();
+  }
+
+  const LINE = Math.max(5, Math.min(sx, sy) * 0.065);
+
+  function renderFrame() {
+    cycleFrame++;
+    clk += dt;
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // Ring radii breathe on a rank-phased travelling wave: an integer number
+    // of full cycles across the dot index, so the summed radius change is
+    // exactly zero at every instant (discrete-Fourier orthogonality). This
+    // is what reshapes the knot, not just bends it.
+    const N = dots.length;
+    rad = new Array(N);
+    for (let n = 0; n < N; n++) {
+      rad[n] = rr * (1 + 0.30 * Math.sin(ringRate * clk + ringPhase0 + 2 * Math.PI * 2 * (n / N)));
+    }
+
+    // Pre-compute every strand's current samples once per frame.
+    const cur = edges.map((e) => strandPoints(e, clk));
+
+    // Glow pass (wide, dim) then core pass (thin, bright) for every strand.
+    for (let n = 0; n < edges.length; n++) {
+      const pts = cur[n];
+      ctx.strokeStyle = strandColor(edges[n], -6);
+      ctx.globalAlpha = 0.28;
+      strokePiece(pts, 0, NS - 1, LINE * 3.2, ctx.strokeStyle);
+      ctx.globalAlpha = 1;
+      strokePiece(pts, 0, NS - 1, LINE, strandColor(edges[n], 4));
+    }
+
+    // Rings around every dot: fixed radius, fixed hue per dot. The loop is
+    // what makes it a kolam -- the line goes around the dot, never through it.
+    ctx.globalAlpha = 1;
+    for (let n = 0; n < dots.length; n++) {
+      const d = dots[n];
+      const hue = ((PAL[(d.i + d.j) % PAL.length][0] + hue0 + 90) % 360 + 360) % 360;
+      ctx.strokeStyle = `hsl(${hue}, ${PAL[0][1]}%, ${Math.min(74, PAL[0][2] + 6)}%)`;
+      ctx.lineWidth = LINE;
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, rad[n], 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Chase highlights: a fixed-length window of each strand brightens and
+    // slides along it on a sine ping-pong. Window length never changes, so
+    // the lit area is constant -- only which part of the strand is bright.
+    const WIN = 0.16;
+    for (let n = 0; n < edges.length; n++) {
+      const e = edges[n];
+      const pos = e.chasePhase + clk * e.chaseRate;
+      const f = 0.5 - 0.5 * Math.cos(2 * Math.PI * pos);
+      const start = Math.round(f * (1 - WIN) * (NS - 1));
+      const end = Math.min(NS - 1, start + Math.round(WIN * (NS - 1)));
+      strokePiece(cur[n], start, end, LINE * 1.5, strandColor(e, 18));
+    }
+
+    // Over/under at each crossing: the UNDER strand is cut by a black gap
+    // around the crossing, then the OVER strand is redrawn through it.
+    for (let n = 0; n < edges.length; n += 2) {
+      const a = edges[n];
+      const over = a.over ? n : n + 1;
+      const under = a.over ? n + 1 : n;
+      const gapHalf = Math.round(NS * 0.07);
+      const i0 = Math.max(0, Math.round(MID) - gapHalf);
+      const i1 = Math.min(NS - 1, Math.round(MID) + gapHalf);
+      strokePiece(cur[under], i0, i1, LINE * 3.6, '#000');
+      strokePiece(cur[over], i0, i1, LINE * 3.2, strandColor(edges[over], -6));
+      strokePiece(cur[over], i0, i1, LINE, strandColor(edges[over], 4));
+    }
+
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigureMotion(); }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

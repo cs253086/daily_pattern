@@ -56,6 +56,7 @@ const ENGINE_SUBJECTS = {
   ikatweave: 'Ikat Weave Patterns',
   juliabands: 'Julia Set Escape Bands',
   kaleidoscope: 'Kaleidoscope Patterns',
+  kolam: 'Kolam Knot Lattice',
   kuramotochimera: 'Synchronizing Oscillator Rings',
   langtonsant: "Langton's Ant Colonies",
   lattice3d: 'Spinning Cube Lattice',

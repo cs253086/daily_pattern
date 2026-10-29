@@ -1389,5 +1389,16 @@
     "seedsVerified": "none",
     "nearestNeighbour": null,
     "nearestDistance": null
+  },
+  {
+    "date": "2026-10-29",
+    "inspirationSource": "Kolam (South Indian floor-drawn dot-grid art: one continuous line woven around a dot lattice, over/under at each crossing): https://en.wikipedia.org/wiki/Kolam (search snippets only, Wikipedia blocked); https://arxiv.org/pdf/2507.02874 (even-ordered dot-pattern kolam construction); https://arxiv.org/pdf/2304.14134 (symmetry classification of sikku kolams); http://www.sahapedia.org/significance-of-kolam-tamil-culture (rule: lines drawn around a dot, never through it; path closes on itself). Category: traditional textile/tiling/ornament tradition from a randomly chosen culture.",
+    "idea": "Kolam knot lattice: each dot of a rectangular lattice carries a ring, and each lattice edge carries an X-crossing of two bowed strands point-symmetric about the edge midpoint, with over/under chosen by checkerboard parity so the drawing reads as one interlaced knot. Motion: per-strand bow breathing, a rank-phased zero-sum ring-radius wave that reshapes the knot, and a fixed-length highlight chasing along each strand.",
+    "engineName": "kolam",
+    "outcome": "shipped",
+    "reason": "Shipped after two composition-level iterations. First render read as dashes (rings too large, gaps too wide); fixed geometry. validateEngine failed compositionDrift (0.0113) because only bows moved; fixed by a rank-phased ring-radius wave. Caught on review, not by a gate: a stale field guard silently skipped the over/under gap cuts; fixed and re-validated. Final: 16/16 seeds pass, CLI ok, novelty 0.794 vs moire.",
+    "seedsVerified": "1-15 and 12345 (16/16 via validateEngine; CLI default ok:true); frames rendered at 25/50/75/95/105% of cycleSec 43.5 at seeds 12345 and 7",
+    "nearestNeighbour": "moire",
+    "nearestDistance": 0.794
   }
 ]
