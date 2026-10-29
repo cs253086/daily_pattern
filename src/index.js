@@ -730,6 +730,19 @@ async function noveltyDistance(enginePath) {
   return { nearest, distance: best };
 }
 
+// Reads the pattern name Gemini was asked to write into its file's <head>
+// (see generate.js, PATTERN NAME). Returns null if the tag is missing; the
+// title then falls back to a generic subject in metadata.js.
+async function readPatternName(enginePath) {
+  try {
+    const html = await readFile(enginePath, 'utf8');
+    const m = html.match(/<meta\s+name="pattern-name"\s+content="([^"]{1,80})"/i);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
 async function main() {
   const cli = parseArgs(process.argv.slice(2));
   const dryRun = cli['no-upload'] === true || process.env.DRY_RUN === '1';
@@ -873,6 +886,7 @@ async function main() {
     // its ENGINE_SUBJECTS map -- a fresh file every day) as 3D vs 2D rather
     // than guessing from its photo-derived filename slug.
     engineIs3D: isWebGLEngine(engine),
+    patternName: await readPatternName(engine),
     hasAudio: renderResult.hasAudio,
     musicCredit: renderResult.hasAudio ? musicCredit : null,
     // >1 distinct engine in the scene playlist: the description can say the

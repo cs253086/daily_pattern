@@ -134,10 +134,26 @@ const GENERIC_SUBJECTS_2D = [
 // Every subject this engine may be titled with, in preference order. Known
 // engines have exactly one; unlisted engines (the Gemini auto-* files) get the
 // generic pool for their dimension.
-function subjectCandidatesFor(engineName, engineIs3D) {
+// Gemini's own name for what it drew (the <meta name="pattern-name"> tag, see
+// generate.js). Accepted only if it is 2-4 plain words and not a generic filler
+// word on its own, so a bad name falls back to the generic pool below.
+const GENERIC_WORDS = new Set(['geometric', 'motion', 'art', 'abstract', 'pattern', 'patterns', 'screensaver', 'generative', 'geometry', 'visuals']);
+function cleanPatternName(raw) {
+  if (typeof raw !== 'string') return null;
+  const name = raw.replace(/\s+/g, ' ').trim();
+  if (!/^[A-Za-z][A-Za-z -]{3,58}$/.test(name)) return null;
+  const words = name.split(' ');
+  if (words.length < 2 || words.length > 4) return null;
+  if (words.every((w) => GENERIC_WORDS.has(w.toLowerCase()))) return null;
+  return words.map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
+}
+
+function subjectCandidatesFor(engineName, engineIs3D, patternName) {
   const name = String(engineName || '').trim();
   const known = ENGINE_SUBJECTS[name];
   if (known) return [known];
+  const named = cleanPatternName(patternName);
+  if (named) return [named];
   // 13 curated engines added 2026-09-10..25 shipped without an entry, so
   // e.g. the 2026-09-27 Doyle spiral video was titled "Generative Geometry".
   // Only Gemini's auto-* engines are expected to land here; say so loudly
@@ -264,7 +280,7 @@ export function buildMetadata(info = {}) {
   // from the recent-memory window (used by the verification scripts).
   const recent = readRecentTitles();
   const { mood, subject } = pickMoodAndSubject(
-    subjectCandidatesFor(info.engineName, info.engineIs3D), h, recent,
+    subjectCandidatesFor(info.engineName, info.engineIs3D, info.patternName), h, recent,
   );
   const useCase = pick(USE_CASES, h >>> 6);
   if (info.persistTitle !== false) {
