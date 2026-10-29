@@ -8390,6 +8390,81 @@ distance **0.772** (next: `auto-2026-10-01-nasa-science` 0.934,
 
 `ENGINE_SUBJECTS`: `juliabands: 'Julia Set Escape Bands'` in `src/metadata.js`.
 
+## Kolam knot-lattice engine (`kolam.html`) — 2026-10-29
+
+Daily creative-research routine. Category was "traditional textile/tiling/
+ornament tradition from a randomly chosen culture" (last used 2026-10-17 for
+`temari.html`). An open WebSearch within the category surfaced **kolam**, the
+South Indian floor-drawn art: a continuous line woven around a rectangular
+grid of dots, every dot encircled by a loop, and the line passing over and
+under itself at each crossing, so the whole drawing reads as one interlaced
+knot. Sources: https://en.wikipedia.org/wiki/Kolam (search snippets only --
+Wikipedia is blocked in this sandbox), https://arxiv.org/pdf/2507.02874
+(even-ordered dot-pattern kolam construction),
+https://arxiv.org/pdf/2304.14134 (symmetry classification of sikku kolams),
+http://www.sahapedia.org/significance-of-kolam-tamil-culture (rules: lines are
+drawn around a dot, never through it; the path closes on itself).
+
+**What it is**: a genuinely different construction PRINCIPLE from every other
+engine in the pool. Each dot carries a ring, and each lattice edge carries an
+X-crossing of two bowed strands that are point-symmetric about the edge
+midpoint. The over/under choice at each crossing is a checkerboard parity on
+the lattice, which is the interlace that makes a kolam read as a knot. The
+engine has no polygon fill, no substitution tiling, no wave field and no
+growth process, and it is not a weave, since the strands attach to rings
+rather than lying on a warp/weft grid.
+
+**Motion, built to be coverage-aware rather than only moving.** Two sources:
+(1) each strand's bow breathes on its own rate and phase, which is a
+per-element, non-rigid change; (2) every ring's radius breathes on a
+rank-phased travelling wave, with an integer number of cycles across the dot
+index so the summed radius change is exactly zero at every instant (the same
+discrete-Fourier construction as `doylespiral.html`/`rosenspikes.html`). A
+bright highlight also chases along each strand on a fixed-length window.
+
+**Two bugs found by rendering and running the gates, and one caught on review:**
+1. The first render read as dashes: rings too large left bridges too short,
+   and the over/under gap (12% of each strand's length on each side) cut most
+   of the visible strand. Fixed by shrinking the rings (0.26 -> 0.19 of the
+   cell), lengthening the bridges by raising the bow length (0.20 -> 0.32 of a
+   cell), narrowing the gap (12% -> 7% per side) and widening the line.
+2. `validate.js` failed `compositionDrift` (0.0113-0.0115 against the 0.015
+   floor) with fastMotion also short (6.64 vs 8.69). Strengthening the bow
+   amplitude (0.28 -> 0.6) and rate fixed fastMotion (11.4), but the
+   composition still did not reshape: only bends moved, the arrangement stayed
+   fixed. Fixed by making the RING RADII breathe on the rank-phased wave
+   (amplitude 0.26, then 0.30). Re-measured: the bridges re-attach at changing
+   points and the knot visibly reshapes.
+3. **Caught on review, not by any gate**: after the ring change, a leftover
+   guard (`if (a.P0 === undefined ...) continue;`) referenced a field I had
+   removed, so it always skipped, and the over/under gap cuts were silently
+   not drawn. Found by re-reading the code, fixed by deleting the guard, then
+   re-rendered and re-validated. Lesson: after removing a field, grep for every
+   read of it, since a stale `undefined` check fails silently.
+
+**Verified** (final design): `validateEngine()` **16/16** across seeds 1-15
+plus the CLI default seed 12345, and `node src/validate.js
+engines/manual/kolam.html` returns `ok: true`. Margins across the battery:
+`avgSat` 68-80 (vs 22 minimum), `peakNearWhiteFrac` 0, `projectedRise` -15 to
++15 (vs 50), `compositionDrift` 0.0153-0.0324 (vs 0.015), `unitMotionNonRigidFrac`
+exactly 1.0 on every seed, `fastMotion` 15.5-18.3 against floors of 7.9-9.5,
+`avgMsPerFrame` 33-36 on the parallel battery (`projectedHourRenderMin` ~41
+min on the quiet CLI run at seed 12345, 28.9 ms/frame). The thinnest drift
+margin is seed 4: it failed at 0.0149 with the 0.26 ring amplitude and passes
+at 0.0153 after the raise to 0.30, so it is passing but close. Frames rendered and looked at at 25/50/75/95/105% of a
+43.5s cycle at seeds 12345 and 7: vivid, bold, interlaced woven ring lattice,
+clear black over/under gaps at every crossing, and visible reshaping between
+checkpoints.
+
+**Novelty gate**: measured against all 74 engines in `engines/manual/` (the
+whole pool fingerprinted fresh alongside the candidate; the refreshed cache was
+not committed). Nearest neighbour is `moire` at distance **0.794** (next
+`auto-2026-08-29-eclipse-pair` 0.840, `auto-2026-10-24-nasa-science` 0.926).
+Clean pass above the 0.60 threshold, reached after the composition-level ring
+and gap changes above, not a bare first draft.
+
+`ENGINE_SUBJECTS`: `kolam: 'Kolam Knot Lattice'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
