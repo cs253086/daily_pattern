@@ -53,12 +53,12 @@ function hashStr(s) {
   return h >>> 0;
 }
 
-// A spread of ambient-leaning search terms so different days pull from
-// different corners of the catalog rather than always the same query.
+// Genre-style search terms so different days pull different kinds of music
+// (deep house, chillout, relaxing piano, ...) rather than sound effects.
 const QUERY_TERMS = [
-  'ambient calm', 'ambient meditation', 'ambient pad', 'ambient drone',
-  'calm background', 'peaceful ambient', 'relaxing ambient', 'soft ambient',
-  'ambient loop', 'meditative pad',
+  'deep house', 'deep house music', 'chillout music', 'relaxing music',
+  'lofi chill music', 'ambient music', 'relaxing piano music', 'downtempo music',
+  'meditation music', 'chill house', 'soft electronic music', 'calm instrumental music',
 ];
 
 // duration:[25 TO 480] keeps clips long enough that looping them for an
@@ -69,7 +69,7 @@ async function searchTracks({ apiKey, query, page }) {
   const params = new URLSearchParams({
     query,
     token: apiKey,
-    filter: 'license:"Creative Commons 0" duration:[25 TO 480]',
+    filter: 'license:"Creative Commons 0" tag:music duration:[90 TO 480]',
     fields: 'id,name,previews,duration,license,username,url',
     sort: 'rating_desc',
     page_size: '50',
