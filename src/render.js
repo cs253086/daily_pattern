@@ -51,8 +51,8 @@ export function resolveConfig(cli = {}) {
     enginePath,
     seed: pick(cli, 'seed', 'SEED', String(defaultSeed())),
     palette: pick(cli, 'palette', 'PALETTE', '', (v) => String(v)),
-    width: pick(cli, 'width', 'WIDTH', 1920, num),
-    height: pick(cli, 'height', 'HEIGHT', 1080, num),
+    width: pick(cli, 'width', 'WIDTH', 3840, num),
+    height: pick(cli, 'height', 'HEIGHT', 2160, num),
     fps: pick(cli, 'fps', 'FPS', 24, num),
     duration: pick(cli, 'duration', 'DURATION', 3600, num), // seconds
     speed: pick(cli, 'speed', 'SPEED', '', (v) => String(v)),
