@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Impact Shock — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated punch engine: a lattice of bold colour tiles that gets struck by
+// timed impacts. Each impact sends an outward shockwave across the lattice:
+// tiles are pushed outward as the front passes, shrink on the hit, and flash
+// brighter. Between impacts the lattice settles back. Every frame is a pure
+// function of time, so the cycle resets cleanly at cycleSec.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no requestAnimationFrame. The canvas clears to
+// opaque black every frame, so nothing accumulates across frames.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE = Math.max(12, fltP('cycleSec', 43.5));
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+
+  // Lattice: cols across the frame, rows chosen so cells stay near square.
+  const cols = Math.max(6, Math.round(10 * DENSITY));
+  const cw = W / cols;
+  const rows = Math.max(4, Math.round(H / cw));
+  const ch = H / rows;
+  const U = Math.min(cw, ch);
+
+  // Five palette hues spread around the wheel, assigned to tiles in a
+  // checker-like rotation so neighbours always differ.
+  const hueBase = rand(0, 360);
+  const HUES = [0, 72, 144, 216, 288].map((h) => (hueBase + h) % 360);
+  const tiles = [];
+  for (let j = -1; j <= rows; j++) {
+    for (let i = -1; i <= cols; i++) {
+      const k = ((i + 1) * 2 + (j + 1) * 3 + Math.abs(i + j)) % HUES.length;
+      tiles.push({
+        x: (i + 0.5) * cw,
+        y: (j + 0.5) * ch,
+        hue: HUES[k],
+        ph: rng() * Math.PI * 2,   // ambient wobble phase, fixed per tile
+      });
+    }
+  }
+
+  // Impact schedule, fixed once per video. Every impact starts and ends inside
+  // one cycle, so the cycle reset never cuts a shockwave in half.
+  const N_IMPACTS = 14;
+  const LIFE = 3.5;
+  const impacts = [];
+  for (let k = 0; k < N_IMPACTS; k++) {
+    const t0 = (k + 0.3 + 0.4 * rng()) * ((CYCLE - LIFE - 0.5) / N_IMPACTS);
+    impacts.push({
+      t0,
+      cx: rand(0.15, 0.85) * W,
+      cy: rand(0.2, 0.8) * H,
+      v: rand(1.6, 2.2) * U,        // front speed, px per second
+      w: rand(0.6, 0.8) * U,        // front thickness
+      amp: rand(0.5, 0.7) * U,      // push distance
+    });
+  }
+
+  window.currentFrame = 0;
+  window.TOTAL_FRAMES = Math.round(DURATION * FPS);
+
+  function renderFrame() {
+    const t = window.currentFrame / FPS * SPEED;
+    const tl = t % CYCLE;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    // Per-impact shock: envelope at this tile's distance from the impact.
+    const drawW = cw * 0.9;
+    const drawH = ch * 0.9;
+    for (const tile of tiles) {
+      // Ambient wobble: whole cycles per CYCLE keep it seamless at the reset.
+      const wob = 0.10 * U * Math.sin(2 * Math.PI * 6 * tl / CYCLE + tile.ph);
+      let px = tile.x + wob, py = tile.y + 0.5 * wob, flash = 0;
+      for (const im of impacts) {
+        const age = tl - im.t0;
+        if (age < 0 || age > LIFE) continue;
+        const dx = tile.x - im.cx, dy = tile.y - im.cy;
+        const r = Math.hypot(dx, dy);
+        if (r < 1e-6) continue;
+        const front = r - im.v * age;
+        const env = Math.exp(-(front / im.w) * (front / im.w)) * Math.exp(-0.45 * age);
+        px += (dx / r) * im.amp * env;
+        py += (dy / r) * im.amp * env;
+        flash += env;
+      }
+      flash = Math.min(1, flash);
+      const s = 1 - 0.22 * flash;
+      ctx.fillStyle = `hsl(${tile.hue.toFixed(1)}, 95%, ${(40 + 30 * flash).toFixed(1)}%)`;
+      ctx.fillRect(px - (drawW * s) / 2, py - (drawH * s) / 2, drawW * s, drawH * s);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

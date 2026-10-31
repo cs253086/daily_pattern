@@ -58,6 +58,7 @@ const ENGINE_SUBJECTS = {
   kaleidoscope: 'Kaleidoscope Patterns',
   kolam: 'Kolam Knot Lattice',
   kuramotochimera: 'Synchronizing Oscillator Rings',
+  impactshock: 'Shockwave Tile Impacts',
   langtonsant: "Langton's Ant Colonies",
   lattice3d: 'Spinning Cube Lattice',
   liesegang: 'Liesegang Rings',
