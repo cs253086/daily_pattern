@@ -93,8 +93,60 @@ async function downloadPreview(url, destPath) {
   return destPath;
 }
 
+// Jamendo (https://developer.jamendo.com/v3.0): real genre music. Only tracks
+// whose licence URL is CC0 (publicdomain/zero) are used, so the no-attribution
+// safety property matches the Freesound path. Field names are from the Jamendo
+// v3 track objects as documented; anything missing is logged and skipped.
+const JAMENDO_TAGS = ['deephouse', 'chillout', 'relaxation', 'lounge', 'meditation', 'ambient'];
+
+async function jamendoTrack({ clientId, date, seed, destPath }) {
+  const h = hashStr(`${date}:${seed}:jamendo`);
+  const tag = JAMENDO_TAGS[h % JAMENDO_TAGS.length];
+  const params = new URLSearchParams({
+    client_id: clientId,
+    format: 'json',
+    limit: '50',
+    tags: tag,
+    order: 'popularity_week',
+    offset: String((h % 3) * 50),
+  });
+  const res = await fetchWithTimeout(`https://api.jamendo.com/v3.0/tracks/?${params}`, { ms: 15000 });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`jamendo search ${res.status} ${res.statusText}: ${body.slice(0, 300)}`);
+  }
+  const j = await res.json();
+  const all = Array.isArray(j.results) ? j.results : [];
+  const cc0 = all.filter((t) => typeof t.license_ccurl === 'string'
+    && /creativecommons\.org\/publicdomain\/zero/.test(t.license_ccurl)
+    && typeof t.audio === 'string' && t.audio.startsWith('http')
+    && Number(t.duration) >= 90);
+  console.log(`[music] jamendo tag="${tag}": ${all.length} tracks, ${cc0.length} CC0 with audio >= 90s.`);
+  if (cc0.length === 0) return null;
+  const pick = cc0[h % cc0.length];
+  await downloadPreview(pick.audio, destPath);
+  console.log(`[music] using "${pick.name}" by ${pick.artist_name} (${Math.round(pick.duration)}s, CC0, jamendo #${pick.id}, tag="${tag}")`);
+  return {
+    path: destPath,
+    title: pick.name,
+    username: pick.artist_name,
+    freesoundUrl: pick.shareurl || `https://www.jamendo.com/track/${pick.id}`,
+    durationSec: Number(pick.duration),
+  };
+}
+
 // Public: fetch today's CC0 background track to destPath, or null. Never throws.
 export async function dailyStockTrack({ date, seed, apiKey = process.env.FREESOUND_API_KEY, destPath } = {}) {
+  const jamendoId = process.env.JAMENDO_CLIENT_ID;
+  if (jamendoId) {
+    try {
+      const jt = await jamendoTrack({ clientId: jamendoId, date, seed, destPath });
+      if (jt) return jt;
+      console.warn('[music] jamendo had no usable CC0 track today; trying Freesound.');
+    } catch (e) {
+      console.warn(`[music] jamendo failed: ${e.message}; trying Freesound.`);
+    }
+  }
   if (!apiKey) {
     console.warn('[music] FREESOUND_API_KEY not set; skipping stock music.');
     return null;
