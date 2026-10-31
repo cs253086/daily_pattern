@@ -96,13 +96,10 @@ jobs:
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           SMITHSONIAN_API_KEY: ${{ secrets.SMITHSONIAN_API_KEY }}
           IMAGE_PALETTE: ${{ vars.IMAGE_PALETTE }}
-          # Background music: a license-free CC0 track from Freesound.org
+          # Background music: a CC0 track from Jamendo.
           # (src/stockMusic.js). OFF by default since 2026-09-28 (owner: "no
           # music at all"). Set repo variable MUSIC=1 to turn it back on;
-          # FREESOUND_API_KEY is then required (free key from
-          # https://freesound.org/apiv2/apply/).
-          FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
-          # Jamendo (genre music, CC0 tracks only). Optional; Freesound is the fallback.
+          # Jamendo (genre music, CC0 tracks only). Optional.
           JAMENDO_CLIENT_ID: ${{ secrets.JAMENDO_CLIENT_ID }}
           MUSIC: ${{ vars.MUSIC }}
           # Scene-based rendering (src/render.js, 2026-09-08): the hour is

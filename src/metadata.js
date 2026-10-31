@@ -340,7 +340,7 @@ export function buildMetadata(info = {}) {
   // credit above.
   const mc = info.musicCredit;
   const musicCreditLine = hasAudio && mc && mc.title
-    ? `Music: "${mc.title}" by ${mc.username} (freesound.org, CC0 license).`
+    ? `Music: "${mc.title}" by ${mc.username} (jamendo.com, CC0 license).`
     : undefined;
 
   // Subscribe link with YouTube's ?sub_confirmation=1, which opens the

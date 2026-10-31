@@ -185,7 +185,7 @@ export function resolveConfig(cli = {}) {
     readyTimeoutMs: pick(cli, 'readyTimeout', 'READY_TIMEOUT_MS', 60000, num),
 
     // Ambient music: a real license-free (CC0) track fetched from
-    // Freesound.org by src/stockMusic.js and looped to cover the render.
+    // Jamendo by src/stockMusic.js and looped to cover the render.
     // OFF by default since 2026-09-28: the first day it actually ran (a
     // sitar/drone raga track) the owner asked for it removed and chose "no
     // music at all" going forward. Opt back in with --music=1 / MUSIC=1

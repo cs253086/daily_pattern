@@ -849,7 +849,7 @@ async function main() {
     if (imageInfo.structure) renderCli.sceneLum = encodeStructure(imageInfo.structure, imageInfo.gridW, imageInfo.gridH);
   }
 
-  // Optional license-free (CC0) background music, fetched from Freesound.org
+  // Optional license-free (CC0) background music, fetched from Jamendo
   // (src/stockMusic.js) rather than synthesized -- user request 2026-08-19,
   // "don't make music yourself, get a license free music somewhere".
   // Enabled/disabled by the same cfg.music flag render() itself would use
@@ -866,7 +866,7 @@ async function main() {
       if (track) {
         renderCli.musicTrackPath = track.path;
         musicCredit = track;
-        console.log(`[index] background music: "${track.title}" by ${track.username} (CC0, freesound.org)`);
+        console.log(`[index] background music: "${track.title}" by ${track.username} (CC0, jamendo.com)`);
       } else {
         console.log('[index] no stock music available today; video will be silent.');
       }
