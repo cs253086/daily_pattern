@@ -301,7 +301,7 @@ export function buildMetadata(info = {}) {
   // guarantee is identical in both styles.
   const searchStyle = String(info.titleStyle || '').toLowerCase() !== 'short';
   const longTitle = clampTitle(searchStyle
-    ? `${subject} Screensaver | ${durLabel.search} ${mood} Visuals for Sleep & Focus`
+    ? `${subject} Video | ${durLabel.search} ${mood} Visuals for Sleep & Focus`
     : `${mood} ${subject}`);
 
   // Optional credit when the day's colours were drawn from an image (e.g. NASA
@@ -384,7 +384,7 @@ export function buildMetadata(info = {}) {
   // hook style (short-form viewers decide in the first line too), include
   // #Shorts (required for reliable Shorts-shelf placement).
   const shortTitle = clampTitle(searchStyle
-    ? `${mood} ${subject} Screensaver #Shorts`
+    ? `${mood} ${subject} Video #Shorts`
     : `${mood} ${subject} #Shorts`);
   const shortDescription = [
     `A quick taste of today's ${subject.toLowerCase()}${hasAudio ? ', with a calming ambient soundtrack' : ''} — crisp, hypnotic, and endlessly satisfying to watch.`,
