@@ -120,6 +120,9 @@ function repairFixes(reasons) {
   if (text.includes('pale') || text.includes('saturation')) {
     blocks.push('FIX FOR PALE COLOUR: the colours are too grey. Set every hsl() saturation to 80-100% and lightness to 45-60%. Do not use white, grey, or low-saturation colours except for tiny highlights.');
   }
+  if (text.includes('total_frames') || text.includes('total frames')) {
+    blocks.push('FIX FOR TOTAL_FRAMES: the renderer reads window.TOTAL_FRAMES, which is currently undefined. Add the exact line window.TOTAL_FRAMES = Math.round(duration * fps); during startup, before window.READY is set to true.');
+  }
   if (text.includes('shadersource') || text.includes('webglshader') || text.includes('page errors') || text.includes('readyerror') || text.includes('is not defined') || text.includes('before initialization')) {
     blocks.push('FIX FOR THE RUNTIME ERROR: check every createShader, createProgram and createBuffer result for null and throw a clear Error if one is null. Declare every helper and variable above the first line that uses it, and call init() only at the very end of the file.');
   }
@@ -159,7 +162,7 @@ Output ONLY the raw HTML document. Start with <!DOCTYPE html>. No markdown, no c
 4. Do NOT use requestAnimationFrame, setInterval, or setTimeout to drive animation. The animation clock is controlled externally.
 5. Expose on window:
    - READY: boolean, set to true only after initialization is complete.
-   - TOTAL_FRAMES: integer === Math.round(duration * fps).
+   - TOTAL_FRAMES: integer === Math.round(duration * fps). It MUST be assigned as a property of window, with the exact line window.TOTAL_FRAMES = Math.round(duration * fps); executed during startup BEFORE window.READY is set. A plain 'let TOTAL_FRAMES;' or a bare variable does NOT create window.TOTAL_FRAMES; the 2026-11-01 run had three attempts rejected for exactly this (invalid TOTAL_FRAMES: undefined).
    - currentFrame: integer, starts at 0.
    - advanceFrame(): advances the simulation by exactly dt = 1/fps seconds, draws exactly one frame to the canvas, and increments currentFrame by 1.
    - advanceFrames(n): calls advanceFrame() n times.
