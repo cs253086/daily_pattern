@@ -1411,5 +1411,16 @@
     "seedsVerified": "round 1 only: validateEngine 16/16 (seeds 1-15 plus 12345); round 2 not validated",
     "nearestNeighbour": "prismbloom.html (round 1)",
     "nearestDistance": 0.5154
+  },
+  {
+    "date": "2026-11-01",
+    "inspirationSource": "Hopf fibration: the 3-sphere is partitioned into great-circle fibers over a 2-sphere base, and stereographic projection to R^3 fills space with nested tori of linked Villarceau circles (Zamboj, arXiv 2003.09236, https://arxiv.org/abs/2003.09236v2 ; nested-tori summary from the same search, https://arxiv.org/pdf/2003.09236v2). Category: obscure mathematical object (last used 2026-10-26). Found via one open WebSearch, no other leads followed.",
+    "idea": "Render stereographically projected Hopf fibers (linked circles / nested tori) as lit or glowing curves, with the base point on S^2 moving to drift the fiber family.",
+    "engineName": null,
+    "outcome": "skipped",
+    "reason": "Skipped before any engine was built. Pre-build judgment, not a measured gate result: the construction's visual read is nested linked rings, which overlaps torusrings3d (lit tori/rings) for the lit-3D version and temari (great-circle guide threads) or wireframe-style line art for the glowing-curve version. The novelty gate was not run. Recent 2D line-art and glowing-line-network attempts already failed novelty (leaf-vein 2026-10-31, nearest prismbloom 0.515), so a line-based render is a known dead end. Not pursued further today. Recent natural-structure attempts (ammonite, pavement cells, leaf venation) were also skipped, so that category stays off the list.",
+    "seedsVerified": [],
+    "nearestNeighbour": null,
+    "nearestDistance": null
   }
 ]
