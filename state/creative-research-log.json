@@ -1422,5 +1422,16 @@
     "seedsVerified": [],
     "nearestNeighbour": null,
     "nearestDistance": null
+  },
+  {
+    "date": "2026-11-02",
+    "inspirationSource": "Gemstone 'fingerprint' inclusions: a crack in a crystal heals shut and the trapped fluid breaks into a row of droplets that sit in the old fracture plane (Plateau-Rayleigh pinch-off). Sources: https://www.gia.edu/doc/Induced-Fingerprints.pdf ; https://lotusgemology.com/resources/articles/135-inside-out-inclusions-and-the-symmetry-of-crystals ; https://skyjems.ca/pages/encyclopedia-fingerprint-inclusion (category: a random featured image)",
+    "idea": "Straight fracture sheets rendered as strings of bead droplets joined by necks, with a travelling pinch wave (integer whole cycles per sheet so the drawn area is exactly constant), mirrored 4-fold for symmetry, colours equalised in luma.",
+    "engineName": "fracturepearls",
+    "outcome": "shipped",
+    "reason": "validateEngine 16/16 (seeds 1-15 + 12345) after luma-trend fixes; first novelty pass failed at 0.477 vs wireframe (mirror asymmetry), fixed by 4-fold mirroring; final novelty 0.859 vs moire.",
+    "seedsVerified": "1-15,12345",
+    "nearestNeighbour": "moire",
+    "nearestDistance": 0.859
   }
 ]

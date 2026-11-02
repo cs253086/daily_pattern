@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Healed Fracture Pearls — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated engine, inspired by a genuinely random web find (today's
+// creative-research routine). Category: a random featured image (the pool's
+// least recently used image category; last real use 2026-10-09). An open
+// WebSearch for a macro-photographed mineral surface surfaced gemstone
+// "fingerprint" inclusions (search snippets): a crack in a crystal heals shut,
+// and the trapped fluid inside it breaks up into a row of small droplets that
+// occupy the same plane as the old fracture (GIA, "Induced Fingerprints";
+// skyjems.ca encyclopedia entries on healed fractures). The physics is the
+// Plateau-Rayleigh pinch-off of a liquid thread into beads.
+// Sources: https://www.gia.edu/doc/Induced-Fingerprints.pdf ;
+// https://lotusgemology.com/resources/articles/135-inside-out-inclusions-and-the-symmetry-of-crystals ;
+// https://skyjems.ca/pages/encyclopedia-fingerprint-inclusion
+//
+// Construction PRINCIPLE, distinct from every other engine in the pool: each
+// "fracture sheet" is a straight row of discrete droplets (a bead chain with
+// visible necks between beads). The droplets are not a tiling, a wave-field
+// sample, a growth process or a rigid lattice -- they are the pinch-off of a
+// thread, and the motion is a travelling pinch wave: each droplet's radius
+// follows sin(2*pi*K*i/N - omega*t), so the beads swell and necks thin in a
+// wave that runs along each sheet. A few sheets sit at independent angles,
+// offsets and wave rates, so the whole frame never reads as one rigid
+// transform.
+//
+// Brightness neutrality by construction: the radius wave is an integer number
+// of cycles along each sheet, so the sum of r^2 over the beads (the drawn area)
+// is exactly constant at every instant (sum of sin^2 over whole cycles is N/2
+// independent of phase; the first-order sin term sums to zero). Colour is fixed
+// per sheet, so no hue-driven luma drift either. The frame is cleared to opaque
+// black every frame, so there is no accumulation.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32 (4-draw burn-in), no requestAnimationFrame.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Mulberry32's first draws for consecutive small seeds are correlated --
+  // burn 4 draws first (same convention as juliabands/pendulumwave).
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  // [hue, sat, light] stops; copied from juliabands.html.
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  // Rec.709 luma of an HSL colour. Sheets overlap where they cross, so the
+  // visible colour in an overlap changes as the beads swell and shrink; giving
+  // every sheet the same luma keeps that swap from leaking into mean brightness
+  // (seeds 1 and 6 read a slow luma trend when the colours differed in luma).
+  function lumaOfHsl(h, s, l) {
+    h = ((h % 360) + 360) % 360; s /= 100; l /= 100;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = l - c / 2;
+    let r = 0, g = 0, b = 0;
+    if (h < 60) { r = c; g = x; } else if (h < 120) { r = x; g = c; }
+    else if (h < 180) { g = c; b = x; } else if (h < 240) { g = x; b = c; }
+    else if (h < 300) { r = x; b = c; } else { r = c; b = x; }
+    const R = (r + m) * 255, G = (g + m) * 255, B = (b + m) * 255;
+    return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+  }
+  const LUMA_TARGET = 105;
+  function equalLuma(stop) {
+    const [h, s] = stop;
+    let lo = 25, hi = 88;
+    for (let k = 0; k < 30; k++) {
+      const mid = (lo + hi) / 2;
+      if (lumaOfHsl(h, s, mid) < LUMA_TARGET) lo = mid; else hi = mid;
+    }
+    return [h, s, (lo + hi) / 2];
+  }
+
+  // ---- fracture sheets ------------------------------------------------------
+  // Fixed once per video (coverage-affecting geometry is never re-rolled).
+  const DIAG = Math.hypot(W, H);
+  const MIN_D = Math.min(W, H);
+  // Base sheets are mirrored about both screen axes (4-fold). A mirrored copy
+  // keeps the same bead index -> radius mapping, the same wave rate and phase,
+  // and the same colour, so the whole frame is mirror-symmetric at every
+  // instant (the house-style symmetry preference), while each base sheet is
+  // still a free straight fracture line.
+  const BASE_COUNT = Math.max(2, Math.min(3, Math.round(2 * density() + rand(0, 0.6))));
+  function density() {
+    const d = fltP('density', 1);
+    return Math.max(0.5, Math.min(1.6, d));
+  }
+
+  const sheets = [];
+  function addSheet(px, py, dx, dy, nBeads, pitch, K, omega, phase0, col, hueJit) {
+    const beads = [];
+    for (let i = 0; i < nBeads; i++) {
+      const u = (i - (nBeads - 1) / 2) * pitch;
+      beads.push({ x: px + dx * u, y: py + dy * u });
+    }
+    sheets.push({ beads, pitch, r0: 0.36 * pitch, K, omega, phase0, col, hueJit });
+  }
+  for (let s = 0; s < BASE_COUNT; s++) {
+    const ang = rand(0, Math.PI);
+    const dx = Math.cos(ang), dy = Math.sin(ang);
+    const px = W / 2 + sgn() * rand(0.12, 0.32) * W;
+    const py = H / 2 + rand(-0.3, 0.3) * H;
+    const nBeads = 13 + Math.floor(rng() * 4); // 13..16 beads per sheet
+    const pitch = DIAG / nBeads;
+    const K = 2 + Math.floor(rng() * 2);        // 2 or 3 whole pinch cycles per sheet
+    const omega = sgn() * rand(1.0, 1.6) * SPEED; // full pinch-wave period 4-6 s
+    const phase0 = rand(0, 2 * Math.PI);
+    const col = equalLuma(PAL[(2 * s) % PAL.length]);
+    const hueJit = rand(-6, 6);
+    // four mirror images: identity, x-mirror, y-mirror, both
+    const mx = W - px, my = H - py;
+    addSheet(px, py, dx, dy, nBeads, pitch, K, omega, phase0, col, hueJit);
+    addSheet(mx, py, -dx, dy, nBeads, pitch, K, omega, phase0, col, hueJit);
+    addSheet(px, my, dx, -dy, nBeads, pitch, K, omega, phase0, col, hueJit);
+    addSheet(mx, my, -dx, -dy, nBeads, pitch, K, omega, phase0, col, hueJit);
+  }
+
+  // Off-screen pass is unnecessary: the sheets are a handful of arcs per frame.
+  const AMP = 0.22; // radius swings between 0.78 and 1.22 of r0 (no neighbour overlap)
+
+  function drawSheet(sh, t) {
+    const N = sh.beads.length;
+    const rad = new Array(N);
+    for (let i = 0; i < N; i++) {
+      const th = (2 * Math.PI * sh.K * i) / N + sh.phase0 - sh.omega * t;
+      rad[i] = sh.r0 * (1 + AMP * Math.sin(th));
+    }
+    const [h, s, l] = sh.col;
+    // Necks: a thin bar between neighbouring droplets, as thick as the thinner bead's neck.
+    ctx.strokeStyle = `hsl(${h + sh.hueJit}, ${s}%, ${Math.max(30, l - 14)}%)`;
+    ctx.lineCap = 'round';
+    for (let i = 0; i + 1 < N; i++) {
+      const a = sh.beads[i], b = sh.beads[i + 1];
+      // Fixed-width neck: a min() of two swinging radii is not zero-sum, so
+      // letting the neck follow it leaked a slow luma trend (seeds 1 and 6).
+      ctx.lineWidth = 0.4 * sh.r0;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+    // Droplets: bold, flat, saturated; hue steps gently along the sheet.
+    for (let i = 0; i < N; i++) {
+      const p = sh.beads[i];
+      ctx.fillStyle = `hsl(${h + sh.hueJit}, ${s}%, ${l}%)`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, rad[i], 0, 2 * Math.PI);
+      ctx.fill();
+    }
+  }
+
+  function renderFrame(t) {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    for (const sh of sheets) drawSheet(sh, t);
+  }
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+  window.advanceFrame = function () {
+    renderFrame(window.currentFrame / FPS);
+    window.currentFrame++;
+  };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

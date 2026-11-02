@@ -8465,6 +8465,66 @@ and gap changes above, not a bare first draft.
 
 `ENGINE_SUBJECTS`: `kolam: 'Kolam Knot Lattice'` in `src/metadata.js`.
 
+## Healed-fracture pearl chains engine (`fracturepearls.html`) — 2026-11-02
+
+Daily creative-research routine. Category was "a random featured image", the
+pool's least recently used image category (last real use 2026-10-09). An open
+WebSearch for a macro-photographed mineral surface surfaced gemstone
+"fingerprint" inclusions: a crack in a crystal heals shut, and the fluid
+trapped in it breaks up into a row of droplets that sit in the old fracture
+plane (GIA, https://www.gia.edu/doc/Induced-Fingerprints.pdf; Lotus Gemology,
+https://lotusgemology.com/resources/articles/135-inside-out-inclusions-and-the-symmetry-of-crystals).
+The physics is Plateau-Rayleigh pinch-off of a liquid thread into beads.
+
+**What it is**: a 2D Canvas2D engine, not WebGL. Each fracture sheet is a
+straight row of droplets joined by necks, and each droplet's radius follows a
+travelling pinch wave `1 + 0.22*sin(2*pi*K*i/N - omega*t)` with K = 2 or 3
+whole cycles per sheet. Base sheets (2 or 3) are mirrored about both screen
+axes, so the frame is 4-fold mirror-symmetric at every instant. Colours are
+fixed per sheet and equalised in Rec.709 luma. The frame is cleared to opaque
+black every frame.
+
+**Brightness neutrality, by construction and then measured**: the sum of r^2
+over the N droplets is exactly constant, since the sum of sin^2 over whole
+cycles is N/2 at any phase, and the first-order sin term sums to zero. This
+held on paper, but the first render still showed luma trends on seeds 1 and
+6 (+79 and +58 projected). Three causes, each found by measuring:
+1. **Per-droplet hue steps** (`h + i*2.5`) made each droplet's luma differ, so
+   the area-weighted sum swung in time. Removed; each sheet now has one hue.
+2. **Necks sized from `min(r_i, r_i+1)`** are not zero-sum. Necks are now a fixed
+   width.
+3. **Crossing sheets of different luma** swap colour in their overlaps as the
+   droplets swell. Sheet colours are equalised to Rec.709 luma 105 by
+   bisection on lightness (not on hue, so each sheet stays saturated).
+
+Even after these, seed 1 still projected +68. A lumatrace over 600 s showed
+a real ~2-3 minute mean-luma oscillation of about +/-4 levels, which the
+8-point validator fit reads as a trend. Halving the wave amplitude from 0.33
+to 0.22 (radius 0.78-1.22 of r0) cleared it. Seed 1 now projects +37.9, the
+closest margin in the battery, so it is worth watching if this engine is ever
+tuned.
+
+**Verified**: `validateEngine()` **16/16** across seeds 1-15 plus the default
+seed 12345 (avgSat 74-93, zero near-white, projectedRise -28.5 to +37.9
+against the 50 threshold, compositionDrift 0.020-0.077 against 0.015,
+unitMotionNonRigidFrac 0.999-1.0 against 0.40, fastMotion 6.9-22.8 against
+floors of 4.7-6.6, avgMsPerFrame about 4-18 ms). Rendered PNGs and looked at
+them at seeds 1, 3, 12345 and 20261102: bold saturated beads on straight
+necked strings, a clean mirror-symmetric lattice of crossing sheets, and real
+pinch motion between checkpoints.
+
+**Novelty gate**: measured against all 80 engines in `engines/manual/`
+(fingerprinted fresh, cache not committed). The first design was a single
+set of off-axis sheets, which measured **0.477** against `wireframe`, the
+pool's generic line-on-black attractor. The per-feature diagnostic showed
+`mirrorLR`/`mirrorUD` as the driver, since the sheets were random and
+asymmetric while `wireframe` is symmetric. Adding the 4-fold mirror
+(identical radius-by-index mapping and colour across copies) fixed that. The
+final design measures **0.859** against `moire` (next `spinbounce` 0.868,
+`voderberg` 0.892), a clear pass.
+
+`ENGINE_SUBJECTS`: `fracturepearls: 'Healed Fracture Pearls'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

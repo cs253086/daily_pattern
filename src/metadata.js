@@ -55,6 +55,7 @@ const ENGINE_SUBJECTS = {
   hyperbolic: 'Hyperbolic Tiling',
   ikatweave: 'Ikat Weave Patterns',
   juliabands: 'Julia Set Escape Bands',
+  fracturepearls: 'Healed Fracture Pearls',
   kaleidoscope: 'Kaleidoscope Patterns',
   kolam: 'Kolam Knot Lattice',
   kuramotochimera: 'Synchronizing Oscillator Rings',
