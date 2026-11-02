@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>WebGL Orbiting Polyhedra</title>
+    <meta name="pattern-name" content="Orbiting Prism Clusters">
+    <style>
+        body { margin: 0; overflow: hidden; background-color: black; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<script>
+    // --- Seeded PRNG (Mulberry32) ---
+    let _seed = 0;
+    let _a = 0;
+    function mulberry32(seed) {
+        _seed = seed;
+        _a = seed;
+        return function() {
+            let t = _a += 0x6D2B79F5;
+            t = Math.imul(t ^ t >>> 15, t | 1);
+            t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+            return ((t ^ t >>> 14) >>> 0) / 4294967296;
+        }
+    }
+
+    let R = mulberry32(0); // This will be reassigned with actual seed later
+
+    // --- URL Parameter Parsing ---
+    const urlParams = new URLSearchParams(window.location.search);
+    const getParam = (name, defaultValue, parser = String) => {
+        const value = urlParams.get(name);
+        return value !== null ? parser(value) : defaultValue;
+    };
+
+    const canvasWidth = getParam('width', 1920, Number);
+    const canvasHeight = getParam('height', 1080, Number);
+    _seed = getParam('seed', 12345, Number);
+    R = mulberry32(_seed); // Initialize PRNG with actual seed
+    const fps = getParam('fps', 24, Number);
+    const duration = getParam('duration', 3600, Number); // seconds
+    const speed = getParam('speed', 1.0, Number);
+    const density = getParam('density', 1.0, Number);
+    const cycleSec = getParam('cycleSec', 90, Number); // For composition evolution
+
+    // --- Global Animation State ---
+    window.TOTAL_FRAMES = Math.round(duration * fps);
+    window.currentFrame = 0;
+    window.READY = false;
+
+    const canvas = document.getElementById('canvas');
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    let gl = null;
+
+    // --- WebGL Context Handling and Recovery ---
+    let resourcesReady = false;
+    let glInitialized = false;
+
+    function createWebGLContext() {
+        if (glInitialized) return;
+
+        try {
+            gl = canvas.getContext('webgl', { preserveDrawingBuffer: true, antialias: true });
+        } catch (e) {
+            console.error("Failed to get WebGL context:", e);
+            return;
+        }
+
+        if (!gl) {
+            console.error("Unable to initialize WebGL. Your browser or machine may not support it.");
+            return;
+        }
+
+        gl.clearColor(0.0, 0.0, 0.0, 1.0); // Black background
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthFunc(gl.LEQUAL);
+
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // Additive blending
+        gl.enable(gl.BLEND);
+
+        glInitialized = true;
+    }
+
+    canvas.addEventListener('webglcontextlost', (event) => {
+        event.preventDefault();
+        console.warn('WebGL context lost. Attempting to restore...');
+        glInitialized = false;
+        resourcesReady = false;
+        window.READY = false;
+    }, false);
+
+    canvas.addEventListener('webglcontextrestored', () => {
+        console.log('WebGL context restored. Re-initializing resources...');
+        initGL(); // Re-initialize all GL resources
+        // Ensure READY is set after a short delay to allow all resources to be recreated
+        setTimeout(() => {
+            if (gl && resourcesReady) {
+                window.READY = true;
+            }
+        }, 100);
+    }, false);
+
+    // --- Math Utilities ---
+    const degToRad = (d) => d * Math.PI / 180;
+
+    // --- 4x4 Matrix Helper (mat4) ---
+    const mat4 = {
+        create: () => new Float32Array(16),
+        identity: (out) => {
+            for (let i = 0; i < 16; i++) out[i] = (i % 5 === 0) ? 1 : 0;
+            return out;
+        },
+        multiply: (out, a, b) => {
+            const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+            const a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+            const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+            const a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+
+            let b0 = b[0], b1 = b[1], b2 = b[2], b3 = b[3];
+            out[0] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+            out[1] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+            out[2] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+            out[3] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+
+            b0 = b[4], b1 = b[5], b2 = b[6], b3 = b[7];
+            out[4] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+            out[5] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+            out[6] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+            out[7] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+
+            b0 = b[8], b1 = b[9], b2 = b[10], b3 = b[11];
+            out[8] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+            out[9] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+            out[10] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+            out[11] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+
+            b0 = b[12], b1 = b[13], b2 = b[14], b3 = b[15];
+            out[12] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+            out[13] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+            out[14] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+            out[15] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+            return out;
+        },
+        perspective: (out, fov, aspect, near, far) => {
+            const f = 1.0 / Math.tan(fov / 2);
+            out[0] = f / aspect; out[1] = 0; out[2] = 0; out[3] = 0;
+            out[4] = 0; out[5] = f; out[6] = 0; out[7] = 0;
+            out[8] = 0; out[9] = 0; out[10] = (far + near) / (near - far); out[11] = -1;
+            out[12] = 0; out[13] = 0; out[14] = (2 * far * near) / (near - far); out[15] = 0;
+            return out;
+        },
+        translate: (out, a, v) => {
+            const x = v[0], y = v[1], z = v[2];
+            let a00, a01, a02, a03;
+            let a10, a11, a12, a13;
+            let a20, a21, a22, a23;
+
+            if (a === out) {
+                out[12] = a[0] * x + a[4] * y + a[8] * z + a[12];
+                out[13] = a[1] * x + a[5] * y + a[9] * z + a[13];
+                out[14] = a[2] * x + a[6] * y + a[10] * z + a[14];
+                out[15] = a[3] * x + a[7] * y + a[11] * z + a[15];
+            } else {
+                a00 = a[0]; a01 = a[1]; a02 = a[2]; a03 = a[3];
+                a10 = a[4]; a11 = a[5]; a12 = a[6]; a13 = a[7];
+                a20 = a[8]; a21 = a[9]; a22 = a[10]; a23 = a[11];
+
+                out[0] = a00; out[1] = a01; out[2] = a02; out[3] = a03;
+                out[4] = a10; out[5] = a11; out[6] = a12; out[7] = a13;
+                out[8] = a20; out[9] = a21; out[10] = a22; out[11] = a23;
+
+                out[12] = a00 * x + a10 * y + a20 * z + a[12];
+                out[13] = a01 * x + a11 * y + a21 * z + a[13];
+                out[14] = a02 * x + a12 * y + a22 * z + a[14];
+                out[15] = a03 * x + a13 * y + a23 * z + a[15];
+            }
+            return out;
+        },
+        rotateX: (out, a, rad) => {
+            let s = Math.sin(rad), c = Math.cos(rad);
+            let a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+            let a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+
+            if (a !== out) {
+                out[0] = a[0]; out[1] = a[1]; out[2] = a[2]; out[3] = a[3];
+                out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+            }
+
+            out[4] = a10 * c + a20 * s;
+            out[5] = a11 * c + a21 * s;
+            out[6] = a12 * c + a22 * s;
+            out[7] = a13 * c + a23 * s;
+
+            out[8] = a20 * c - a10 * s;
+            out[9] = a21 * c - a11 * s;
+            out[10] = a22 * c - a12 * s;
+            out[11] = a23 * c - a13 * s;
+            return out;
+        },
+        rotateY: (out, a, rad) => {
+            let s = Math.sin(rad), c = Math.cos(rad);
+            let a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+            let a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+
+            if (a !== out) {
+                out[4] = a[4]; out[5] = a[5]; out[6] = a[6]; out[7] = a[7];
+                out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+            }
+
+            out[0] = a00 * c - a20 * s;
+            out[1] = a01 * c - a21 * s;
+            out[2] = a02 * c - a22 * s;
+            out[3] = a03 * c - a23 * s;
+
+            out[8] = a00 * s + a20 * c;
+            out[9] = a01 * s + a21 * c;
+            out[10] = a02 * s + a22 * c;
+            out[11] = a03 * s + a23 * c;
+            return out;
+        },
+        rotateZ: (out, a, rad) => {
+            let s = Math.sin(rad), c = Math.cos(rad);
+            let a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+            let a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+
+            if (a !== out) {
+                out[8] = a[8]; out[9] = a[9]; out[10] = a[10]; out[11] = a[11];
+                out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+            }
+
+            out[0] = a00 * c + a10 * s;
+            out[1] = a01 * c + a11 * s;
+            out[2] = a02 * c + a12 * s;
+            out[3] = a03 * c + a13 * s;
+
+            out[4] = a10 * c - a00 * s;
+            out[5] = a11 * c - a01 * s;
+            out[6] = a12 * c - a02 * s;
+            out[7] = a13 * c - a03 * s;
+            return out;
+        },
+        scale: (out, a, v) => {
+            const x = v[0], y = v[1], z = v[2];
+            out[0] = a[0] * x; out[1] = a[1] * x; out[2] = a[2] * x; out[3] = a[3] * x;
+            out[4] = a[4] * y; out[5] = a[5] * y; out[6] = a[6] * y; out[7] = a[7] * y;
+            out[8] = a[8] * z; out[9] = a[9] * z; out[10] = a[10] * z; out[11] = a[11] * z;
+            out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+            return out;
+        },
+        lookAt: (out, eye, center, up) => {
+            let x0, x1, x2, y0, y1, y2, z0, z1, z2, len;
+            let eyex = eye[0], eyey = eye[1], eyez = eye[2];
+            let upx = up[0], upy = up[1], upz = up[2];
+            let centerx = center[0], centery = center[1], centerz = center[2];
+
+            if (Math.abs(eyex - centerx) < 0.000001 && Math.abs(eyey - centery) < 0.000001 && Math.abs(eyez - centerz) < 0.000001) {
+                return mat4.identity(out);
+            }
+
+            z0 = eyex - centerx;
+            z1 = eyey - centery;
+            z2 = eyez - centerz;
+
+            len = 1 / Math.sqrt(z0 * z0 + z1 * z1 + z2 * z2);
+            z0 *= len;
+            z1 *= len;
+            z2 *= len;
+
+            x0 = upy * z2 - upz * z1;
+            x1 = upz * z0 - upx * z2;
+            x2 = upx * z1 - upy * z0;
+
+            len = Math.sqrt(x0 * x0 + x1 * x1 + x2 * x2);
+            if (len === 0) {
+                x0 = 0; x1 = 0; x2 = 0;
+            } else {
+                len = 1 / len;
+                x0 *= len;
+                x1 *= len;
+                x2 *= len;
+            }
+
+            y0 = z1 * x2 - z2 * x1;
+            y1 = z2 * x0 - z0 * x2;
+            y2 = z0 * x1 - z1 * x0;
+
+            len = Math.sqrt(y0 * y0 + y1 * y1 + y2 * y2);
+            if (len === 0) {
+                y0 = 0; y1 = 0; y2 = 0;
+            } else {
+                len = 1 / len;
+                y0 *= len;
+                y1 *= len;
+                y2 *= len;
+            }
+
+            out[0] = x0; out[1] = y0; out[2] = z0; out[3] = 0;
+            out[4] = x1; out[5] = y1; out[6] = z1; out[7] = 0;
+            out[8] = x2; out[9] = y2; out[10] = z2; out[11] = 0;
+            out[12] = -(x0 * eyex + x1 * eyey + x2 * eyez);
+            out[13] = -(y0 * eyex + y1 * eyey + y2 * eyez);
+            out[14] = -(z0 * eyex + z1 * eyey + z2 * eyez);
+            out[15] = 1;
+            return out;
+        }
+    };
+
+    // --- Shader Sources ---
+    const vsSource = `
+        attribute vec4 aVertexPosition;
+        attribute vec3 aVertexNormal;
+        attribute vec4 aVertexColor;
+
+        uniform mat4 uModelViewMatrix;
+        uniform mat4 uProjectionMatrix;
+        uniform mat3 uNormalMatrix;
+        uniform vec3 uAmbientLight;
+        uniform vec3 uDirectionalLightColor;
+        uniform vec3 uDirectionalLightDirection;
+
+        varying lowp vec4 vColor;
+
+        void main() {
+            gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
+
+            vec3 ambient = uAmbientLight;
+
+            vec3 transformedNormal = uNormalMatrix * aVertexNormal;
+            float directional = max(dot(transformedNormal, uDirectionalLightDirection), 0.0);
+            vec3 lighting = ambient + uDirectionalLightColor * directional;
+
+            vColor = vec4(aVertexColor.rgb * lighting, aVertexColor.a);
+        }
+    `;
+
+    const fsSource = `
+        precision mediump float;
+        varying lowp vec4 vColor;
+
+        void main() {
+            gl_FragColor = vColor;
+        }
+    `;
+
+    // --- WebGL Program and Buffers ---
+    let shaderProgram = null;
+    let programInfo = {
+        program: null,
+        attribLocations: {
+            vertexPosition: 0,
+            vertexNormal: 0,
+            vertexColor: 0,
+        },
+        uniformLocations: {
+            projectionMatrix: null,
+            modelViewMatrix: null,
+            normalMatrix: null,
+            ambientLight: null,
+            directionalLightColor: null,
+            directionalLightDirection: null,
+        },
+    };
+
+    let cubeBuffer = null;
+    let cubeNormalBuffer = null;
+    let cubeColorBuffer = null;
+    let cubeIndexBuffer = null;
+    let cubeVertexCount = 0;
+
+    // --- Scene State ---
+    let projectionMatrix = mat4.create();
+    let viewMatrix = mat4.create();
+    let modelMatrix = mat4.create();
+    let modelViewMatrix = mat4.create();
+    let normalMatrix = mat4.create(); // Using mat4 for normal matrix to derive mat3 later
+
+    let ambientLight = [0.1, 0.1, 0.1];
+    let directionalLightColor = [1.0, 1.0, 1.0];
+    let directionalLightDirection = [0.0, 0.0, -1.0]; // Direction from light source to object
+
+    const cameraDistance = 8.0;
+    const fov = degToRad(45);
+    const zNear = 0.1;
+    const zFar = 100.0;
+
+    let totalTime = 0;
+
+    // Parameters for composition evolution
+    let numPrimitives = Math.floor(6 + R() * 6 * density); // 6 to 12 primitives
+    const primitiveScales = [];
+    const primitiveOrbitRadii = [];
+    const primitiveOrbitSpeeds = [];
+    const primitiveSelfRotateSpeedsX = [];
+    const primitiveSelfRotateSpeedsY = [];
+    const primitiveSelfRotateSpeedsZ = [];
+    const primitiveColors = [];
+    const primitiveMorphTargets = []; // Array of arrays, for target positions/rotations
+
+    // Palette derived from seed, similar to NASA photo
+    let baseHue;
+    let currentPaletteHues = [];
+
+    function generatePalette() {
+        baseHue = Math.floor(R() * 360); // Random base hue
+        currentPaletteHues = [];
+        const hueSpread = 60 + R() * 40; // Spread between 60 and 100 degrees
+
+        // Blueish base, with hints of red/purple and brighter highlights
+        let h = baseHue;
+        currentPaletteHues.push(h); // Main blue/purple
+        h = (h + hueSpread + R() * 20) % 360;
+        currentPaletteHues.push(h); // Complementary or analogous hue
+        h = (h + hueSpread + R() * 20) % 360;
+        currentPaletteHues.push(h); // Third hue
+        
+        // Ensure some contrast and variation
+        currentPaletteHues.sort((a,b) => a-b);
+        while (currentPaletteHues.length < 3) currentPaletteHues.push(Math.floor(R()*360));
+    }
+
+    function hslToRgb(h, s, l, a = 1.0) {
+        h /= 360;
+        s /= 100;
+        l /= 100;
+        let c = (1 - Math.abs(2 * l - 1)) * s,
+            x = c * (1 - Math.abs((h % 1) * 6 - 3)),
+            m = l - c / 2,
+            r = 0, g = 0, b = 0;
+
+        if (0 <= h && h < 1 / 6) {
+            r = c; g = x; b = 0;
+        } else if (1 / 6 <= h && h < 2 / 6) {
+            r = x; g = c; b = 0;
+        } else if (2 / 6 <= h && h < 3 / 6) {
+            r = 0; g = c; b = x;
+        } else if (3 / 6 <= h && h < 4 / 6) {
+            r = 0; g = x; b = c;
+        } else if (4 / 6 <= h && h < 5 / 6) {
+            r = x; g = 0; b = c;
+        } else if (5 / 6 <= h && h < 1) {
+            r = c; g = 0; b = x;
+        }
+        r = (r + m);
+        g = (g + m);
+        b = (b + m);
+        return [r, g, b, a];
+    }
+
+    // Function to compile a shader
+    function compileShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        if (!shader) throw new Error("Failed to create shader.");
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            const info = gl.getShaderInfoLog(shader);
+            gl.deleteShader(shader);
+            throw new Error(`An error occurred compiling the shaders: ${info}`);
+        }
+        return shader;
+    }
+
+    // Function to link shaders into a program
+    function linkProgram(gl, vs, fs) {
+        const program = gl.createProgram();
+        if (!program) throw new Error("Failed to create program.");
+        gl.attachShader(program, vs);
+        gl.attachShader(program, fs);
+        gl.linkProgram(program);
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            const info = gl.getProgramInfoLog(program);
+            gl.deleteProgram(program);
+            throw new Error(`Unable to initialize the shader program: ${info}`);
+        }
+        return program;
+    }
+
+    // --- Geometry Generation (Prism) ---
+    function generatePrismGeometry(sides, height, radius) {
+        const positions = [];
+        const normals = [];
+        const indices = [];
+
+        // Top and Bottom faces
+        const topCenter = [0, height / 2, 0];
+        const bottomCenter = [0, -height / 2, 0];
+        positions.push(...topCenter); // Top center vertex
+        normals.push(0, 1, 0);
+        positions.push(...bottomCenter); // Bottom center vertex
+        normals.push(0, -1, 0);
+
+        for (let i = 0; i < sides; i++) {
+            const angle0 = (i / sides) * 2 * Math.PI;
+            const angle1 = ((i + 1) / sides) * 2 * Math.PI;
+
+            const x0 = radius * Math.cos(angle0);
+            const z0 = radius * Math.sin(angle0);
+            const x1 = radius * Math.cos(angle1);
+            const z1 = radius * Math.sin(angle1);
+
+            // Vertices for top ring
+            positions.push(x0, height / 2, z0);
+            normals.push(0, 1, 0); // Temporary normal, will be replaced by face normal
+            // Vertices for bottom ring
+            positions.push(x0, -height / 2, z0);
+            normals.push(0, -1, 0); // Temporary normal, will be replaced by face normal
+        }
+
+        // Indices for top face
+        for (let i = 0; i < sides; i++) {
+            indices.push(0, 2 + i * 2, 2 + ((i + 1) % sides) * 2);
+        }
+
+        // Indices for bottom face
+        for (let i = 0; i < sides; i++) {
+            indices.push(1, 3 + ((i + 1) % sides) * 2, 3 + i * 2);
+        }
+        
+        // Indices for side faces
+        for (let i = 0; i < sides; i++) {
+            const v0_top = 2 + i * 2;
+            const v0_bottom = 3 + i * 2;
+            const v1_top = 2 + ((i + 1) % sides) * 2;
+            const v1_bottom = 3 + ((i + 1) % sides) * 2;
+
+            // Two triangles for each side rectangle
+            indices.push(v0_top, v0_bottom, v1_top);
+            indices.push(v0_bottom, v1_bottom, v1_top);
+        }
+
+        // Recompute normals for side faces
+        const finalNormals = new Array(positions.length).fill(0);
+        for (let i = 0; i < indices.length; i += 3) {
+            const i0 = indices[i] * 3;
+            const i1 = indices[i + 1] * 3;
+            const i2 = indices[i + 2] * 3;
+
+            const p0 = [positions[i0], positions[i0 + 1], positions[i0 + 2]];
+            const p1 = [positions[i1], positions[i1 + 1], positions[i1 + 2]];
+            const p2 = [positions[i2], positions[i2 + 1], positions[i2 + 2]];
+
+            const v1 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+            const v2 = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+
+            const normalX = v1[1] * v2[2] - v1[2] * v2[1];
+            const normalY = v1[2] * v2[0] - v1[0] * v2[2];
+            const normalZ = v1[0] * v2[1] - v1[1] * v2[0];
+
+            const len = Math.sqrt(normalX * normalX + normalY * normalY + normalZ * normalZ);
+            const nx = normalX / len;
+            const ny = normalY / len;
+            const nz = normalZ / len;
+
+            // Apply normal to all vertices of the face
+            finalNormals[i0] += nx; finalNormals[i0 + 1] += ny; finalNormals[i0 + 2] += nz;
+            finalNormals[i1] += nx; finalNormals[i1 + 1] += ny; finalNormals[i1 + 2] += nz;
+            finalNormals[i2] += nx; finalNormals[i2 + 1] += ny; finalNormals[i2 + 2] += nz;
+        }
+
+        for (let i = 0; i < finalNormals.length; i += 3) {
+            const len = Math.sqrt(finalNormals[i] * finalNormals[i] + finalNormals[i + 1] * finalNormals[i + 1] + finalNormals[i + 2] * finalNormals[i + 2]);
+            if (len > 0) {
+                finalNormals[i] /= len;
+                finalNormals[i + 1] /= len;
+                finalNormals[i + 2] /= len;
+            }
+        }
+
+
+        return {
+            positions: new Float32Array(positions),
+            normals: new Float32Array(finalNormals),
+            indices: new Uint16Array(indices),
+            vertexCount: indices.length,
+        };
+    }
+
+    // --- WebGL Initialization ---
+    function initGL() {
+        createWebGLContext();
+        if (!gl) return;
+
+        // Compile shaders
+        const vs = compileShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fs = compileShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+        // Link program
+        shaderProgram = linkProgram(gl, vs, fs);
+        gl.useProgram(shaderProgram);
+
+        // Store program info
+        programInfo.program = shaderProgram;
+        programInfo.attribLocations.vertexPosition = gl.getAttribLocation(shaderProgram, 'aVertexPosition');
+        programInfo.attribLocations.vertexNormal = gl.getAttribLocation(shaderProgram, 'aVertexNormal');
+        programInfo.attribLocations.vertexColor = gl.getAttribLocation(shaderProgram, 'aVertexColor');
+
+        programInfo.uniformLocations.projectionMatrix = gl.getUniformLocation(shaderProgram, 'uProjectionMatrix');
+        programInfo.uniformLocations.modelViewMatrix = gl.getUniformLocation(shaderProgram, 'uModelViewMatrix');
+        programInfo.uniformLocations.normalMatrix = gl.getUniformLocation(shaderProgram, 'uNormalMatrix');
+        programInfo.uniformLocations.ambientLight = gl.getUniformLocation(shaderProgram, 'uAmbientLight');
+        programInfo.uniformLocations.directionalLightColor = gl.getUniformLocation(shaderProgram, 'uDirectionalLightColor');
+        programInfo.uniformLocations.directionalLightDirection = gl.getUniformLocation(shaderProgram, 'uDirectionalLightDirection');
+
+        // Check if attrib locations are valid
+        if (programInfo.attribLocations.vertexPosition === -1 ||
+            programInfo.attribLocations.vertexNormal === -1 ||
+            programInfo.attribLocations.vertexColor === -1) {
+            throw new Error("Failed to get one or more attribute locations.");
+        }
+        // Check if uniform locations are valid
+        for (const key in programInfo.uniformLocations) {
+            if (programInfo.uniformLocations[key] === null) {
+                throw new Error(`Failed to get uniform location for ${key}.`);
+            }
+        }
+
+        // Set up the prism geometry once
+        const sides = Math.floor(3 + R() * 4); // 3 to 6 sides (triangle to hexagon)
+        const prismHeight = 0.5 + R() * 1.5;
+        const prismRadius = 0.5 + R() * 1.0;
+        const geometry = generatePrismGeometry(sides, prismHeight, prismRadius);
+
+        cubeBuffer = gl.createBuffer();
+        if (!cubeBuffer) throw new Error("Failed to create vertex buffer.");
+        gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, geometry.positions, gl.STATIC_DRAW);
+
+        cubeNormalBuffer = gl.createBuffer();
+        if (!cubeNormalBuffer) throw new Error("Failed to create normal buffer.");
+        gl.bindBuffer(gl.ARRAY_BUFFER, cubeNormalBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, geometry.normals, gl.STATIC_DRAW);
+
+        cubeColorBuffer = gl.createBuffer();
+        if (!cubeColorBuffer) throw new Error("Failed to create color buffer.");
+        gl.bindBuffer(gl.ARRAY_BUFFER, cubeColorBuffer);
+        // Will update colors per frame, so DYNAMIC_DRAW or STREAM_DRAW might be better if colors change often
+        // For now, setting initial dummy data, actual colors will be uploaded later.
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(geometry.positions.length * 4 / 3), gl.DYNAMIC_DRAW);
+
+        cubeIndexBuffer = gl.createBuffer();
+        if (!cubeIndexBuffer) throw new Error("Failed to create index buffer.");
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeIndexBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, geometry.indices, gl.STATIC_DRAW);
+
+        cubeVertexCount = geometry.vertexCount;
+
+        // Initialize scene parameters
+        generatePalette();
+        initComposition();
+        resourcesReady = true;
+    }
+
+    function initComposition() {
+        // Clear previous parameters
+        primitiveScales.length = 0;
+        primitiveOrbitRadii.length = 0;
+        primitiveOrbitSpeeds.length = 0;
+        primitiveSelfRotateSpeedsX.length = 0;
+        primitiveSelfRotateSpeedsY.length = 0;
+        primitiveSelfRotateSpeedsZ.length = 0;
+        primitiveColors.length = 0;
+        primitiveMorphTargets.length = 0;
+
+        numPrimitives = Math.floor(6 + R() * 6 * density); // Re-randomize count
+        if (numPrimitives < 1) numPrimitives = 1;
+
+        for (let i = 0; i < numPrimitives; i++) {
+            primitiveScales.push(0.3 + R() * 0.7); // Scale 0.3 to 1.0
+            primitiveOrbitRadii.push(2.0 + R() * 3.0); // Orbit radius 2.0 to 5.0
+            
+            // Orbit speed with guaranteed magnitude and random sign
+            const orbitSpeedMag = (0.4 + R() * 1.1) * speed; // 0.4 to 1.5 rad/s
+            primitiveOrbitSpeeds.push(R() < 0.5 ? orbitSpeedMag : -orbitSpeedMag);
+
+            // Self rotation speeds
+            const selfRotateXMag = (0.4 + R() * 1.1) * speed; // 0.4 to 1.5 rad/s
+            primitiveSelfRotateSpeedsX.push(R() < 0.5 ? selfRotateXMag : -selfRotateXMag);
+            const selfRotateYMag = (0.4 + R() * 1.1) * speed;
+            primitiveSelfRotateSpeedsY.push(R() < 0.5 ? selfRotateYMag : -selfRotateYMag);
+            const selfRotateZMag = (0.4 + R() * 1.1) * speed;
+            primitiveSelfRotateSpeedsZ.push(R() < 0.5 ? selfRotateZMag : -selfRotateZMag);
+
+            const hue = currentPaletteHues[Math.floor(R() * currentPaletteHues.length)];
+            const saturation = 75 + R() * 20; // 75-95% saturation
+            const lightness = 45 + R() * 10; // 45-55% lightness
+            primitiveColors.push(hslToRgb(hue, saturation, lightness, 0.25)); // Low alpha for glow effect
+
+            // Morph targets for continuous evolution
+            primitiveMorphTargets.push({
+                targetOrbitRadius: 2.0 + R() * 3.0,
+                targetOrbitSpeed: (R() < 0.5 ? 1 : -1) * (0.4 + R() * 1.1) * speed,
+                targetScale: 0.3 + R() * 0.7,
+                targetSelfRotateX: (R() < 0.5 ? 1 : -1) * (0.4 + R() * 1.1) * speed,
+                targetSelfRotateY: (R() < 0.5 ? 1 : -1) * (0.4 + R() * 1.1) * speed,
+                targetSelfRotateZ: (R() < 0.5 ? 1 : -1) * (0.4 + R() * 1.1) * speed,
+                targetHue: currentPaletteHues[Math.floor(R() * currentPaletteHues.length)],
+                targetSaturation: 75 + R() * 20,
+                targetLightness: 45 + R() * 10,
+                morphProgress: 0,
+                morphDuration: (3 + R() * 5) * fps // 3 to 8 seconds duration in frames
+            });
+        }
+    }
+
+    function updateComposition(dt) {
+        for (let i = 0; i < numPrimitives; i++) {
+            const morph = primitiveMorphTargets[i];
+            morph.morphProgress += dt * fps;
+
+            if (morph.morphProgress >= morph.morphDuration) {
+                // Reached target, pick new targets
+                morph.morphProgress = 0;
+                
+                primitiveOrbitRadii[i] = morph.targetOrbitRadius;
+                primitiveOrbitSpeeds[i] = morph.targetOrbitSpeed;
+                primitiveScales[i] = morph.targetScale;
+                primitiveSelfRotateSpeedsX[i] = morph.targetSelfRotateX;
+                primitiveSelfRotateSpeedsY[i] = morph.targetSelfRotateY;
+                primitiveSelfRotateSpeedsZ[i] = morph.targetSelfRotateZ;
+
+                const currentColor = primitiveColors[i];
+                const currentHue = currentColor[0] * 360; // Approximate hue from RGB
+                const currentSaturation = currentColor[1] * 100;
+                const currentLightness = currentColor[2] * 100;
+
+                morph.targetOrbitRadius = 2.0 + R() * 3.0;
+                morph.targetOrbitSpeed = (R() < 0.5 ? 1 : -1) * (0.4 + R() * 1.1) * speed;
+                morph.targetScale = 0.3 + R() * 0.7;
+                morph.targetSelfRotateX = (R() < 0.5 ? 1 : -1) * (0.4 + R() * 1.1) * speed;
+                morph.targetSelfRotateY = (R() < 0.5 ? 1 : -1) * (0.4 + R() * 1.1) * speed;
+                morph.targetSelfRotateZ = (R() < 0.5 ? 1 : -1) * (0.4 + R() * 1.1) * speed;
+                morph.targetHue = currentPaletteHues[Math.floor(R() * currentPaletteHues.length)];
+                morph.targetSaturation = 75 + R() * 20;
+                morph.targetLightness = 45 + R() * 10;
+                morph.morphDuration = (3 + R() * 5) * fps;
+            } else {
+                // Interpolate towards target
+                const t = morph.morphProgress / morph.morphDuration;
+                primitiveOrbitRadii[i] = primitiveOrbitRadii[i] + (morph.targetOrbitRadius - primitiveOrbitRadii[i]) * t;
+                primitiveOrbitSpeeds[i] = primitiveOrbitSpeeds[i] + (morph.targetOrbitSpeed - primitiveOrbitSpeeds[i]) * t;
+                primitiveScales[i] = primitiveScales[i] + (morph.targetScale - primitiveScales[i]) * t;
+                primitiveSelfRotateSpeedsX[i] = primitiveSelfRotateSpeedsX[i] + (morph.targetSelfRotateX - primitiveSelfRotateSpeedsX[i]) * t;
+                primitiveSelfRotateSpeedsY[i] = primitiveSelfRotateSpeedsY[i] + (morph.targetSelfRotateY - primitiveSelfRotateSpeedsY[i]) * t;
+                primitiveSelfRotateSpeedsZ[i] = primitiveSelfRotateSpeedsZ[i] + (morph.targetSelfRotateZ - primitiveSelfRotateSpeedsZ[i]) * t;
+
+                const currentColor = primitiveColors[i];
+                const currentHue = (Math.atan2(currentColor[1], currentColor[0]) / (2 * Math.PI) + 1) % 1; // Basic hue approx
+                const targetHue = morph.targetHue / 360;
+                const interpolatedHue = currentHue + (targetHue - currentHue) * t;
+                const interpolatedSaturation = currentColor[1] * 100 + (morph.targetSaturation - currentColor[1] * 100) * t;
+                const interpolatedLightness = currentColor[2] * 100 + (morph.targetLightness - currentColor[2] * 100) * t;
+                primitiveColors[i] = hslToRgb(interpolatedHue * 360, interpolatedSaturation, interpolatedLightness, 0.25);
+            }
+        }
+    }
+
+    // --- Draw Function ---
+    function drawScene() {
+        if (!gl || !resourcesReady) return;
+
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+        const aspect = canvas.width / canvas.height;
+        mat4.perspective(projectionMatrix, fov, aspect, zNear, zFar);
+        
+        // Main camera rotation
+        const cameraX = Math.sin(totalTime * 0.05 * speed) * cameraDistance;
+        const cameraZ = Math.cos(totalTime * 0.05 * speed) * cameraDistance;
+        mat4.lookAt(viewMatrix, [cameraX, 0, cameraZ], [0, 0, 0], [0, 1, 0]);
+
+        gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix);
+        gl.uniform3fv(programInfo.uniformLocations.ambientLight, ambientLight);
+        gl.uniform3fv(programInfo.uniformLocations.directionalLightColor, directionalLightColor);
+        gl.uniform3fv(programInfo.uniformLocations.directionalLightDirection, directionalLightDirection);
+
+        // Bind common buffers
+        gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer);
+        gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, cubeNormalBuffer);
+        gl.vertexAttribPointer(programInfo.attribLocations.vertexNormal, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(programInfo.attribLocations.vertexNormal);
+
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeIndexBuffer);
+
+        // Render each primitive
+        for (let i = 0; i < numPrimitives; i++) {
+            mat4.identity(modelMatrix);
+
+            // Orbit rotation
+            mat4.rotateY(modelMatrix, modelMatrix, totalTime * primitiveOrbitSpeeds[i]);
+            mat4.translate(modelMatrix, modelMatrix, [primitiveOrbitRadii[i], 0, 0]);
+
+            // Self rotation
+            mat4.rotateX(modelMatrix, modelMatrix, totalTime * primitiveSelfRotateSpeedsX[i]);
+            mat4.rotateY(modelMatrix, modelMatrix, totalTime * primitiveSelfRotateSpeedsY[i]);
+            mat4.rotateZ(modelMatrix, modelMatrix, totalTime * primitiveSelfRotateSpeedsZ[i]);
+
+            // Scale
+            mat4.scale(modelMatrix, modelMatrix, [primitiveScales[i], primitiveScales[i], primitiveScales[i]]);
+
+            mat4.multiply(modelViewMatrix, viewMatrix, modelMatrix);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, modelViewMatrix);
+
+            // Calculate normal matrix (inverse transpose of modelView)
+            // For simplicity, we assume no non-uniform scaling; a direct inverse-transpose would be needed otherwise.
+            // For now, using a simpler approach that works for uniform scaling and rotations:
+            mat4.identity(normalMatrix); // Start with identity
+            for(let j=0; j<3; j++) { // Copy 3x3 rotation part from modelViewMatrix
+                for(let k=0; k<3; k++) {
+                    normalMatrix[j*4 + k] = modelViewMatrix[j*4 + k];
+                }
+            }
+            // For proper normal matrix, it's inverse transpose of the 3x3 submatrix.
+            // But since modelMatrix is mostly rotation and translation, and we scale uniformly,
+            // we can approximate by using the upper-left 3x3 of the modelViewMatrix directly for normal transformation.
+            // This is not perfectly correct for all cases but often sufficient for simple models.
+            // A more robust implementation would compute inverse transpose:
+            let normalMat3 = new Float32Array(9);
+            normalMat3[0] = modelViewMatrix[0]; normalMat3[1] = modelViewMatrix[1]; normalMat3[2] = modelViewMatrix[2];
+            normalMat3[3] = modelViewMatrix[4]; normalMat3[4] = modelViewMatrix[5]; normalMat3[5] = modelViewMatrix[6];
+            normalMat3[6] = modelViewMatrix[8]; normalMat3[7] = modelViewMatrix[9]; normalMat3[8] = modelViewMatrix[10];
+
+            gl.uniformMatrix3fv(programInfo.uniformLocations.normalMatrix, false, normalMat3);
+
+            // Set color for this primitive
+            const currentColor = primitiveColors[i];
+            const colors = new Float32Array(gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE) / 4); // Get size of current buffer
+            for (let j = 0; j < colors.length / 4; j++) {
+                colors[j * 4 + 0] = currentColor[0];
+                colors[j * 4 + 1] = currentColor[1];
+                colors[j * 4 + 2] = currentColor[2];
+                colors[j * 4 + 3] = currentColor[3];
+            }
+            gl.bindBuffer(gl.ARRAY_BUFFER, cubeColorBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, colors, gl.DYNAMIC_DRAW); // Update colors per primitive
+            gl.vertexAttribPointer(programInfo.attribLocations.vertexColor, 4, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(programInfo.attribLocations.vertexColor);
+
+            gl.drawElements(gl.TRIANGLES, cubeVertexCount, gl.UNSIGNED_SHORT, 0);
+
+            // Draw again for the brighter core stroke (using a higher alpha color, but still within budget)
+            const coreColor = hslToRgb(currentColor[0] * 360, 90, 55, 0.8); // Brighter, higher saturation, higher alpha
+            const coreColors = new Float32Array(gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE) / 4);
+            for (let j = 0; j < coreColors.length / 4; j++) {
+                coreColors[j * 4 + 0] = coreColor[0];
+                coreColors[j * 4 + 1] = coreColor[1];
+                coreColors[j * 4 + 2] = coreColor[2];
+                coreColors[j * 4 + 3] = coreColor[3];
+            }
+            gl.bufferData(gl.ARRAY_BUFFER, coreColors, gl.DYNAMIC_DRAW);
+            gl.vertexAttribPointer(programInfo.attribLocations.vertexColor, 4, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(programInfo.attribLocations.vertexColor);
+            gl.drawElements(gl.LINES, cubeVertexCount, gl.UNSIGNED_SHORT, 0); // Draw lines for core
+        }
+    }
+
+    // --- Animation Loop Functions ---
+    let lastResetFrame = 0;
+    const dt = 1 / fps; // seconds per frame
+
+    window.advanceFrame = () => {
+        if (!glInitialized || !resourcesReady) {
+            console.warn("WebGL not initialized or resources not ready. Skipping frame.");
+            return;
+        }
+
+        totalTime = window.currentFrame / fps;
+
+        // Composition evolution and hard reset
+        if (window.currentFrame === 0 || (window.currentFrame - lastResetFrame) >= Math.round(cycleSec * fps)) {
+            initComposition(); // Re-randomize primitive parameters and targets
+            generatePalette(); // Re-randomize palette
+            lastResetFrame = window.currentFrame;
+        }
+        updateComposition(dt);
+
+        drawScene();
+        window.currentFrame++;
+    };
+
+    window.advanceFrames = (n) => {
+        for (let i = 0; i < n; i++) {
+            window.advanceFrame();
+        }
+    };
+
+    // --- Initial setup call ---
+    // Delay setting READY to true to allow for potential early context loss recovery.
+    // If context is lost and restored, initGL will be called again.
+    setTimeout(() => {
+        try {
+            initGL();
+            if (gl && resourcesReady) {
+                window.READY = true;
+            } else if (!glInitialized) {
+                // If initGL failed to set glInitialized, this means context creation failed initially.
+                console.error("Failed to initialize WebGL on startup.");
+            }
+        } catch (e) {
+            console.error("Error during initial WebGL setup:", e);
+        }
+    }, 500); // Wait 500ms for potential early context loss event
+</script>
+</body>
+</html>
