@@ -301,7 +301,7 @@ export function buildMetadata(info = {}) {
   // guarantee is identical in both styles.
   const searchStyle = String(info.titleStyle || '').toLowerCase() !== 'short';
   const longTitle = clampTitle(searchStyle
-    ? `${subject} ${durLabel.search} Video 4K`
+    ? `${subject} ${durLabel.search} Video`
     : `${mood} ${subject}`);
 
   // Optional credit when the day's colours were drawn from an image (e.g. NASA
