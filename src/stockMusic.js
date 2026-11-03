@@ -66,6 +66,11 @@ async function jamendoTrack({ clientId, date, seed, destPath }) {
   }
   const j = await res.json();
   const all = Array.isArray(j.results) ? j.results : [];
+  if (all.length === 0) {
+    // Jamendo reports request problems (bad client id, bad tag, rate limit) in
+    // the response headers, not as an HTTP error. Log them so the job log shows why.
+    console.warn(`[music] jamendo returned no tracks; response headers: ${JSON.stringify(j.headers || j).slice(0, 400)}`);
+  }
   const cc0 = all.filter((t) => typeof t.license_ccurl === 'string'
     && /creativecommons\.org\/publicdomain\/zero/.test(t.license_ccurl)
     && typeof t.audio === 'string' && t.audio.startsWith('http')
