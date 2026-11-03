@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fireworks — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated fireworks engine: shells rise from the bottom, burst into rings of
+// particles that arc under gravity and fade. Each frame is a pure function of
+// time (no accumulation), so the cycle resets cleanly at cycleSec.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no requestAnimationFrame. The canvas clears to
+// opaque black every frame, so nothing accumulates across frames.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE = Math.max(20, fltP('cycleSec', 44));
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+
+  const U = Math.min(W, H);
+  const GRAV = 0.22 * U;          // gravity, px per second squared
+  const FLIGHT_MIN = 1.1, FLIGHT_MAX = 1.5;
+  const LIFE_MIN = 2.2, LIFE_MAX = 3.0;
+
+  // Shell schedule, fixed once per video. Every shell's burst and fade end
+  // inside one cycle, so the reset never cuts a burst in half.
+  const N_SHELLS = Math.max(12, Math.round(30 * DENSITY));
+  const SPACING = (CYCLE - 5.0) / N_SHELLS;
+  const hueBase = rand(0, 360);
+  const shells = [];
+  for (let k = 0; k < N_SHELLS; k++) {
+    const flight = rand(FLIGHT_MIN, FLIGHT_MAX);
+    const tLaunch = k * SPACING + rand(0, 0.4 * SPACING);
+    const bx = rand(0.12, 0.88) * W;
+    const by = rand(0.18, 0.5) * H;
+    const hue = (hueBase + [0, 60, 120, 200, 280][k % 5] + rand(-12, 12) + 360) % 360;
+    const count = Math.round(rand(100, 130) * Math.sqrt(DENSITY));
+    const parts = [];
+    const spin = rand(0, Math.PI * 2);
+    for (let p = 0; p < count; p++) {
+      const ang = spin + (p / count) * Math.PI * 2 + rand(-0.04, 0.04);
+      const sp = rand(0.30, 0.50) * U;
+      parts.push({
+        vx: Math.cos(ang) * sp,
+        vy: Math.sin(ang) * sp,
+        life: rand(LIFE_MIN, LIFE_MAX),
+        hue: (hue + rand(-10, 10) + 360) % 360,
+      });
+    }
+    shells.push({ tLaunch, flight, bx, by, hue, parts });
+  }
+
+  // Twinkling sparks: fixed positions, each blinking at its own rate, so there is
+  // always some per-frame change across the whole frame, not only near bursts.
+  const N_SPARKS = Math.round(90 * DENSITY);
+  const sparks = [];
+  for (let k = 0; k < N_SPARKS; k++) {
+    sparks.push({
+      x: rand(0.02, 0.98) * W,
+      y: rand(0.02, 0.98) * H,
+      hue: (hueBase + rand(0, 360)) % 360,
+      // Hz, never near zero; quantised so rate*CYCLE is a whole number of turns.
+      rate: (rng() < 0.5 ? -1 : 1) * Math.max(1, Math.round(rand(1.2, 2.6) * CYCLE)) / CYCLE,
+      ph: rand(0, Math.PI * 2),
+    });
+  }
+
+  window.currentFrame = 0;
+  window.TOTAL_FRAMES = Math.round(DURATION * FPS);
+
+  function drawShell(sh, tl) {
+    const age = tl - sh.tLaunch;
+    if (age < 0) return;
+    // Rising trail: a bright dot travels from the bottom to the burst point.
+    if (age < sh.flight) {
+      const f = age / sh.flight;
+      const ease = 1 - Math.pow(1 - f, 2);
+      const x = sh.bx;
+      const y = H + (sh.by - H) * ease;
+      ctx.fillStyle = `hsla(${sh.hue.toFixed(1)}, 100%, 75%, 0.9)`;
+      ctx.beginPath();
+      ctx.arc(x, y, Math.max(2, U * 0.006), 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+    const a = age - sh.flight;
+    // Flash at the burst point.
+    if (a < 0.35) {
+      const fl = 1 - a / 0.35;
+      ctx.fillStyle = `hsla(${sh.hue.toFixed(1)}, 100%, 80%, ${(0.55 * fl * fl).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(sh.bx, sh.by, U * (0.03 + 0.09 * (1 - fl)), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Particles: ballistic arcs, drawn as short streaks.
+    const dt = 0.16;
+    for (const p of sh.parts) {
+      if (a > p.life) continue;
+      const life = p.life;
+      const alpha = Math.pow(1 - a / life, 0.8) * 0.95;
+      const x = sh.bx + p.vx * a;
+      const y = sh.by + p.vy * a + 0.5 * GRAV * a * a;
+      const ax = Math.max(0, a - dt);
+      const xp = sh.bx + p.vx * ax;
+      const yp = sh.by + p.vy * ax + 0.5 * GRAV * ax * ax;
+      const lw = Math.max(2.5, U * 0.007) * (1 - a / life * 0.4);
+      // Soft glow under a bright core: the wide pass is what makes it read as light.
+      ctx.strokeStyle = `hsla(${p.hue.toFixed(1)}, 100%, 60%, ${(alpha * 0.28).toFixed(3)})`;
+      ctx.lineWidth = lw * 4;
+      ctx.beginPath();
+      ctx.moveTo(xp, yp);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      ctx.strokeStyle = `hsla(${p.hue.toFixed(1)}, 100%, 72%, ${alpha.toFixed(3)})`;
+      ctx.lineWidth = lw;
+      ctx.beginPath();
+      ctx.moveTo(xp, yp);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    }
+  }
+
+  function renderFrame() {
+    const t = window.currentFrame / FPS * SPEED;
+    const tl = t % CYCLE;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    for (const sh of shells) drawShell(sh, tl);
+    // Sparks: whole-cycle-locked blink (rate * CYCLE is an integer number of
+    // turns) so the reset at cycleSec is seamless.
+    const sr = Math.max(4, U * 0.0045);
+    for (const s of sparks) {
+      const w = 0.5 + 0.5 * Math.sin(2 * Math.PI * s.rate * tl + s.ph);
+      if (w < 0.08) continue;
+      ctx.fillStyle = `hsla(${s.hue.toFixed(1)}, 100%, 70%, ${(0.85 * w * w).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, sr * (0.6 + 0.4 * w), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
