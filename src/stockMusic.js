@@ -71,21 +71,36 @@ async function jamendoTrack({ clientId, date, seed, destPath }) {
     // the response headers, not as an HTTP error. Log them so the job log shows why.
     console.warn(`[music] jamendo returned no tracks; response headers: ${JSON.stringify(j.headers || j).slice(0, 400)}`);
   }
-  const cc0 = all.filter((t) => typeof t.license_ccurl === 'string'
-    && /creativecommons\.org\/publicdomain\/zero/.test(t.license_ccurl)
+  // Accepted licences: CC0 (no attribution) and plain CC BY (attribution
+  // required, which the description's credit line provides). Share-alike,
+  // non-commercial and no-derivatives variants are rejected.
+  const licenseOf = (t) => {
+    const u = typeof t.license_ccurl === 'string' ? t.license_ccurl : '';
+    if (/creativecommons\.org\/publicdomain\/zero/.test(u)) return { name: 'CC0', url: u };
+    const m = u.match(/creativecommons\.org\/licenses\/by\/(\d\.\d)\//);
+    if (m) return { name: `CC BY ${m[1]}`, url: u };
+    return null;
+  };
+  const usable = all.filter((t) => licenseOf(t)
     && typeof t.audio === 'string' && t.audio.startsWith('http')
     && Number(t.duration) >= 90);
-  console.log(`[music] jamendo tag="${tag}": ${all.length} tracks, ${cc0.length} CC0 with audio >= 90s.`);
-  if (cc0.length === 0) return null;
-  const pick = cc0[h % cc0.length];
+  // Prefer CC0 when both kinds are available, so credit lines are rare.
+  const cc0 = usable.filter((t) => licenseOf(t).name === 'CC0');
+  const pool = cc0.length ? cc0 : usable;
+  console.log(`[music] jamendo tag="${tag}": ${all.length} tracks, ${usable.length} usable (CC0 or CC BY) with audio >= 90s.`);
+  if (pool.length === 0) return null;
+  const pick = pool[h % pool.length];
+  const lic = licenseOf(pick);
   await downloadPreview(pick.audio, destPath);
-  console.log(`[music] using "${pick.name}" by ${pick.artist_name} (${Math.round(pick.duration)}s, CC0, jamendo #${pick.id}, tag="${tag}")`);
+  console.log(`[music] using "${pick.name}" by ${pick.artist_name} (${Math.round(pick.duration)}s, ${lic.name}, jamendo #${pick.id}, tag="${tag}")`);
   return {
     path: destPath,
     title: pick.name,
     username: pick.artist_name,
     url: pick.shareurl || `https://www.jamendo.com/track/${pick.id}`,
     durationSec: Number(pick.duration),
+    license: lic.name,
+    licenseUrl: lic.url,
   };
 }
 

@@ -866,7 +866,7 @@ async function main() {
       if (track) {
         renderCli.musicTrackPath = track.path;
         musicCredit = track;
-        console.log(`[index] background music: "${track.title}" by ${track.username} (CC0, jamendo.com)`);
+        console.log(`[index] background music: "${track.title}" by ${track.username} (${track.license || 'CC0'}, jamendo.com)`);
       } else {
         console.log('[index] no stock music available today; video will be silent.');
       }
