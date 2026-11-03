@@ -1433,5 +1433,16 @@
     "seedsVerified": "1-15,12345",
     "nearestNeighbour": "moire",
     "nearestDistance": 0.859
+  },
+  {
+    "date": "2026-11-03",
+    "inspirationSource": "Abelian sandpile (Bak-Tang-Wiesenfeld, Dhar): grains dropped on a grid topple to neighbours until stable, with a sink at the edge. Sources: https://mag.uchicago.edu/sandpile ; https://arxiv.org/pdf/1109.2908 (pattern formation in fast-growing sandpiles) ; https://ista.ac.at/en/news/famous-sandpile-model-shown-to-move-like-a-traveling-sand-dune/ (category: random Wikipedia article, fallback since Wikipedia is blocked)",
+    "idea": "Several fixed off-centre grain sources drop grains on a lattice; avalanches topple cells in bulk and the pile reaches a self-organised steady state, coloured by height 0-3.",
+    "engineName": null,
+    "outcome": "skipped",
+    "reason": "Prototype engines/manual/sandpile.html not committed. Rendered at 1280x720 with 3 scattered sources: the pile spreads into sink-limited round blobs, and the steady-state height texture reads as three-colour speckle rather than bold legible structure; the crisp sandpile fractal only shows at small pile sizes. validate.js failed the brightness-trend gate (projected +77.2 luma, slope 0.021/s, fit over 300s) because the pile keeps spreading over the test window, with avgSat 74, fastMotion 22.4 (floor 8.9), compositionDrift 0.075 and unitMotionNonRigidFrac 1.0 all passing. Reducing grain rate or grid size to fix the trend would leave the pile in the speckle regime or unfilled, so not fixed within this run.",
+    "seedsVerified": "12345 (single seed, failed gate; battery not run)",
+    "nearestNeighbour": null,
+    "nearestDistance": null
   }
 ]
