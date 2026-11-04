@@ -8525,6 +8525,42 @@ final design measures **0.859** against `moire` (next `spinbounce` 0.868,
 
 `ENGINE_SUBJECTS`: `fracturepearls: 'Healed Fracture Pearls'` in `src/metadata.js`.
 
+## Kumiko lattice engine (`kumiko.html`) — 2026-11-04
+
+Daily creative-research routine. Category was "random architectural or
+typographic movement" (least recent use, last 2026-10-27). An open WebSearch
+surfaced **kumiko**, the Japanese nail-free wooden lattice joinery: thin slats
+are fitted into hishi (diamond) and koshi (square) lattice panels, the
+panels read as crisp straight-edged geometry against the dark negative space
+between pieces. Sources: https://mymodernmet.com/kumiko-woodworking-smithsonian-craft-show,
+https://suigenkyo.store/de/blogs/handwerksgeschichte/kumiko.
+
+**What it is**: a Canvas2D engine built only from straight slats of constant
+width on black. Two families of slats cross at +/-45 degrees (the hishi
+diamond lattice). Each slat is offset by `offsetAmp * sin(2*pi*K*rank -
+phase)`, where rank is the slat's index fraction and K is an integer in 2-4,
+so the diamond cells breathe and shear. Each family has its own independent
+rate (guaranteed-minimum magnitude, random sign, 2.4-3.2 rad/s, away from the
+4.19 rad/s validator alias). Slat colour is fixed by slat index, an axis the
+motion never disturbs.
+
+**Verified visually**: PNGs at 25% and 75% of the cycle, seed 1. Bold, saturated
+slats with clear black diamond cells and visible reshaping between frames. The
+frame reads as a lattice rather than a filled field.
+
+**Validator (`node src/validate.js`, seed 12345)**: ok. avgSat 78.7, projectedRise
+13.6, compositionDrift 0.048, unitMotionNonRigidFrac 1.0, fastMotion 77.8 vs
+floor 9.6, avgMsPerFrame 4.9. Battery seeds 1-15 all PASS: avgSat 76-86,
+projectedRise -58 to +20, compositionDrift 0.028-0.063, unitMotion 0.949-1.0,
+fastMotion 50-89 vs floors 7-11.
+
+**Novelty gate**: measured against all engines in `engines/manual/` (pool
+fingerprinted fresh, refreshed cache not committed). Nearest neighbour is
+`auto-2026-10-01-nasa-science` at distance **1.346**, comfortably clear of the
+0.60 threshold (next: juliabands 1.351, diagrid 1.356).
+
+`ENGINE_SUBJECTS`: `kumiko: 'Kumiko Lattice'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

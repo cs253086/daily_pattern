@@ -56,6 +56,7 @@ const ENGINE_SUBJECTS = {
   ikatweave: 'Ikat Weave Patterns',
   juliabands: 'Julia Set Escape Bands',
   fracturepearls: 'Healed Fracture Pearls',
+  kumiko: 'Kumiko Lattice',
   kaleidoscope: 'Kaleidoscope Patterns',
   kolam: 'Kolam Knot Lattice',
   kuramotochimera: 'Synchronizing Oscillator Rings',

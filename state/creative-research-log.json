@@ -1444,5 +1444,16 @@
     "seedsVerified": "12345 (single seed, failed gate; battery not run)",
     "nearestNeighbour": null,
     "nearestDistance": null
+  },
+    {
+    "date": "2026-11-04",
+    "inspirationSource": "Kumiko, the Japanese nail-free wooden lattice joinery (https://mymodernmet.com/kumiko-woodworking-smithsonian-craft-show; https://suigenkyo.store/de/blogs/handwerksgeschichte/kumiko): thin slats fitted into hishi (diamond) and koshi (square) lattice panels with no nails, shown against black negative space. Category was 'random architectural or typographic movement' (least recent use, last 2026-10-27).",
+    "idea": "Hishi-kumiko diamond lattice drawn only as straight slats of constant width on black: two families at +/-45 degrees, each slat offset by an integer-K travelling wave across its index so the diamond cells breathe and shear. Colours fixed per slat index; the two families run on independent rates.",
+    "engineName": "kumiko",
+    "outcome": "shipped",
+    "reason": "Passed validateEngine() on 16/16 seeds (1-15 plus 12345) and the CLI gate; novelty nearest neighbour 1.346 vs auto-2026-10-01-nasa-science, well above the 0.60 minimum. Frames at 25/75% of the cycle were rendered and looked at: bold saturated slats on black, visible non-rigid change between frames.",
+    "seedsVerified": "1-15, 12345",
+    "nearestNeighbour": "auto-2026-10-01-nasa-science",
+    "nearestDistance": 1.346
   }
 ]
