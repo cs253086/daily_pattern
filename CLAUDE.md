@@ -8525,6 +8525,107 @@ final design measures **0.859** against `moire` (next `spinbounce` 0.868,
 
 `ENGINE_SUBJECTS`: `fracturepearls: 'Healed Fracture Pearls'` in `src/metadata.js`.
 
+## Kumiko lattice engine (`kumiko.html`) — 2026-11-04
+
+Daily creative-research routine. Category was "random architectural or
+typographic movement" (least recent use, last 2026-10-27). An open WebSearch
+surfaced **kumiko**, the Japanese nail-free wooden lattice joinery: thin slats
+are fitted into hishi (diamond) and koshi (square) lattice panels, the
+panels read as crisp straight-edged geometry against the dark negative space
+between pieces. Sources: https://mymodernmet.com/kumiko-woodworking-smithsonian-craft-show,
+https://suigenkyo.store/de/blogs/handwerksgeschichte/kumiko.
+
+**What it is**: a Canvas2D engine built only from straight slats of constant
+width on black. Two families of slats cross at +/-45 degrees (the hishi
+diamond lattice). Each slat is offset by `offsetAmp * sin(2*pi*K*rank -
+phase)`, where rank is the slat's index fraction and K is an integer in 2-4,
+so the diamond cells breathe and shear. Each family has its own independent
+rate (guaranteed-minimum magnitude, random sign, 2.4-3.2 rad/s, away from the
+4.19 rad/s validator alias). Slat colour is fixed by slat index, an axis the
+motion never disturbs.
+
+**Verified visually**: PNGs at 25% and 75% of the cycle, seed 1. Bold, saturated
+slats with clear black diamond cells and visible reshaping between frames. The
+frame reads as a lattice rather than a filled field.
+
+**Validator (`node src/validate.js`, seed 12345)**: ok. avgSat 78.7, projectedRise
+13.6, compositionDrift 0.048, unitMotionNonRigidFrac 1.0, fastMotion 77.8 vs
+floor 9.6, avgMsPerFrame 4.9. Battery seeds 1-15 all PASS: avgSat 76-86,
+projectedRise -58 to +20, compositionDrift 0.028-0.063, unitMotion 0.949-1.0,
+fastMotion 50-89 vs floors 7-11.
+
+**Novelty gate**: measured against all engines in `engines/manual/` (pool
+fingerprinted fresh, refreshed cache not committed). Nearest neighbour is
+`auto-2026-10-01-nasa-science` at distance **1.346**, comfortably clear of the
+0.60 threshold (next: juliabands 1.351, diagrid 1.356).
+
+`ENGINE_SUBJECTS`: `kumiko: 'Kumiko Lattice'` in `src/metadata.js`.
+
+## Hankin star-lattice engine (`hankin.html`) — 2026-11-05
+
+Daily creative-research routine. Category was "traditional textile/tiling/
+ornament tradition" (least recent use, last 2026-10-29 for `kolam.html`). An
+open WebSearch surfaced Hankin's "polygons in contact" construction for
+Islamic star patterns (Hankin 1925; formalised for computers by Kaplan,
+Graphics Interface 2005). Sources (search snippets):
+https://tilingsearch.mit.edu/RosetteAnalysis.pdf,
+https://archive.bridgesmathart.org/2000/bridges2000-105.pdf,
+https://github.com/evoluteur/islamic-patterns (method description).
+
+**What it is**: on a tiling of regular hexagons, each edge midpoint M gives a
+straight strap leaving at a fixed contact angle theta to the edge. In each
+tile, the strap from M_k toward corner V and the strap from M_{k+1} toward the
+same corner meet on the corner bisector at a contact point X, at distance
+(a/2) sin(theta) / sin(120 - theta) from V (law of sines, verified before
+rendering). Each tile carries a closed 12-gon star: midpoints are the outer
+tips, contact points are the inner vertices. Straps through a shared midpoint
+join the neighbouring stars. A genuinely different construction from the
+pool: not a filled tile field, not kumiko's straight slat families, not
+rotating polygons, not a curve. The contact angle is the only generative
+parameter.
+
+**Bugs and iterations found by rendering and by the gates, not by reasoning:**
+1. At theta 22-30 degrees the stars read as near-full hexagons with truncated
+   corners, not stars. Raising the contact angle to 40-48 degrees deepened the
+   tips into a real Islamic star lattice.
+2. The first motion (row-major rank wave, theta amplitude 5-8 degrees, 0.55-0.9
+   rad/s) failed fastMotion (8.27 vs 9.0) and compositionDrift (0.0089 vs 0.015).
+   Raising amplitude and rate fixed fastMotion (18.9), but the descriptor
+   still saw a frozen composition: a row-major wave barely changes the
+   radially averaged profile. Ranking tiles by distance from centre so the
+   wave marches outward as concentric bands helped only a little (0.0133).
+3. A slow whole-lattice drift of the base angle (minutes-scale) raised drift
+   but produced a real monotone coverage change inside the 300s window; five
+   seeds then failed the brightness-trend gate (projected +94 to +143). Reverted.
+4. Sharpening the wave to an odd function (sign * sqrt|sin|) made tiles snap
+   between deep and shallow stars and lifted drift on most seeds, but seed 5
+   stayed at 0.0129. Widening the contact-angle sweep to about 19-61 degrees
+   (base 39-41, amplitude 18-21) moved every seed to 0.025-0.039. The wide
+   sweep stays inside the non-degenerate range (checked visually at the
+   extremes: shallow hexagon-like tips and deep hexagram-like stars).
+5. Band count: K=2 and K=4 were each worse than K random in {4,5}; K=5 fixed
+   failed seeds 5 and 7 under the narrower sweep.
+
+**Verified**: `validateEngine()` 16/16 across seeds 1-15 plus the CLI default
+seed 12345, and `node src/validate.js engines/manual/hankin.html` returns
+ok. Margins across the battery: `avgSat` 74.6-85.7 (vs 22 minimum),
+`peakNearWhiteFrac` 0, `projectedRise` -35.9 to +40.6 (vs 50; the production
+default seed 12345 is the closest at +40.6, so it passes with less room than
+most), `compositionDrift` 0.021-0.039 on seeds 1-15 (vs 0.015; seed 12345
+0.0287), `unitMotionNonRigidFrac` exactly 1.0 on every seed, `fastMotion`
+15-34 against floors 6-10, `avgMsPerFrame` 4-10ms. Frames rendered at
+cycle fractions 25/50/75/95/105 (seeds 1, 2, 3, 12345) and looked at: vivid
+saturated stars, tips visibly sliding between deep and shallow states across
+the cycle, no whiteout, no degenerate tiles at the cycle boundary.
+
+**Novelty gate**: measured against all 85 engines in `engines/manual/` (pool
+fingerprinted fresh alongside the candidate; the refreshed cache was not
+committed). Nearest neighbour is `radiolarian` at distance **0.806** (next
+`auto-2026-08-15-spirograph-hypotrocloid-line-art-in-clea` 0.894, `starburst`
+0.958), a clean pass above the 0.60 threshold.
+
+`ENGINE_SUBJECTS`: `hankin: 'Islamic Star Lattice'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

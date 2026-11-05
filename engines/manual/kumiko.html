@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Kumiko Lattice — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find
+// (today's creative-research routine, category "traditional architectural
+// woodwork / lattice joinery"): KUMIKO, the Japanese nail-free wooden
+// lattice. Thin slats are joined into a hishi (diamond) lattice: two
+// families of straight slats cross at a fixed angle, each slat carries its
+// own cross-joint, and the whole panel is assembled from separate pieces
+// with black negative space between them. Sources: mymodernmet.com/kumiko-
+// woodworking-smithsonian-craft-show; suigenkyo.store/de/blogs/
+// handwerksgeschichte/kumiko (hishi-kumiko = diamond lattice, koshi-kumiko
+// = square lattice; slats fitted into a frame, no nails).
+//
+// A genuinely different construction PRINCIPLE from every other engine in
+// the pool: not a filled tile field (grid, tessellation, mashrabiya,
+// herringbone), not overlaid smooth wave fields (chladni, moire), not
+// rotating polygons, not a curve. Here the picture is made only of straight
+// SLATS of constant width on black: two independent slat families whose
+// individual slat positions are animated by travelling waves across the
+// slat index, so the diamond cells between them breathe and shear.
+//
+// MOTION: the slats of each family are offset by an integer-K travelling
+// wave across their index (rank fraction i/N), so the summed offset of a
+// family is exactly zero-mean at every instant. The two families use
+// independent rates (guaranteed-minimum magnitude, random sign), so no
+// single rigid transform explains the frame's change. Each slat's colour is
+// fixed by its index, an axis the motion never disturbs.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
+  const dt = 1 / FPS;
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Burn 4 draws first -- Mulberry32's first outputs for small consecutive
+  // seeds are correlated (pendulumwave.html/spinbounce.html's own fix).
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  let PAL = parseColors() || palettes[resolvePalette()];
+  if (PAL.length < 5) {
+    const out = [];
+    for (let i = 0; i < 5; i++) out.push(PAL[i % PAL.length]);
+    PAL = out;
+  }
+
+  // Slat layout, fixed once per video.
+  let spacing, slatW, nLines, waveK, angA, angB, offsetAmp;
+  let phaseA = 0, phaseB = 0, rateA = 1, rateB = 1;
+  let phaseOffA = 0, phaseOffB = 0;
+  function initLayout() {
+    const diag = Math.hypot(W, H);
+    // Spacing so roughly 6-9 slats cross the frame per family at DENSITY 1.
+    spacing = Math.min(W, H) / (6.5 * Math.max(0.6, Math.min(1.6, DENSITY)));
+    slatW = spacing * rand(0.28, 0.34);
+    nLines = Math.ceil(diag / spacing) + 4;
+    // Slats at +/-45 degrees: the hishi (diamond) lattice.
+    angA = Math.PI / 4 + rand(-0.02, 0.02);
+    angB = -Math.PI / 4 + rand(-0.02, 0.02);
+    offsetAmp = spacing * rand(0.14, 0.18);
+    phaseOffA = rand(0, 2 * Math.PI);
+    phaseOffB = rand(0, 2 * Math.PI);
+  }
+  function reconfigure() {
+    // Rates avoid ~4.19 rad/s (2*pi/1.5, validate.js fastMotion aliasing).
+    rateA = sgn() * rand(2.4, 3.2) * SPEED;
+    rateB = sgn() * rand(2.4, 3.2) * SPEED;
+    waveK = Math.max(2, Math.min(4, Math.round(rand(2, 4.49))));
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+
+  initLayout();
+  reconfigure();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  // Draw one family of parallel slats. Each slat is a band of width slatW
+  // centred on the line {p : p.n = d}, n = (cos a, sin a), extended far
+  // beyond the frame so the canvas clip gives crisp edges.
+  function drawFamily(ang, phase, lineCol, colBase) {
+    const nx = Math.cos(ang), ny = Math.sin(ang);
+    const tx = -ny, ty = nx;
+    const L = Math.hypot(W, H);
+    const half = nLines / 2;
+    for (let i = -half; i < half; i++) {
+      const rank = (i + half) / nLines;
+      const wave = Math.sin(2 * Math.PI * waveK * rank - phase);
+      const d = i * spacing + offsetAmp * wave;
+      const cxm = W / 2 + nx * d;
+      const cym = H / 2 + ny * d;
+      const [h, s, l] = PAL[((i + half) | 0) % PAL.length];
+      const sat = Math.max(60, Math.min(94, s));
+      const light = Math.max(48, Math.min(62, l));
+      ctx.fillStyle = `hsl(${(h + colBase) % 360}, ${sat}%, ${light}%)`;
+      const hw = slatW / 2;
+      ctx.beginPath();
+      ctx.moveTo(cxm - tx * L + nx * hw, cym - ty * L + ny * hw);
+      ctx.lineTo(cxm + tx * L + nx * hw, cym + ty * L + ny * hw);
+      ctx.lineTo(cxm + tx * L - nx * hw, cym + ty * L - ny * hw);
+      ctx.lineTo(cxm - tx * L - nx * hw, cym - ty * L - ny * hw);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  function renderFrame() {
+    cycleFrame++;
+    phaseA += rateA * dt;
+    phaseB += rateB * dt;
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigure(); }
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    drawFamily(angA, phaseA + phaseOffA, 0, 0);
+    drawFamily(angB, phaseB + phaseOffB, 0, 40);
+
+    window.currentFrame++;
+  }
+
+  window.advanceFrame = function () { renderFrame(); };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) renderFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
