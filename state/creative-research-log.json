@@ -1455,5 +1455,16 @@
     "seedsVerified": "1-15, 12345",
     "nearestNeighbour": "auto-2026-10-01-nasa-science",
     "nearestDistance": 1.346
+  },
+  {
+    "date": "2026-11-05",
+    "inspirationSource": "Islamic star patterns by Hankin's 'polygons in contact' construction (Hankin 1925, formalised for computers by Kaplan, Graphics Interface 2005): straps leave edge midpoints at a fixed contact angle and meet at corners to form interlaced stars. Sources: https://tilingsearch.mit.edu/RosetteAnalysis.pdf ; https://archive.bridgesmathart.org/2000/bridges2000-105.pdf ; https://github.com/evoluteur/islamic-patterns (search snippets). Category: traditional textile/tiling/ornament tradition (least recent use, last 2026-10-29).",
+    "idea": "Hexagonal tiling where each edge midpoint emits a straight strap at a contact angle to the edge; the straps meet on each corner bisector, so every tile is a closed 12-gon star. The contact angle breathes per tile on a radial travelling wave (odd, sharpened, four or five bands), so the stars march between deep and shallow states outward from the centre.",
+    "engineName": "hankin",
+    "outcome": "shipped",
+    "reason": "Passed validateEngine() on 16/16 seeds (1-15 plus 12345) and the CLI gate. Nearest-neighbour novelty 0.806 vs radiolarian, above the 0.60 minimum. Iterations were driven by measurement: contact angle raised so stars read as stars rather than hexagons; wave ranking changed to radial; the slow whole-lattice drift was reverted after it failed the brightness-trend gate; the contact-angle sweep was widened to fix compositionDrift on seed 5. Frames at several cycle fractions and seeds were rendered and looked at.",
+    "seedsVerified": "1-15, 12345",
+    "nearestNeighbour": "radiolarian",
+    "nearestDistance": 0.806
   }
 ]
