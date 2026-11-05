@@ -491,6 +491,10 @@ function curatedOr(reason, seed) {
 //   3. otherwise, Bloom.
 // Gemini repair rounds after the first attempt (2026-10-27): 3 attempts in total.
 const MAX_REPAIRS = 2;
+// One extra Gemini attempt after all others fail, following a wait long enough
+// for overload (503) spikes to clear (2026-11-04: two 503s, then a skip).
+// LATE_RETRY_MIN=0 disables it.
+const LATE_RETRY_MIN = Number(process.env.LATE_RETRY_MIN ?? 15);
 
 async function chooseEngine(cli, imageInfo) {
   const seed = cli.seed ?? (process.env.SEED || defaultSeedStr());
@@ -584,7 +588,25 @@ async function chooseEngine(cli, imageInfo) {
       current = next;
       reasons = result.reasons;
     }
-    return { skip: true, reason: `generated engine failed validation after ${MAX_REPAIRS + 1} attempts: ${reasons.join('; ')}` };
+    if (LATE_RETRY_MIN > 0) {
+      console.log(`[index] all attempts failed; waiting ${LATE_RETRY_MIN} min for one last Gemini attempt.`);
+      await new Promise((r) => setTimeout(r, LATE_RETRY_MIN * 60000));
+      const late = await generateEngine({
+        ...genOpts,
+        wantWebGL: gen.wantWebGL ? false : undefined,
+        repair: { previousHtml: await readFile(current.path, 'utf8'), reasons },
+      });
+      result = await validateEngine(late.path, validateOpts);
+      if (result.ok) {
+        console.log(`[index] late attempt passed (peakStd=${result.stats.peakStd.toFixed(1)}, motion=${result.stats.motion.toFixed(1)}, ${result.stats.avgMsPerFrame}ms/frame, ~${result.stats.projectedHourRenderMin}min for 1h).`);
+        return {
+          engine: late.path, source: 'gemini-repaired', themeHint: late.themeHint, date: late.date,
+        };
+      }
+      await logEngineSnippet('late attempt', late.path);
+      reasons = result.reasons;
+    }
+    return { skip: true, reason: `generated engine failed validation after ${MAX_REPAIRS + 1 + (LATE_RETRY_MIN > 0 ? 1 : 0)} attempts: ${reasons.join('; ')}` };
   } catch (e) {
     return { skip: true, reason: `generation error: ${e.message}` };
   }

@@ -126,6 +126,9 @@ function repairFixes(reasons) {
   if (text.includes('shadersource') || text.includes('webglshader') || text.includes('page errors') || text.includes('readyerror') || text.includes('is not defined') || text.includes('before initialization')) {
     blocks.push('FIX FOR THE RUNTIME ERROR: check every createShader, createProgram and createBuffer result for null and throw a clear Error if one is null. Declare every helper and variable above the first line that uses it, and call init() only at the very end of the file.');
   }
+  if (text.includes('too slow') || text.includes('ms/frame') || text.includes('render budget')) {
+    blocks.push('FIX FOR SPEED: the engine is too slow for a one-hour render. Cut the work done per frame: draw at most about 150 shapes per frame, precompute all geometry once in the startup code, do not allocate new arrays or objects inside advanceFrame, and avoid shadowBlur and per-shape createRadialGradient. Fewer, larger, bolder shapes are better than many small ones.');
+  }
   if (blocks.length === 0) return '';
   return '\n' + blocks.join('\n\n') + '\n';
 }
