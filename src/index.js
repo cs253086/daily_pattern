@@ -490,6 +490,18 @@ function curatedOr(reason, seed) {
 //      failure, fall back to Bloom;
 //   3. otherwise, Bloom.
 // Gemini repair rounds after the first attempt (2026-10-27): 3 attempts in total.
+// A generated engine can throw inside the page during frame rendering (e.g.
+// "mat4.copy is not a function"); page.evaluate rethrows that here. Treat it as
+// a failed attempt with a reason, so the repair path runs instead of skipping
+// the day outright (2026-11-05: a runtime error on attempt 1 skipped the day).
+async function validateEngineSafe(enginePath, opts) {
+  try {
+    return await validateEngine(enginePath, opts);
+  } catch (e) {
+    return { ok: false, reasons: [`runtime error during validation: ${e.message}`], stats: null };
+  }
+}
+
 const MAX_REPAIRS = 2;
 // One extra Gemini attempt after all others fail, following a wait long enough
 // for overload (503) spikes to clear (2026-11-04: two 503s, then a skip).
@@ -523,7 +535,7 @@ async function chooseEngine(cli, imageInfo) {
   try {
     const gen = await generateEngine(genOpts);
     console.log('[index] validating generated engine…');
-    let result = await validateEngine(gen.path, validateOpts);
+    let result = await validateEngineSafe(gen.path, validateOpts);
     if (result.ok) {
       console.log(`[index] generated engine passed (peakStd=${result.stats.peakStd.toFixed(1)}, motion=${result.stats.motion.toFixed(1)}, ${result.stats.avgMsPerFrame}ms/frame, ~${result.stats.projectedHourRenderMin}min for 1h).`);
       return {
@@ -577,7 +589,7 @@ async function chooseEngine(cli, imageInfo) {
         wantWebGL: gen.wantWebGL ? false : undefined,
         repair: { previousHtml, reasons },
       });
-      result = await validateEngine(next.path, validateOpts);
+      result = await validateEngineSafe(next.path, validateOpts);
       if (result.ok) {
         console.log(`[index] repaired engine passed (peakStd=${result.stats.peakStd.toFixed(1)}, motion=${result.stats.motion.toFixed(1)}, ${result.stats.avgMsPerFrame}ms/frame, ~${result.stats.projectedHourRenderMin}min for 1h).`);
         return {
@@ -596,7 +608,7 @@ async function chooseEngine(cli, imageInfo) {
         wantWebGL: gen.wantWebGL ? false : undefined,
         repair: { previousHtml: await readFile(current.path, 'utf8'), reasons },
       });
-      result = await validateEngine(late.path, validateOpts);
+      result = await validateEngineSafe(late.path, validateOpts);
       if (result.ok) {
         console.log(`[index] late attempt passed (peakStd=${result.stats.peakStd.toFixed(1)}, motion=${result.stats.motion.toFixed(1)}, ${result.stats.avgMsPerFrame}ms/frame, ~${result.stats.projectedHourRenderMin}min for 1h).`);
         return {

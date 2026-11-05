@@ -123,8 +123,8 @@ function repairFixes(reasons) {
   if (text.includes('total_frames') || text.includes('total frames')) {
     blocks.push('FIX FOR TOTAL_FRAMES: the renderer reads window.TOTAL_FRAMES, which is currently undefined. Add the exact line window.TOTAL_FRAMES = Math.round(duration * fps); during startup, before window.READY is set to true.');
   }
-  if (text.includes('shadersource') || text.includes('webglshader') || text.includes('page errors') || text.includes('readyerror') || text.includes('is not defined') || text.includes('before initialization')) {
-    blocks.push('FIX FOR THE RUNTIME ERROR: check every createShader, createProgram and createBuffer result for null and throw a clear Error if one is null. Declare every helper and variable above the first line that uses it, and call init() only at the very end of the file.');
+  if (text.includes('shadersource') || text.includes('webglshader') || text.includes('page errors') || text.includes('readyerror') || text.includes('is not defined') || text.includes('is not a function') || text.includes('runtime error') || text.includes('before initialization')) {
+    blocks.push('FIX FOR THE RUNTIME ERROR: check every createShader, createProgram and createBuffer result for null and throw a clear Error if one is null. Declare every helper and variable above the first line that uses it, and call init() only at the very end of the file. Use only functions you define yourself in the file (a matrix or vector helper such as mat4.copy must be written out in the file, not assumed from a library).');
   }
   if (text.includes('too slow') || text.includes('ms/frame') || text.includes('render budget')) {
     blocks.push('FIX FOR SPEED: the engine is too slow for a one-hour render. Cut the work done per frame: draw at most about 150 shapes per frame, precompute all geometry once in the startup code, do not allocate new arrays or objects inside advanceFrame, and avoid shadowBlur and per-shape createRadialGradient. Fewer, larger, bolder shapes are better than many small ones.');
