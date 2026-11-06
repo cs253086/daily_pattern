@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Mondrian Guillotine Partition — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find
+// (today's creative-research routine, category "random Wikipedia article",
+// resolved through open search since Wikipedia is blocked here): the
+// GUILLOTINE PARTITION, the recursive rule behind Mondrian-style black-line
+// compositions and the statistical "Mondrian process" (Roy & Teh, NIPS 2009,
+// https://danroy.org/papers/RoyTeh-NIPS-2009.pdf). A rectangle is cut edge to
+// edge by a straight line, each piece is cut again, and so on. Feijs
+// (https://arxiv.org/pdf/2011.00843) analysed Mondrian's 1920-1940
+// compositions against exactly this recursive-split model.
+//
+// A genuinely different construction PRINCIPLE from every other engine in the
+// pool: not a substitution tiling (quasicrystal, voderberg), not a Voronoi or
+// foam partition (voronoimosaic, foamcoarsen, columnarbasalt), not a regular
+// grid or herringbone weave (grid, herringbone, tessellation). Here the
+// partition is an authored binary tree of axis-aligned cuts with unequal
+// splits, so cells are large, bold, and of very different sizes, separated by
+// crisp black gutters.
+//
+// MOTION: every internal cut sits at a fraction t of its parent rectangle,
+// and t oscillates around its rest value on its own phase and rate
+// (guaranteed-minimum magnitude, random sign). Children are always derived
+// from their parent's current rectangle, so the tiling stays gap-free at
+// every instant; only the cut positions move. Because each cut moves on its
+// own phase, the cells visibly slide and resize relative to one another (the
+// unit-level motion), not as one rigid transform. Colours are fixed per leaf,
+// so the motion never disturbs hue.
+//
+// BRIGHTNESS: coloured leaves are luma-equalised by bisecting lightness, so
+// trading area between colours does not swing mean brightness. Some leaves
+// are left as black negative space, the rest of the frame is black gutter.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
+  const dt = 1 / FPS;
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Burn 4 draws first -- Mulberry32's first outputs for small consecutive
+  // seeds are correlated (pendulumwave.html/spinbounce.html's own fix).
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  // Hue sets per palette. Lightness is luma-equalised per colour below, so
+  // these only pick hues and saturation.
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  // Hues chosen so every vivid colour has a similar natural luma (no yellows
+  // or oranges, which would need a pastel or olive lightness to match).
+  const palettes = {
+    aurora: [[140, 90], [190, 88], [230, 82], [280, 78], [320, 70]],
+    ember:  [[10, 95], [345, 90], [320, 82], [355, 95], [300, 80]],
+    ocean:  [[185, 92], [205, 90], [225, 85], [250, 75], [270, 68]],
+    neon:   [[0, 95], [165, 88], [144, 88], [216, 92], [288, 94]],
+    sunset: [[10, 95], [330, 88], [280, 75], [355, 90], [190, 70]],
+    ice:    [[185, 88], [205, 84], [225, 80], [250, 76], [270, 72]],
+    gold:   [[20, 92], [350, 85], [300, 80], [160, 85], [240, 85]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out.map((c) => [c[0], c[1]]) : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const HUES = parseColors() || palettes[resolvePalette()];
+
+  // Rec.709 luma of an HSL colour.
+  function hslToRgb(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [255 * f(0), 255 * f(8), 255 * f(4)];
+  }
+  function lumaOf(h, s, l) {
+    const [r, g, b] = hslToRgb(h, s, l);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+  // Bisect lightness so every colour carries the same luma (a fixed target
+  // within the reachable range), so colour-area trades cannot drive brightness.
+  // Lightness is bisected toward the target luma, then clamped to a vivid band
+  // (40-70%), so no hue is pushed into olive or pastel. The residual luma
+  // spread between hues is small and is checked by the brightness gate.
+  const LUMA_TARGET = 112;
+  function equaliseLightness(h, s, target = LUMA_TARGET, lMin = 40, lMax = 70) {
+    let lo = 18, hi = 90;
+    for (let i = 0; i < 28; i++) {
+      const mid = (lo + hi) / 2;
+      if (lumaOf(h, s, mid) < target) lo = mid; else hi = mid;
+    }
+    return Math.max(lMin, Math.min(lMax, (lo + hi) / 2));
+  }
+
+  // ---- Tree of cuts, built once per video ----
+  let GUTTER = 0, MARGIN = 0, MAXDEPTH = 3;
+  const leaves = [];
+  let root = null;
+  const cuts = [];
+  function makeLeaf() {
+    const leaf = { leaf: true, col: null, col2: null, ph: rand(0, 2 * Math.PI), rate: 0, horiz: rng() < 0.5 };
+    leaves.push(leaf);
+    return leaf;
+  }
+  function collectCuts(n) {
+    if (!n || n.leaf) return;
+    cuts.push(n);
+    collectCuts(n.a);
+    collectCuts(n.b);
+  }
+  // Build with explicit rectangles so the split can be sized to the current
+  // canvas (structure stays identical; only nominal sizes are used here).
+  function buildRoot() {
+    const diag = Math.min(W, H);
+    GUTTER = diag * 0.014;
+    MARGIN = GUTTER;
+    MAXDEPTH = DENSITY >= 1.3 ? 4 : 3;
+    leaves.length = 0;
+    const build = (rect, depth) => {
+      const canSplit = depth < MAXDEPTH && rect.w > 0.2 * W && rect.h > 0.2 * H;
+      const stop = !canSplit || (depth > 0 && rng() < 0.3);
+      if (stop) return makeLeaf();
+      const longerIsW = rect.w >= rect.h;
+      const vertical = rng() < 0.7 ? longerIsW : !longerIsW;
+      const node = {
+        leaf: false,
+        vertical,
+        t0: rand(0.32, 0.68),
+        amp: rand(0.08, 0.12),
+        ph: rand(0, 2 * Math.PI),
+        rate: 0,
+        a: null,
+        b: null,
+      };
+      // Child rectangles at rest, using the rest cut position.
+      const t = node.t0;
+      const ra = vertical
+        ? { x: rect.x, y: rect.y, w: rect.w * t, h: rect.h }
+        : { x: rect.x, y: rect.y, w: rect.w, h: rect.h * t };
+      const rb = vertical
+        ? { x: rect.x + rect.w * t, y: rect.y, w: rect.w * (1 - t), h: rect.h }
+        : { x: rect.x, y: rect.y + rect.h * t, w: rect.w, h: rect.h * (1 - t) };
+      node.a = build(ra, depth + 1);
+      node.b = build(rb, depth + 1);
+      return node;
+    };
+    root = build({ x: MARGIN, y: MARGIN, w: W - 2 * MARGIN, h: H - 2 * MARGIN }, 0);
+    // Colour every leaf. No black leaves: a black leaf's area would vary with
+    // the cuts and swing mean brightness, while with all leaves coloured at one
+    // equal luma the frame's total luma is constant by construction. The black
+    // gutters provide the negative space.
+    const order = leaves.map((_, i) => i);
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    for (let k = 0; k < order.length; k++) {
+      const [h, s] = HUES[k % HUES.length];
+      const sat = Math.max(82, Math.min(96, s));
+      const light = equaliseLightness(h, sat);
+      const leaf = leaves[order[k]];
+      leaf.col = `hsl(${h}, ${sat}%, ${light.toFixed(2)}%)`;
+      // Sliding stripe: a brighter tint of the same hue (luma +58), fixed
+      // width fraction of its leaf, so it moves visibly without changing the
+      // leaf's own area or its luma share.
+      leaf.col2 = `hsl(${h}, ${sat}%, ${equaliseLightness(h, sat, LUMA_TARGET + 40, 40, 90).toFixed(2)}%)`;
+    }
+    // Collect cut nodes for motion.
+    cuts.length = 0;
+    collectCuts(root);
+  }
+  // Rates: guaranteed-minimum magnitude, random sign, lively pace (0.9-1.5 rad/s).
+  function reconfigure() {
+    for (const c of cuts) c.rate = sgn() * rand(1.1, 1.6) * SPEED;
+    for (const l of leaves) l.rate = sgn() * rand(1.1, 1.6) * SPEED;
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+
+  buildRoot();
+  reconfigure();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  // Walk the tree with the current cut positions, drawing each coloured leaf
+  // inset by half a gutter on every side so neighbours stay separated by one
+  // crisp black gutter.
+  function drawNode(n, rect) {
+    if (n.leaf) {
+      if (!n.col) return;
+      const g = GUTTER / 2;
+      const x = rect.x + g, y = rect.y + g;
+      const w = rect.w - GUTTER, h = rect.h - GUTTER;
+      if (w <= 1 || h <= 1) return;
+      ctx.fillStyle = n.col;
+      ctx.fillRect(x, y, w, h);
+      // Sliding stripe, 20% of the leaf's extent across its short travel.
+      const f = 0.2;
+      const k = 0.5 + 0.5 * Math.sin(n.ph);
+      ctx.fillStyle = n.col2;
+      if (n.horiz) ctx.fillRect(x, y + (h - f * h) * k, w, f * h);
+      else ctx.fillRect(x + (w - f * w) * k, y, f * w, h);
+      return;
+    }
+    const s = Math.sin(n.ph);
+    const t = Math.max(0.2, Math.min(0.8, n.t0 + n.amp * s));
+    const ra = n.vertical
+      ? { x: rect.x, y: rect.y, w: rect.w * t, h: rect.h }
+      : { x: rect.x, y: rect.y, w: rect.w, h: rect.h * t };
+    const rb = n.vertical
+      ? { x: rect.x + rect.w * t, y: rect.y, w: rect.w * (1 - t), h: rect.h }
+      : { x: rect.x, y: rect.y + rect.h * t, w: rect.w, h: rect.h * (1 - t) };
+    drawNode(n.a, ra);
+    drawNode(n.b, rb);
+  }
+
+  function renderFrame() {
+    cycleFrame++;
+    for (const c of cuts) c.ph += c.rate * dt;
+    for (const l of leaves) l.ph += l.rate * dt;
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigure(); }
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    drawNode(root, { x: MARGIN, y: MARGIN, w: W - 2 * MARGIN, h: H - 2 * MARGIN });
+
+    window.currentFrame++;
+  }
+
+  window.advanceFrame = function () { renderFrame(); };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) renderFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

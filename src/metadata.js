@@ -58,6 +58,7 @@ const ENGINE_SUBJECTS = {
   fracturepearls: 'Healed Fracture Pearls',
   kumiko: 'Kumiko Lattice',
   hankin: 'Islamic Star Lattice',
+  mondrian: 'Mondrian Block Partition',
   kaleidoscope: 'Kaleidoscope Patterns',
   kolam: 'Kolam Knot Lattice',
   kuramotochimera: 'Synchronizing Oscillator Rings',

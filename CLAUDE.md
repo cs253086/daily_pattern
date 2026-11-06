@@ -8626,6 +8626,26 @@ committed). Nearest neighbour is `radiolarian` at distance **0.806** (next
 
 `ENGINE_SUBJECTS`: `hankin: 'Islamic Star Lattice'` in `src/metadata.js`.
 
+## Guillotine block-partition engine (`mondrian.html`) — 2026-11-06
+
+Daily creative-research routine. Category was "random Wikipedia article", resolved through open search since Wikipedia is blocked here (least recently used category, last 2026-10-23). The inspiration is the guillotine partition: a rectangle cut edge to edge by straight lines, each piece cut again. It is the recursive rule behind Mondrian-style black-line compositions and the statistical Mondrian process (Roy & Teh, NIPS 2009, https://danroy.org/papers/RoyTeh-NIPS-2009.pdf). Feijs (https://arxiv.org/pdf/2011.00843) tested Mondrian's 1920-1940 paintings against this recursive-split model.
+
+**What it is**: a binary tree of axis-aligned cuts, built once per video. Each cut sits at an unequal fraction of its parent rectangle, and each leaf carries a vivid, luma-matched colour with a sliding brighter stripe. Black gutters separate the leaves. The structure is a Canvas2D guillotine partition, which no other engine in the pool builds. Substitution tilings, Voronoi and foam partitions, and regular grids all differ from it.
+
+**Motion**: every cut oscillates around its rest fraction on its own phase and rate (guaranteed-minimum magnitude, random sign). Children are always derived from the parent's current rectangle, so the tiling stays gap-free. Each leaf's stripe slides across 80% of its extent, so the cells visibly resize and slide against one another.
+
+**Bugs and iterations found by running the battery and looking, not by reasoning**:
+1. First version used black leaves for negative space. The black leaves' area varied with the cuts, which produced a real brightness trend (up to +46 on the battery). Fixed by colouring every leaf, so the total luma is constant by construction and the black gutters carry the negative space.
+2. With equal-luma colours, a colour boundary moving between two hues is almost invisible to a luma diff. fastMotion failed on several seeds (about 4-6 against floors of about 4.5-7). Fixed with a sliding stripe per leaf, a brighter tint of the same hue, at a fixed fraction of the leaf. The leaf's own area and luma share stay constant, and the motion is luma-visible.
+3. Equal luma at 112 forced yellow and orange to dark olive and blue toward pale. Fixed by choosing hues whose vivid lightness already sits near the same luma, dropping yellow and orange from the palette sets. Mixed-luma leaves then produced brightness trends, so equal luma was kept.
+4. Rendered frames at seed 7 with the production-style `colors` palette, then at 12345 with the default palette. The output reads as bold, saturated colour blocks with clear black gutters.
+
+**Verified**: `validateEngine()` 15/15 across seeds 1-15 (avgSat 82.7-92.4 vs 22; projectedRise -52 to +44 vs 50, thinnest seed 14 at +44; compositionDrift 0.042-0.098 vs 0.015; unitMotionNonRigidFrac 0.80-1.0 vs 0.40; fastMotion 9-29 against floors of 4.9-7.1; avgMsPerFrame 1-6). The CLI gate passes on seed 12345 (projectedRise -4, fastMotion 17.4, unitMotion 1.0, 1.6 ms per frame).
+
+**Novelty gate**: measured against all engines in `engines/manual/` (pool fingerprinted fresh alongside the candidate; the refreshed cache was not committed). Nearest neighbour is `impactshock` at distance **0.973**, comfortably above the 0.60 threshold, reached on the first composition with no structural iteration.
+
+`ENGINE_SUBJECTS`: `mondrian: 'Mondrian Block Partition'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

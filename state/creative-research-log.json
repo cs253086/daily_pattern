@@ -1466,5 +1466,16 @@
     "seedsVerified": "1-15, 12345",
     "nearestNeighbour": "radiolarian",
     "nearestDistance": 0.806
+  },
+  {
+    "date": "2026-11-06",
+    "inspirationSource": "Guillotine partition, the recursive rule behind Mondrian-style black-line compositions and the statistical Mondrian process (Roy & Teh, NIPS 2009, https://danroy.org/papers/RoyTeh-NIPS-2009.pdf; Feijs, Mondrian 1920-1940 structure analysis, https://arxiv.org/pdf/2011.00843; https://en.wikipedia.org/wiki/Guillotine_partition, search snippets only). Category was random Wikipedia article, resolved through open search since Wikipedia is blocked (least recently used category, last 2026-10-23).",
+    "idea": "Binary tree of axis-aligned cuts, each at an unequal fraction of its parent rectangle, with every leaf coloured in vivid luma-matched hues and black gutters between them. Each cut oscillates on its own phase, and a brighter tint slides across each leaf at a fixed fraction, so the cells resize and slide against one another while the tiling stays gap-free.",
+    "engineName": "mondrian",
+    "outcome": "shipped",
+    "reason": "Passed validateEngine() on 15/15 seeds (1-15) and the CLI gate on 12345. Iterations driven by measurement: black leaves caused a brightness trend, so all leaves were coloured; equal-luma colour alone gave an invisible luma diff, so sliding stripes were added; yellow and orange were dropped to avoid olive. Nearest-neighbour novelty 0.973 vs impactshock, well above the 0.60 minimum. Frames rendered and looked at.",
+    "seedsVerified": "1-15, 12345",
+    "nearestNeighbour": "impactshock",
+    "nearestDistance": 0.973
   }
 ]
