@@ -8646,6 +8646,59 @@ Daily creative-research routine. Category was "random Wikipedia article", resolv
 
 `ENGINE_SUBJECTS`: `mondrian: 'Mondrian Block Partition'` in `src/metadata.js`.
 
+## Ammonite septa fluting engine (`ammonite.html`) — 2026-11-07
+
+Daily creative-research routine. Category was "random natural structure" (last
+used 2026-10-06 for `foamcoarsen.html`). An open WebSearch surfaced ammonite
+suture lines: the fluted boundary where each septum meets the shell wall. The
+sutures are self-similar, with lobes subdividing into finer lobes, and their
+Richardson step-line dimensions are about 1.6-1.7 in many genera, with a lower
+scale cut-off below which the fractal behaviour breaks down. Sources:
+https://www.nature.com/articles/srep33689 (suture pattern formation),
+https://link.springer.com/article/10.1023/A:1014847007351 (suture complexity,
+fractal analysis), https://n-e-r-v-o-u-s.com/blog/?p=1176 (suture patterns).
+
+**What it is**: concentric chambers (a disk plus four annuli) with geometrically
+spaced septa (ratio 1.45). Each septum outline is a nested triangle-wave flute
+with lobe counts 6, 12 and 24 and amplitudes 1, 0.45 and 0.2, so the lobes
+subdivide hierarchically. Chambers are luma-equalised fills separated by black
+septal gutters. Nothing else in the pool draws concentric fluted contours whose
+flutes subdivide in this way.
+
+**Coverage neutrality, proven and then checked.** The triangle wave has only odd
+harmonics of its own fundamental, and the fundamentals (6, 12, 24 times the
+angle) have disjoint odd-harmonic sets, so the cross terms of the squared
+radius integrate to zero. Each chamber's area is therefore exactly independent
+of every flute phase. A numerical check across random phases gave a relative
+area deviation of about 2e-6, which is sampling noise.
+
+**Motion**: each flute level of each septum crawls along its suture on its own
+rate and sign (guaranteed-minimum magnitude), so neighbouring lobes move in
+different directions at once. No whole-scene rotation.
+
+**Bugs and iterations, found by looking and by the gates**:
+1. The first amplitude (0.06) passed every gate, but seed 4 sat at
+   compositionDrift 0.0152 against the 0.015 floor. Raised the amplitude to
+   0.075, which lifted the minimum drift to 0.0162 and kept every other metric
+   clear.
+2. Rendering at seed 1 showed the first-cut flutes reading as a wobble. The
+   rendered frames at 25/50/75/95/105% of a 43.5s cycle show distinct lobe
+   states and bold, saturated chambers, so the design was kept.
+
+**Verified**: `validateEngine()` 16/16 across seeds 1-15 plus 12345 at the final
+amplitude. `avgSat` 83-91 (vs 22), `peakNearWhiteFrac` 0, `projectedRise` -15 to
++18 (vs 50), `compositionDrift` 0.0162-0.0294 (vs 0.015), `unitMotionNonRigidFrac`
+0.812-1.0 (vs 0.40), `fastMotion` 9.4-11.6 against floors of about 3.0-3.5,
+`avgMsPerFrame` 6-8, about 10 min projected per hour.
+
+**Novelty gate**: measured against all 86 existing engines in `engines/manual/`
+(the pool fingerprinted fresh on seeds 1 and 7, alongside the candidate; the
+refreshed cache was not committed). Nearest neighbour is `hankin` at distance
+**0.814** (next `orbweb` 0.986, `arcrings` 1.062). A clean pass, not a thin-margin
+case.
+
+`ENGINE_SUBJECTS`: `ammonite: 'Ammonite Septa Fluting'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

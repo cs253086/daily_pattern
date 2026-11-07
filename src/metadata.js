@@ -57,6 +57,7 @@ const ENGINE_SUBJECTS = {
   juliabands: 'Julia Set Escape Bands',
   fracturepearls: 'Healed Fracture Pearls',
   kumiko: 'Kumiko Lattice',
+  ammonite: 'Ammonite Septa Fluting',
   hankin: 'Islamic Star Lattice',
   mondrian: 'Mondrian Block Partition',
   kaleidoscope: 'Kaleidoscope Patterns',

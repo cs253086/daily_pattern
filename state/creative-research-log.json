@@ -1445,7 +1445,7 @@
     "nearestNeighbour": null,
     "nearestDistance": null
   },
-    {
+  {
     "date": "2026-11-04",
     "inspirationSource": "Kumiko, the Japanese nail-free wooden lattice joinery (https://mymodernmet.com/kumiko-woodworking-smithsonian-craft-show; https://suigenkyo.store/de/blogs/handwerksgeschichte/kumiko): thin slats fitted into hishi (diamond) and koshi (square) lattice panels with no nails, shown against black negative space. Category was 'random architectural or typographic movement' (least recent use, last 2026-10-27).",
     "idea": "Hishi-kumiko diamond lattice drawn only as straight slats of constant width on black: two families at +/-45 degrees, each slat offset by an integer-K travelling wave across its index so the diamond cells breathe and shear. Colours fixed per slat index; the two families run on independent rates.",
@@ -1477,5 +1477,33 @@
     "seedsVerified": "1-15, 12345",
     "nearestNeighbour": "impactshock",
     "nearestDistance": 0.973
+  },
+  {
+    "date": "2026-11-07",
+    "inspirationSource": "Ammonite suture lines: the fluted boundary where each septum meets the shell wall, self-similar lobes and saddles with Richardson step-line dimensions of about 1.6-1.7 (https://www.nature.com/articles/srep33689 suture pattern formation, Scientific Reports; https://link.springer.com/article/10.1023/A:1014847007351 first and second orders of suture complexity, fractal analysis; https://n-e-r-v-o-u-s.com/blog/?p=1176 ammonite suture patterns). Category was random natural structure (last 2026-10-06 for foamcoarsen).",
+    "idea": "Concentric chambers with geometrically spaced septa (Jablczynski-style ratio 1.45). Each septum outline is a nested triangle-wave flute: lobe counts 6, 12, 24 with amplitudes 1, 0.45, 0.2, so lobes subdivide at finer scales. Chamber areas are exactly invariant to flute phase (odd harmonics of the three fundamentals are disjoint), and each flute level crawls on its own rate and sign. Chambers are luma-equalised fills separated by black septal gutters.",
+    "engineName": "ammonite",
+    "outcome": "shipped",
+    "reason": "Passed validateEngine on seeds 1-15 and 12345 (16/16) and the novelty gate at 0.814 vs hankin (second measurement after the flute-amplitude raise). First amplitude (0.06) passed with a thin compositionDrift margin on seed 4 (0.0152); raised to 0.075, which gives a minimum drift of 0.0162 and a projected-rise range of -15 to +18. Frames inspected at 25/50/75/95/105% of the cycle.",
+    "seedsVerified": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      12345
+    ],
+    "nearestNeighbour": "hankin",
+    "nearestDistance": 0.814
   }
 ]
