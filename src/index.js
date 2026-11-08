@@ -584,11 +584,22 @@ async function chooseEngine(cli, imageInfo) {
     for (let round = 1; round <= MAX_REPAIRS; round++) {
       console.log(`[index] asking Gemini to repair (attempt ${round + 1} of ${MAX_REPAIRS + 1})…`);
       const previousHtml = await readFile(current.path, 'utf8');
-      const next = await generateEngine({
-        ...genOpts,
-        wantWebGL: gen.wantWebGL ? false : undefined,
-        repair: { previousHtml, reasons },
-      });
+      let next;
+      try {
+        next = await generateEngine({
+          ...genOpts,
+          wantWebGL: gen.wantWebGL ? false : undefined,
+          repair: { previousHtml, reasons },
+        });
+      } catch (e) {
+        // A failed Gemini call (empty/RECITATION-blocked output, a 5xx that
+        // outlasted its retries) costs this round, not the whole day
+        // (2026-11-07: an empty repair response skipped the day before the
+        // late attempt could run).
+        console.warn(`[index] repair attempt ${round} produced no engine: ${e.message}`);
+        reasons = [`generation error: ${e.message}`];
+        continue;
+      }
       result = await validateEngineSafe(next.path, validateOpts);
       if (result.ok) {
         console.log(`[index] repaired engine passed (peakStd=${result.stats.peakStd.toFixed(1)}, motion=${result.stats.motion.toFixed(1)}, ${result.stats.avgMsPerFrame}ms/frame, ~${result.stats.projectedHourRenderMin}min for 1h).`);
@@ -603,11 +614,16 @@ async function chooseEngine(cli, imageInfo) {
     if (LATE_RETRY_MIN > 0) {
       console.log(`[index] all attempts failed; waiting ${LATE_RETRY_MIN} min for one last Gemini attempt.`);
       await new Promise((r) => setTimeout(r, LATE_RETRY_MIN * 60000));
-      const late = await generateEngine({
-        ...genOpts,
-        wantWebGL: gen.wantWebGL ? false : undefined,
-        repair: { previousHtml: await readFile(current.path, 'utf8'), reasons },
-      });
+      let late;
+      try {
+        late = await generateEngine({
+          ...genOpts,
+          wantWebGL: gen.wantWebGL ? false : undefined,
+          repair: { previousHtml: await readFile(current.path, 'utf8'), reasons },
+        });
+      } catch (e) {
+        return { skip: true, reason: `late generation error: ${e.message}` };
+      }
       result = await validateEngineSafe(late.path, validateOpts);
       if (result.ok) {
         console.log(`[index] late attempt passed (peakStd=${result.stats.peakStd.toFixed(1)}, motion=${result.stats.motion.toFixed(1)}, ${result.stats.avgMsPerFrame}ms/frame, ~${result.stats.projectedHourRenderMin}min for 1h).`);
