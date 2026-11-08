@@ -1505,5 +1505,33 @@
     ],
     "nearestNeighbour": "hankin",
     "nearestDistance": 0.814
+  },
+  {
+    "date": "2026-11-08",
+    "inspirationSource": "Newton's rings, the thin-film interference fringes of a convex lens resting on flat glass (air wedge thickness r^2/(2R); fringe radii r_n = sqrt(n R lambda)). Sources: https://web.pa.msu.edu/courses/2014fall/PHY431/Labs/Lab5-InterferenceFringesNewtonsRings.pdf , https://www.vedantu.com/physics/newtons-rings , https://iitr.ac.in/Academics/static/Department/Physics/BTech%201st%20year%20lab/Newtons_Ring.pdf",
+    "idea": "Several scattered lens contact points, each a set of concentric fringes whose spacing shrinks outward (the opposite of Liesegang's widening gaps), with a dark centre spot per contact and a wavelength breathing term plus Lissajous drift of the contact points. Tried two structural designs: (1) full-frame nearest-contact fringe domains (crisp, vivid, passed the quality battery) and (2) the same fringes seen through separate circular lens windows on black.",
+    "engineName": null,
+    "outcome": "skipped",
+    "reason": "Quality gate passed 16/16 (seeds 1-15 + 12345, all margins comfortable) but the mandatory novelty gate failed both designs. Full-frame version: nearest neighbour widmanstatten at 0.320 (concentric banded full-bleed composition collides with the colour-blind descriptor). Windowed version (3-4 lens disks, 0.25 M radius, black elsewhere): nearest neighbour diatomlattice at 0.438, also below the 0.60 minimum. Both are multi-centre concentric-ring compositions, the same archetype already covered by liesegang, diatomlattice, doylespiral and kaleidoscope. Engine file not committed.",
+    "seedsVerified": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      12345
+    ],
+    "nearestNeighbour": "diatomlattice (windowed design; full-frame design: widmanstatten)",
+    "nearestDistance": 0.438
   }
 ]
