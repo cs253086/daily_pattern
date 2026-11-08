@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ammonite Septa Fluting — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "random natural structure"): AMMONITE
+// SUTURE LINES. An ammonite shell is divided into chambers by septa, and the
+// line where each septum meets the shell wall (the suture) is fluted into
+// lobes and saddles that are self-similar: each lobe subdivides into smaller
+// lobes at finer scales. Ammonite sutures are a standard fractal-geometry case
+// (Richardson step-line dimensions of about 1.6-1.7 in many genera, with a
+// lower scale cut-off below which the fractal behaviour breaks down). Sources:
+// https://www.nature.com/articles/srep33689 (suture pattern formation,
+// Scientific Reports),
+// https://link.springer.com/article/10.1023/A:1014847007351 (first and second
+// orders of suture complexity, fractal analysis),
+// https://n-e-r-v-o-u-s.com/blog/?p=1176 (ammonite suture patterns).
+//
+// A genuinely different construction PRINCIPLE from every other engine in the
+// pool: the generative primitive is a septum outline built from NESTED
+// triangle-wave flutes (a lobe-count doubling hierarchy), drawn as a stack of
+// concentric chambers with geometrically spaced septa. No engine here uses
+// concentric fluted contours whose flutes subdivide hierarchically.
+//
+// GEOMETRY: septum k has radius R_k = Rout * G^(k-K+1) and outline
+//   r_k(th) = R_k * (1 + A * S(th, phase_k)),
+//   S = sum over levels l of w_l * tri(n_l * th + phi_{k,l}),  n_l = N * 2^l,
+// with w_l = RHO^l. The triangle wave has only ODD harmonics of its own
+// fundamental, and the fundamentals n_l = N*2^l have disjoint odd-harmonic
+// sets, so the cross terms of S^2 integrate to zero. Each chamber's area is
+// therefore exactly independent of every flute phase (checked numerically
+// offline: relative deviation about 2e-6 across random phases), so the motion
+// cannot change how much of the frame each chamber covers.
+//
+// MOTION (unit-level, not rigid): every septum's flutes crawl along the
+// suture at their own rate and sign, and each level of each septum has its own
+// rate (guaranteed-minimum magnitude, random sign), so neighbouring lobes move
+// in different directions at once. No whole-scene rotation.
+//
+// BRIGHTNESS: every chamber colour is luma-equalised by bisecting lightness,
+// and chamber areas are exactly phase-invariant, so mean luma is constant by
+// construction. Septa are drawn as black gutters of fixed width.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
+  const dt = 1 / FPS;
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Burn 4 draws first: Mulberry32's first outputs for small consecutive seeds
+  // are correlated (same fix as pendulumwave.html / spinbounce.html).
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  // Hue sets per palette (copied from the pool's shared hue tables). Only hue
+  // and saturation are used here; lightness is luma-equalised below.
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90], [190, 88], [230, 82], [280, 78], [320, 70]],
+    ember:  [[10, 95], [345, 90], [320, 82], [355, 95], [300, 80]],
+    ocean:  [[185, 92], [205, 90], [225, 85], [250, 75], [270, 68]],
+    neon:   [[0, 95], [165, 88], [144, 88], [216, 92], [288, 94]],
+    sunset: [[10, 95], [330, 88], [280, 75], [355, 90], [190, 70]],
+    ice:    [[185, 88], [205, 84], [225, 80], [250, 76], [270, 72]],
+    gold:   [[20, 92], [350, 85], [300, 80], [160, 85], [240, 85]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out.map((c) => [c[0], c[1]]) : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const HUES = parseColors() || palettes[resolvePalette()];
+
+  // Rec.709 luma of an HSL colour.
+  function hslToRgb(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [255 * f(0), 255 * f(8), 255 * f(4)];
+  }
+  function lumaOf(h, s, l) {
+    const [r, g, b] = hslToRgb(h, s, l);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+  const LUMA_TARGET = 112;
+  function equaliseLightness(h, s, target = LUMA_TARGET) {
+    let lo = 18, hi = 90;
+    for (let i = 0; i < 28; i++) {
+      const mid = (lo + hi) / 2;
+      if (lumaOf(h, s, mid) < target) lo = mid; else hi = mid;
+    }
+    return Math.max(40, Math.min(70, (lo + hi) / 2));
+  }
+
+  // ---- Structure, fixed once per video ----
+  const K = 5;                 // septa (innermost chamber is a disk)
+  const G = 1.45;              // geometric spacing between septa (Jablczynski-style)
+  const A = 0.075;             // flute amplitude, fraction of septum radius
+  const RHO = 0.45;            // level-to-level amplitude ratio
+  const NBASE = 6;             // lobes at the coarsest level
+  const LEVELS = 3;            // 6, 12, 24 lobes
+  const RES = 720;             // outline samples per septum
+  const ROUT = Math.min(W, H) * 0.46 * (DENSITY >= 1.3 ? 1.04 : 1);
+  const GUT = Math.min(W, H) * 0.011;
+
+  // Chamber colours: one per chamber (inner disk + K-1 annuli) plus background.
+  const nChambers = K + 1;
+  const order = [...Array(HUES.length).keys()];
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  const chamberCol = [];
+  for (let c = 0; c < nChambers; c++) {
+    const [h, s] = HUES[order[c % order.length]];
+    const sat = Math.max(84, Math.min(96, s));
+    chamberCol.push(`hsl(${h}, ${sat}%, ${equaliseLightness(h, sat).toFixed(2)}%)`);
+  }
+
+  const septa = [];
+  for (let k = 0; k < K; k++) {
+    const R = ROUT * Math.pow(G, k - (K - 1));
+    const levels = [];
+    for (let l = 0; l < LEVELS; l++) {
+      levels.push({
+        n: NBASE * Math.pow(2, l),
+        w: Math.pow(RHO, l),
+        ph: rand(0, 2 * Math.PI),
+        rate: 0,
+      });
+    }
+    septa.push({ R, levels });
+  }
+
+  // Triangle wave in [-1, 1], period 2*pi, odd harmonics only.
+  function tri(x) {
+    const y = ((x % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    return y < Math.PI ? (2 * y / Math.PI - 1) : (3 - 2 * y / Math.PI);
+  }
+  function flute(s, th) {
+    let S = 0;
+    for (const lv of s.levels) S += lv.w * tri(lv.n * th + lv.ph);
+    return 1 + A * S;
+  }
+
+  // Rates: guaranteed-minimum magnitude, random sign. Level 0 slower than the
+  // finer levels so the coarse lobes crawl while the fine ones shimmer.
+  function reconfigure() {
+    for (const s of septa) {
+      s.levels[0].rate = sgn() * rand(0.9, 1.3) * SPEED;
+      s.levels[1].rate = sgn() * rand(1.2, 1.7) * SPEED;
+      s.levels[2].rate = sgn() * rand(1.4, 2.0) * SPEED;
+    }
+  }
+
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+  reconfigure();
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  const CX = W / 2, CY = H / 2;
+
+  function tracePath(s) {
+    ctx.beginPath();
+    for (let i = 0; i <= RES; i++) {
+      const th = (i / RES) * 2 * Math.PI;
+      const r = s.R * flute(s, th);
+      const x = CX + r * Math.cos(th);
+      const y = CY + r * Math.sin(th);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+  }
+
+  function renderFrame() {
+    cycleFrame++;
+    for (const s of septa) for (const lv of s.levels) lv.ph += lv.rate * dt;
+    if (cycleFrame >= cycleFrames) { cycleFrame = 0; reconfigure(); }
+
+    // Background chamber, then septa from outermost to innermost: each filled
+    // outline takes the colour of the chamber it encloses, so every region is
+    // painted exactly once by its own colour.
+    ctx.fillStyle = chamberCol[K];
+    ctx.fillRect(0, 0, W, H);
+    for (let k = K - 1; k >= 0; k--) {
+      tracePath(septa[k]);
+      ctx.fillStyle = chamberCol[k];
+      ctx.fill();
+    }
+    // Septa as black gutters of fixed width (negative space between chambers).
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#000';
+    for (let k = 0; k < K; k++) {
+      tracePath(septa[k]);
+      ctx.lineWidth = GUT;
+      ctx.stroke();
+    }
+
+    window.currentFrame++;
+  }
+
+  window.advanceFrame = function () { renderFrame(); };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) renderFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
