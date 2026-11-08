@@ -38,9 +38,25 @@ them:
      correctly rejected; all 7 curated engines pass with a wide margin
      (29-67 vs. the 22 threshold); the fixed `kaleidoscope`/`ice` combo
      went from 16.0 to 35.5.
-2. **Geometric house style.** Crisp straight edges, defined shapes, polygons,
-   lattices, radial/mirror symmetry — not soft organic blobs/fuzzy clouds.
-   (See `src/generate.js`'s `HOUSE STYLE` prompt line and `THEME_HINTS`.)
+2. **Geometric house style, with organic forms allowed (2026-11-08).** The
+   default is crisp, luminous geometry: polygons, lattices, radial/mirror
+   symmetry, glowing edges on black. Organic and fluid forms (flowing lines,
+   soft luminous light fields, liquid- or nebula-like shapes) are now ALSO
+   welcome when they keep vivid colour, clear form, and the performance and
+   whiteout rules. This reverses the earlier "not soft organic blobs/fuzzy
+   clouds" rule, after research into what the largest channels in this
+   genre actually watch (fluid, glowing, nebula content). See
+   `src/generate.js`'s `HOUSE STYLE` prompt line.
+   
+   Same date, the owner also asked for "more full and glamorous" videos. The
+   Gemini prompt now asks for edge-to-edge composition with layered detail
+   (up to about 150 shapes per frame, about 30 overlapping in one area),
+   a richer palette (jewel tones, luminous gradients, lightness 35-70%
+   instead of 40-60%), and a generous glow underlay (up to 0.35 alpha, about
+   4-6x the core width). Those are prompt-level limits: `validate.js`'s
+   quality gates (saturation, near-white, brightness trend, motion,
+   compositionDrift, unit motion, speed) were NOT loosened, and they remain
+   the enforcement.
 3. **Additive glow, but watch for whiteout.** Engines that *accumulate*
    light across frames (fade instead of clearing each frame — e.g.
    `kaleidoscope.html`) are prone to washing out to solid white when many
