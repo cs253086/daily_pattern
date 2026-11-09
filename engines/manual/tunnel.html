@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tunnel — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Endless polygon tunnel: nested regular polygons fly outward from the centre
+// (the viewer dives inward), so the frame never runs out of new rings. This is
+// the most common format in the satisfying "hypnotic loop" genre.
+//
+// Design:
+//   * Rings sit at radii Q^e with e = n + shift, where n is a fixed integer per
+//     ring and shift grows continuously. A ring keeps its index and drifts out,
+//     new rings appear at the centre and fade in, old ones fade out at the rim.
+//   * Ink per ring is constant (stroke width ~ 1/radius, length ~ radius), so
+//     the summed lit area stays near-constant as rings slide through. Fades use
+//     smooth ramps so the sum over shifting rings has almost no Fourier content.
+//   * Neighbouring rings counter-rotate, and the twist angle grows with e, so
+//     every ring moves against its neighbours (unit-level motion, not one spin).
+//   * Colour is a continuous function of e (120 degrees per ring step), with
+//     lightness bisected per hue so every colour has the same Rec.709 luma.
+//     The colour travels with each ring as it flies outward.
+//   * Twist offset is re-rolled once per cycleSec. Polygon side count is fixed
+//     for the video (a regular polygon's area does not depend on its rotation).
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no requestAnimationFrame, opaque clear each frame.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const CYCLE = Math.max(20, fltP('cycleSec', 43.5));
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const U = Math.min(W, H);
+  const DIAG = Math.hypot(W, H);
+  const Q = 1.45;                       // radius ratio between neighbouring rings
+  const LOGQ = Math.log(Q);
+  const ZOOM = 0.3 * SPEED;             // ring-spacings per second (one spacing ~3.3 s)
+  const N_SIDES = rng() < 0.5 ? 6 : 8; // fixed per video
+  const TWIST = rand(0.22, 0.34) * sgn(); // rad of twist per unit of e
+  const HUE0 = rand(0, 360);
+  const R_MIN = 0.07 * U;
+  const R_MAX = 0.52 * DIAG;
+  const E_LO = Math.log(R_MIN) / LOGQ;
+  const E_HI = Math.log(R_MAX) / LOGQ;
+  const FADE = 0.5;                     // fade width in ln(radius) units
+
+  // Lightness per hue, bisected so every hue has the same Rec.709 luma (~130).
+  const LUMA_TARGET = 130;
+  function hslToRgb(h, s, l) {
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const hp = (h / 60) % 6;
+    const x = c * (1 - Math.abs((hp % 2) - 1));
+    let r = 0, g = 0, b = 0;
+    if (hp < 1) { r = c; g = x; } else if (hp < 2) { r = x; g = c; }
+    else if (hp < 3) { g = c; b = x; } else if (hp < 4) { g = x; b = c; }
+    else if (hp < 5) { r = x; b = c; } else { r = c; b = x; }
+    const m = l - c / 2;
+    return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+  }
+  const LTAB = new Float32Array(360);
+  for (let h = 0; h < 360; h++) {
+    let lo = 0.1, hi = 0.9;
+    for (let it = 0; it < 24; it++) {
+      const mid = (lo + hi) / 2;
+      const [r, g, b] = hslToRgb(h, 0.92, mid);
+      const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      if (y < LUMA_TARGET) lo = mid; else hi = mid;
+    }
+    LTAB[h] = (lo + hi) / 2;
+  }
+
+  const smooth = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
+  function alphaOf(r) {
+    return smooth(Math.log(r / R_MIN) / FADE) * smooth(Math.log(R_MAX / r) / FADE);
+  }
+
+  // Per-cycle twist offset, deterministic from seed and cycle index.
+  function cycleOffset(cyc) {
+    const x = Math.sin(cyc * 12.9898 + SEED * 78.233) * 43758.5453;
+    return 2 * Math.PI * (x - Math.floor(x));
+  }
+
+  window.currentFrame = 0;
+  window.TOTAL_FRAMES = Math.round(DURATION * FPS);
+
+  function drawRing(n, e, t, phi0) {
+    const r = Math.exp(e * LOGQ);
+    const a = alphaOf(r);
+    if (a <= 0.01) return;
+    const sign = (n & 1) ? 1 : -1;
+    const ang = phi0 + TWIST * e + sign * 0.5 * Math.sin(2 * Math.PI * t / 7 + n * 1.3);
+    const hue = (((HUE0 + 120 * e) % 360) + 360) % 360;
+    const hi = Math.round(hue) % 360;
+    const L = LTAB[hi];
+    // Ink per ring is constant: stroke width ~ 1/radius (length ~ radius).
+    const lw = Math.max(2, Math.min(0.06 * U, 0.02 * U * (0.25 * U / r)));
+
+    ctx.beginPath();
+    for (let k = 0; k <= N_SIDES; k++) {
+      const th = ang + (2 * Math.PI * k) / N_SIDES;
+      const x = W / 2 + r * Math.cos(th);
+      const y = H / 2 + r * Math.sin(th);
+      if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.lineJoin = 'round';
+    // Glow underlay: wide, low alpha.
+    ctx.lineWidth = lw * 3.2;
+    ctx.strokeStyle = `hsla(${hi}, 100%, ${(L * 100).toFixed(1)}%, ${(0.2 * a).toFixed(3)})`;
+    ctx.stroke();
+    // Bright core.
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = `hsla(${hi}, 96%, ${(Math.min(0.9, L + 0.06) * 100).toFixed(1)}%, ${(0.92 * a).toFixed(3)})`;
+    ctx.stroke();
+  }
+
+  function renderFrame() {
+    const t = window.currentFrame / FPS;
+    const cyc = Math.floor(t / CYCLE);
+    const phi0 = cycleOffset(cyc);
+    const shift = t * ZOOM;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    // Ring index n has exponent e = n + shift; visible exponents are E_LO..E_HI.
+    const nLo = Math.ceil(E_LO - shift);
+    const nHi = Math.floor(E_HI - shift);
+    for (let n = nLo; n <= nHi; n++) {
+      drawRing(n, n + shift, t, phi0);
+    }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

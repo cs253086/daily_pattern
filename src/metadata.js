@@ -100,6 +100,7 @@ const ENGINE_SUBJECTS = {
   torusrings3d: 'Glowing 3D Rings',
   truchet: 'Truchet Tile Maze',
   vegasphere: 'Bulging Op Art Checkerboard',
+  tunnel: 'Endless Polygon Tunnel',
   voderberg: 'Voderberg Spiral',
   voronoimosaic: 'Voronoi Mosaic',
   widmanstatten: 'Crystal Lattice Bands',

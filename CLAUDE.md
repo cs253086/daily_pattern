@@ -8715,6 +8715,48 @@ case.
 
 `ENGINE_SUBJECTS`: `ammonite: 'Ammonite Septa Fluting'` in `src/metadata.js`.
 
+## Daily popular-format research (required every day, 2026-11-09)
+
+User request, 2026-11-09: "research what pattern videos are popular and
+generate similar videos ... do the research every day." This is a standing
+part of the daily creative-research routine, in addition to the random
+web-inspiration engine search that already runs.
+
+Each day the research routine must:
+1. WebSearch (and WebFetch where accessible) for currently popular pattern,
+   satisfying, hypnotic, screensaver and loop videos and channels. Record the
+   concrete visual format of each one: archetype (tunnel/zoom, kaleidoscope,
+   lattice, spiral, fluid, morphing solids), motion type, colour scheme and
+   length, with source links.
+2. Pick 2-3 recurring popular formats that the pool does not yet cover well
+   (check engine headers first), and write them into state/creative-research-log.json
+   and a dated note here.
+3. Build ONE engine from the most promising format, using a genuinely
+   different construction, and ship it only if it passes every gate in the
+   research routine (visual look, validate.js, 15-seed battery, and the novelty
+   gate at 0.60). Otherwise log it as skipped with the reason.
+4. Only one engine ships per day, so the best of the popular-format work and
+   the random-inspiration work is chosen; the other is logged as skipped.
+
+First popular-format engine: `engines/manual/tunnel.html` (endless polygon
+tunnel). Format evidence: the satisfying "hypnotic loop" genre favours endless
+zoom and tunnel loops (see the 2026-11-09 research note below). Verified:
+validate.js passes (seed 12345: projectedRise -12.8, compositionDrift 0.029,
+unitMotionNonRigidFrac 0.979, fastMotion 23.8 vs 5.0); 15-seed battery
+15/15 PASS. Novelty gate: see the 2026-11-09 entry in the research log.
+
+Research note, 2026-11-09 (WebSearch, sources): why satisfying loop videos
+work -- pattern recognition and symmetry, predictable repetition, a sense of
+completion, and meditative effects, as in
+[DEV Community: why oddly satisfying videos are addictive](https://dev.to/tvscnvideo/why-are-oddly-satisfying-videos-so-addictive-the-psychology-behind-relaxing-loop-videos-5a13),
+[Irish Times: Visual ASMR, the online world of hypnotic loops](https://www.irishtimes.com/culture/art-and-design/visual-asmr-the-weird-online-world-of-hypnotic-loops-and-satisfying-sounds-1.4525192),
+and
+[BBC Bitesize: why we find these things oddly satisfying](https://bbcbreakingnews.pages.dev/bitesize/articles/zww8xg8).
+The Irish Times piece reports one Swedish animator with 3.44M combined
+followers and #oddlysatisfying at 25.9B TikTok views (date and figures
+unverified). Search results did not rank channels, so the research routine
+should use YouTube-specific queries to name current creators.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

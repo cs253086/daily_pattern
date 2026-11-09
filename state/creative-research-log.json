@@ -1533,5 +1533,17 @@
     ],
     "nearestNeighbour": "diatomlattice (windowed design; full-frame design: widmanstatten)",
     "nearestDistance": 0.438
+  },
+  {
+    "date": "2026-11-09",
+    "source": "popular-video-research",
+    "inspirationSource": "WebSearch: satisfying / hypnotic loop pattern videos (DEV Community; Irish Times Visual ASMR; BBC Bitesize)",
+    "idea": "Endless polygon tunnel: nested regular polygons flying outward, neighbours counter-rotating, colour keyed to radius",
+    "engineName": "tunnel",
+    "outcome": "shipped",
+    "reason": "User request 2026-11-09 to research popular pattern videos and generate similar ones. Endless zoom/tunnel is the most common satisfying loop format; no pool engine covered it.",
+    "seedsVerified": "validate.js 12345 ok; battery 1-15 PASS 15/15",
+    "nearestNeighbour": "spirograph",
+    "nearestDistance": 0.709
   }
 ]
