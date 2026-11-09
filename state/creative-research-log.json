@@ -1545,5 +1545,17 @@
     "seedsVerified": "validate.js 12345 ok; battery 1-15 PASS 15/15",
     "nearestNeighbour": "spirograph",
     "nearestDistance": 0.709
+  },
+  {
+    "date": "2026-11-09",
+    "source": "web-research",
+    "inspirationSource": "WebSearch: Miura-ori fold origami crease pattern (https://en.wikipedia.org/wiki/Miura_fold; https://arxiv.org/pdf/2006.04070 constructing rigid-foldable Miura-ori tessellations)",
+    "idea": "Miura-ori: a parallelogram crease tiling folded rigidly into a kinetic zigzag sheet, rendered as lit, depth-sorted facets that fold and unfold",
+    "engineName": null,
+    "outcome": "skipped",
+    "reason": "Geometry verification failed before any render. The flat Miura-ori crease pattern (rows of parallelograms, mirror-alternating across straight creases, translated across zigzag creases) was unfolded with a BFS of rigid panel rotations about shared creases. Every mountain/valley sign pattern on a 2x2 and 3x3 patch was tested, for uniform fold angles, separate horizontal and zigzag angles, and several shear values. Closure at interior nodes never held except in the fully folded degenerate state (fold = pi), so the uniform-fold Miura kinematics could not be reproduced. Lesson for a retry: this needs a real kinematic solver (per-crease dihedrals solved jointly with panel rigidity, or a published closed-form Miura parametrisation checked against edge lengths and vertex closure) before any rendering. Not attempted further today.",
+    "seedsVerified": "none (no engine built)",
+    "nearestNeighbour": null,
+    "nearestDistance": null
   }
 ]
