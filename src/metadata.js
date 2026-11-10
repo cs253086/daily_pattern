@@ -101,6 +101,7 @@ const ENGINE_SUBJECTS = {
   truchet: 'Truchet Tile Maze',
   vegasphere: 'Bulging Op Art Checkerboard',
   tunnel: 'Endless Polygon Tunnel',
+  topomap: 'Topographic Contour Lines',
   voderberg: 'Voderberg Spiral',
   voronoimosaic: 'Voronoi Mosaic',
   widmanstatten: 'Crystal Lattice Bands',

@@ -1557,5 +1557,29 @@
     "seedsVerified": "none (no engine built)",
     "nearestNeighbour": null,
     "nearestDistance": null
+  },
+  {
+    "date": "2026-11-10",
+    "source": "popular-video-research",
+    "inspirationSource": "WebSearch: popular hypnotic/satisfying pattern loops (https://www.youtube.com/watch?v=RFRXRlMjUSQ topographic contour loop; https://channelsurfer.tv/guides/youtube-screensavers/ 2026 screensaver guide; https://www.youtube.com/watch?v=V-7YER3orSM kaleidoscope loop)",
+    "idea": "Topographic contour flow: bold glowing iso-lines of a slowly morphing smooth height field, levels at equal-area quantiles, marching squares",
+    "engineName": "topomap",
+    "outcome": "shipped",
+    "reason": "Popular-format research 2026-11-10. Formats seen: topographic contour-line loops (monochrome and coloured), kaleidoscope loops, lava-lamp/bubble flow, glossy 3D shapes morphing. Pool gap: no marching-squares iso-line engine (juliabands fills bands, it does not trace lines). Chosen over the random-inspiration candidate because it is a popular format and passed every gate.",
+    "seedsVerified": "validateEngine 16/16 on seeds 1-15 plus 12345; CLI-equivalent speed at 1920x1080 52-90 ms/frame; frames looked at at 300 and 900 frames (seeds 1 and 7)",
+    "nearestNeighbour": "grid",
+    "nearestDistance": 0.808
+  },
+  {
+    "date": "2026-11-10",
+    "source": "web-research",
+    "inspirationSource": "WebSearch: unusual tiling constructions 2026 (https://arxiv.org/pdf/2601.00340 near-coincidence quasiperiodic tilings; https://arxiv.org/pdf/2604.20964 hat tiling via Markov partition; https://en.wikipedia.org/wiki/List_of_aperiodic_sets_of_tiles)",
+    "idea": "Parqueting-reflection / near-coincidence aperiodic tilings: a hat-monotile or near-coincidence quasiperiodic tiling rendered as lit tiles",
+    "engineName": null,
+    "outcome": "skipped",
+    "reason": "Only one engine ships per day, and the popular-format candidate (topomap) passed every gate and was chosen. This aperiodic-tiling idea overlaps the existing quasicrystal and voderberg substitution-tiling archetype, so it is logged for a future day rather than built now.",
+    "seedsVerified": "none (not built)",
+    "nearestNeighbour": null,
+    "nearestDistance": null
   }
 ]

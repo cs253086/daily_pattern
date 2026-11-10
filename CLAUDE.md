@@ -8757,6 +8757,48 @@ followers and #oddlysatisfying at 25.9B TikTok views (date and figures
 unverified). Search results did not rank channels, so the research routine
 should use YouTube-specific queries to name current creators.
 
+## Topographic contour-line engine (`topomap.html`) — 2026-11-10
+
+Daily popular-format research (WebSearch, 2026-11-10). Formats seen in the
+genre: topographic contour-line loops (e.g. the 2026 "Topographic Abstract
+Wallpaper" 4K loop, https://www.youtube.com/watch?v=RFRXRlMjUSQ), kaleidoscope
+loops (https://www.youtube.com/watch?v=V-7YER3orSM), lava-lamp / bubble flow,
+and glossy 3D shapes morphing. The pool has no marching-squares iso-line engine
+(juliabands fills equal-area bands rather than tracing lines), so the
+topographic contour format was chosen. No view counts were available, so the
+popularity ranking is qualitative.
+
+**What it is**: several smooth plane waves (K=5, random direction,
+wavelength 0.35-0.8 frame height, guaranteed-minimum-magnitude random-sign
+phase rate) sum to a height field. Nine iso-levels are set at equal-area
+quantiles of the current field, recomputed each frame from a sorted copy, and
+each level is traced with marching squares as a bold glowing line. Level k
+keeps a fixed hue (tied to rank, not field value), luma-equalised by lightness
+bisection. Because every level sits at a fixed quantile, the area between
+levels is constant by construction.
+
+**Verified**: `validateEngine()` 16/16 on seeds 1-15 plus 12345 (run through
+the same function the CLI uses). avgSat 65.8-78.9 (vs 22), projectedRise -10
+to +36 (vs 50; seed 7 is the highest at +35.8), compositionDrift 0.052-0.088
+(vs 0.015), unitMotionNonRigidFrac 0.663-1.0 (vs 0.40; 12345 is the thinnest
+at 0.663), fastMotion 29-39 against floors of about 5-8, and avgMsPerFrame
+53-90 at 1920x1080 (projected hour 70-130 min; the budget is 100 ms per frame,
+and seed 8 at 90 ms is the closest). Frames rendered and looked at at 300 and
+900 frames (seeds 1 and 7): bold saturated contour lines with clear black
+negative space and visible reshaping.
+
+**Bugs and iterations**: none needed. The first draft was checked by eye and
+passed. The marching-squares lookup table and both saddle cases were checked
+by hand before rendering.
+
+**Novelty gate**: measured against all 90 engines in `engines/manual/` (pool
+fingerprinted fresh; the refreshed cache was not committed). Nearest
+neighbour is `grid` at distance **0.808** (next `fireworks` 0.877,
+`auto-2026-10-25-nasa-science` 0.965). Clean pass above 0.60.
+
+`ENGINE_SUBJECTS`: `topomap: 'Topographic Contour Lines'` in `src/metadata.js`.
+
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
