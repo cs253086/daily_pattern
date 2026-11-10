@@ -115,10 +115,13 @@ function repairFixes(reasons) {
   const text = reasons.join(' | ').toLowerCase();
   const blocks = [];
   if (text.includes('near-max brightness') || text.includes('blown out') || text.includes('solid white')) {
-    blocks.push('FIX FOR WHITE-OUT: too many pixels are near-white. Lower every fill lightness to 40-55%, cut glow-stroke alpha to 0.15-0.25, remove any globalCompositeOperation "lighter" fills, draw fewer and smaller overlapping shapes, and keep only a few tiny bright highlights. Most of the frame must be deep saturated colour on black.');
+    blocks.push('FIX FOR WHITE-OUT: too many pixels are near-white. Lower every fill lightness to 35-60% (the house budget is 35-70%, so stay in its lower half here), cut glow-stroke alpha to 0.2-0.3, remove any globalCompositeOperation "lighter" fills, draw fewer and smaller overlapping shapes, and keep only a few tiny bright highlights. Most of the frame must be deep saturated colour on black.');
   }
   if (text.includes('pale') || text.includes('saturation')) {
-    blocks.push('FIX FOR PALE COLOUR: the colours are too grey. Set every hsl() saturation to 80-100% and lightness to 45-60%. Do not use white, grey, or low-saturation colours except for tiny highlights.');
+    blocks.push('FIX FOR PALE COLOUR: the colours are too grey. Set every hsl() saturation to 80-100% and lightness to 40-65%. Do not use white, grey, or low-saturation colours except for tiny highlights.');
+  }
+  if (text.includes('near-black') || text.includes('lacks spatial structure') || text.includes('max diff 0.00') || text.includes('never develops') || text.includes('frozen')) {
+    blocks.push('FIX FOR AN EMPTY OR FROZEN FRAME: the last attempt drew almost nothing (or the same static image every frame). Make sure the full composition is drawn on every advanceFrame() call at full visible size, that every shape is actually given a fill or stroke colour with non-zero alpha, that the palette arrays are populated before the first draw, and that the composition changes over time (see EVOLVE OVER THE HOUR). Do not hide the drawing behind a condition that is false at startup.');
   }
   if (text.includes('total_frames') || text.includes('total frames')) {
     blocks.push('FIX FOR TOTAL_FRAMES: the renderer reads window.TOTAL_FRAMES, which is currently undefined. Add the exact line window.TOTAL_FRAMES = Math.round(duration * fps); during startup, before window.READY is set to true.');
