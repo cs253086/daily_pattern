@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hypnotic Spiral Zoom — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated engine, inspired by today's popular-format research (2026-11-11).
+// Searches for popular hypnotic/screensaver loops surfaced the black-and-white
+// spiral optical-illusion uploads ("Hypnotic Black & White Spiral Background 4K
+// ... Optical Illusion TV screensaver") and the "infinite pattern for focus and
+// meditation" loop genre. Sources (search snippets):
+// https://www.youtube.com/watch?v=P7qTscRwlaI and
+// https://www.youtube.com/watch?v=lv1rU4trGGk, plus the channel guide
+// https://channelsurfer.tv/guides/youtube-screensavers/. The pool has tunnels
+// (tunnel.html: nested polygons flying outward), contour lines (topomap.html)
+// and equal-area escape bands (juliabands.html), but no logarithmic spiral zoom.
+//
+// Construction: a LOGARITHMIC SPIRAL PHASE FIELD. Every pixel gets the scalar
+//   s = A * ln(r) + M * theta / (2*pi) - F * t        (in cycles)
+// A sets how many ln-radius cycles fit the frame, M is the number of spiral
+// arms, and F is the zoom rate. v = fract(s) is the local position inside a
+// spiral period. Because the field depends on ln(r), a change of scale is a
+// shift of the field, so the whole picture reads as an endless zoom in or out
+// without any frame ever repeating exactly.
+//
+// Brightness neutrality is by construction: each frame the v values are
+// RANK-QUANTISED into K equal-area bands (exactly 1/K of the pixels per band),
+// so the palette's area distribution, and hence mean luma, cannot drift as the
+// spiral zooms. Every third band is black, a fixed 1/3 of the frame, and the
+// coloured bands keep fixed hues, so luma is constant. Frames are computed
+// fresh, so there is no accumulation and no whiteout mechanism.
+//
+// Motion: the zoom (F), a breathing twist term linear in radius, a breathing
+// pitch (the ring spacing) and a fast ring-phase wobble, all at different rates,
+// so neighbouring rings move in different directions. This is why the composition
+// keeps developing for the whole hour rather than just spinning.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32 (4-draw burn-in), no requestAnimationFrame.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Mulberry32's first draws for consecutive small seeds are correlated --
+  // burn 4 draws first (same convention as juliabands/pendulumwave).
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  // [hue, sat, light] stops; PAL[0] sets the starting hue of the band wheel.
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  // ---- spiral parameters (fixed per video) --------------------------------
+  // A: ln-radius cycles per unit of ln r. Each spiral period grows the radius
+  //    by a factor exp(1/A); this sets how many rings of arms fit the frame.
+  // M: number of spiral arms (integer, so the field is single-valued on theta).
+  // F: zoom rate in cycles per second, sign random (zoom in or out).
+  const A = rand(0.85, 1.0);
+  const M = 3 + Math.floor(rng() * 4);        // 3..6 arms
+  const F = sgn() * rand(0.10, 0.16) * SPEED; // about one spiral period per 6-10 s
+  // B0 breathes the arms: a term linear in radius (not ln r) breaks the pure
+  // scale self-similarity, so the arms wind tighter and looser toward the rim
+  // over time. A pure zoom of a log spiral would look identical at every scale
+  // and the composition would never develop.
+  const B0 = rand(0.8, 1.1);
+  const TB = rand(18, 30) / SPEED;             // breathing period, seconds
+  const PB = rand(0, 2 * Math.PI);
+  // Pitch breathing: the ring spacing itself swells and tightens around a pivot
+  // radius (PIV). Unlike the zoom, this changes the radial spacing of the arms,
+  // so the composition really develops over the hour rather than just moving.
+  const KA = rand(0.25, 0.35);
+  const TA = rand(20, 32) / SPEED;
+  const PA = rand(0, 2 * Math.PI);
+  const PIV = Math.log(0.45);                  // pivot in ln-radius units
+  // Ring wobble: a fast term in ln r at its own rate. A zoom of a log spiral
+  // is locally the same as a rigid rotation of it, so on its own it reads as a
+  // block spinning. This wobble phases each ring differently, so neighbouring
+  // rings move in different directions (unit-level, non-rigid motion).
+  const GW = rand(0.12, 0.18);                  // amplitude, in cycles
+  const WW = sgn() * rand(1.6, 2.4) * SPEED;    // rate, rad/s
+  const WP = rand(0, 2 * Math.PI);
+
+  // ---- field grid -----------------------------------------------------------
+  // Computed at a capped resolution and nearest-upscaled (crisp, house style).
+  const CW = Math.min(W, 640);
+  const CH = Math.max(1, Math.round(CW * H / W));
+  const N = CW * CH;
+  const K = 12;                 // equal-area bands
+  const NB = 4096;              // histogram bins over v in [0,1)
+
+  // Normalised coordinates: unit = half the frame height, so the field does not
+  // depend on the render resolution.
+  const LNR = new Float32Array(N);
+  const THN = new Float32Array(N); // theta / (2*pi), in [0,1)
+  const RAD = new Float32Array(N); // radius in the same normalised units
+  const RMIN = 0.5 / (CH / 2);     // clamp radius to half a pixel (avoids ln 0)
+  {
+    let i = 0;
+    for (let py = 0; py < CH; py++) {
+      const y = (CH / 2 - py - 0.5) / (CH / 2);
+      for (let px = 0; px < CW; px++) {
+        const x = (px + 0.5 - CW / 2) / (CH / 2);
+        const r = Math.max(RMIN, Math.hypot(x, y));
+        LNR[i] = Math.log(r);
+        RAD[i] = r;
+        let t = Math.atan2(y, x) / (2 * Math.PI);
+        if (t < 0) t += 1;
+        THN[i] = t;
+        i++;
+      }
+    }
+  }
+
+  const off = document.createElement('canvas');
+  off.width = CW; off.height = CH;
+  const offCtx = off.getContext('2d');
+  const img = offCtx.createImageData(CW, CH);
+  const data = img.data;
+
+  // ---- colour LUT: K bands ----------------------------------------------
+  // Band hues spread evenly around the full colour wheel (step 360/K), fixed
+  // for the whole video. Every third band is black (see isBlack below).
+  function hslToRgb(h, s, l) {
+    h = ((h % 360) + 360) % 360; s /= 100; l /= 100;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = l - c / 2;
+    let r = 0, g = 0, b = 0;
+    if (h < 60) { r = c; g = x; } else if (h < 120) { r = x; g = c; }
+    else if (h < 180) { g = c; b = x; } else if (h < 240) { g = x; b = c; }
+    else if (h < 300) { r = x; b = c; } else { r = c; b = x; }
+    return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+  }
+  const H0 = PAL[0][0];
+  const BAND_S = Math.max(86, Math.min(94, PAL[0][1]));
+  const BAND_L = 60;
+  const lut = new Uint8ClampedArray(K * 3);
+  // Every third band is black (a fixed share of the frame, 1/3, by rank
+  // construction), so the spiral reads as bold coloured arms on black, the
+  // classic hypnotic-spiral look. Black bands cannot move luma, and the coloured
+  // bands keep fixed hues, so the frame's brightness stays constant.
+  const isBlack = (k) => k % 3 === 1;
+  function buildLUT() {
+    for (let k = 0; k < K; k++) {
+      if (isBlack(k)) { lut[k * 3] = 0; lut[k * 3 + 1] = 0; lut[k * 3 + 2] = 0; continue; }
+      const rgb = hslToRgb(H0 + (k * 360) / K, BAND_S, BAND_L);
+      lut[k * 3] = rgb[0]; lut[k * 3 + 1] = rgb[1]; lut[k * 3 + 2] = rgb[2];
+    }
+  }
+
+  const binOf = new Uint16Array(N);
+  const binCount = new Uint32Array(NB);
+  const bandOfBin = new Uint8Array(NB);
+
+  function computeField(clk) {
+    binCount.fill(0);
+    const shift = -F * clk;
+    const bt = B0 * Math.sin((2 * Math.PI * clk) / TB + PB);
+    const wob = WW * clk + WP;
+    const aNow = A * (1 + KA * Math.sin((2 * Math.PI * clk) / TA + PA));
+    for (let i = 0; i < N; i++) {
+      const s = aNow * (LNR[i] - PIV) + M * THN[i] + bt * RAD[i] + shift
+        + GW * Math.sin(4 * Math.PI * LNR[i] + wob);
+      const v = s - Math.floor(s);
+      let bin = (v * NB) | 0;
+      if (bin >= NB) bin = NB - 1;
+      binOf[i] = bin;
+      binCount[bin]++;
+    }
+  }
+
+  // Rank-quantise: bins are walked in order of v and grouped so each band holds
+  // exactly 1/K of the pixels (to bin granularity).
+  function assignBands() {
+    let cum = 0;
+    for (let b = 0; b < NB; b++) {
+      const c = binCount[b];
+      const q = N > 0 ? (cum + c / 2) / N : 0;
+      bandOfBin[b] = Math.min(K - 1, Math.floor(q * K));
+      cum += c;
+    }
+  }
+
+  function paint() {
+    for (let i = 0, p = 0; i < N; i++, p += 4) {
+      const b3 = bandOfBin[binOf[i]] * 3;
+      data[p] = lut[b3]; data[p + 1] = lut[b3 + 1]; data[p + 2] = lut[b3 + 2]; data[p + 3] = 255;
+    }
+    offCtx.putImageData(img, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(off, 0, 0, W, H);
+  }
+
+  let clk = 0;
+  function renderFrame() {
+    clk += 1 / FPS;
+    buildLUT();
+    computeField(clk);
+    assignBands();
+    paint();
+  }
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

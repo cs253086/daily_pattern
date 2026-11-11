@@ -8799,6 +8799,57 @@ neighbour is `grid` at distance **0.808** (next `fireworks` 0.877,
 `ENGINE_SUBJECTS`: `topomap: 'Topographic Contour Lines'` in `src/metadata.js`.
 
 
+## Hypnotic log-spiral zoom (`hypnospiral.html`) — 2026-11-11
+
+Daily popular-format research (WebSearch, 2026-11-11). Formats seen: hypnotic
+black-and-colour spiral optical-illusion loops ("Hypnotic Black & White Spiral
+Background 4K ... Optical Illusion TV screensaver",
+https://www.youtube.com/watch?v=P7qTscRwlaI), infinite-pattern loops for focus
+and meditation (https://www.youtube.com/watch?v=lv1rU4trGGk), and the channel
+guide https://channelsurfer.tv/guides/youtube-screensavers/ (tunnels, spirals,
+ambient loops). No view counts were available, so the ranking is qualitative.
+The pool already had endless tunnels (`tunnel.html`) and op-art (`vegasphere`),
+but no logarithmic spiral zoom, so that was the format built.
+
+**Construction**: each pixel gets s = A*(ln r - pivot) + M*theta/2pi + breathing
++ wobble - F*t (in cycles). v = fract(s) is rank-quantised into K=12 equal-area
+bands per frame; every third band is black (a fixed 1/3 of the frame), and the
+coloured bands keep fixed hues. Motion: the zoom F; a twist term linear in
+radius; a pitch breathing (ring spacing); and a fast ring-phase wobble. Stateless,
+so no accumulation and no whiteout mechanism.
+
+**Bugs and iterations, found by the gates and by looking**:
+1. A pure log-spiral zoom is self-similar: zooming is the same picture at a
+   different phase, so compositionDrift failed on 7 of 16 seeds (0.007-0.010).
+2. Added radius-linear breathing: unit motion still failed on seeds 1/6/13
+   (68%/66%/62% of the 0.25s change explained by one rigid fit). Zooming a log
+   spiral is locally a rigid rotation of it, so the zoom alone reads as a block.
+3. Added a fast ring-phase wobble (a term in ln r at its own rate). Unit motion
+   then passed everywhere (0.62-0.99), but drift still failed on several seeds.
+4. Measured the drift descriptor per feature. On this frame, coverage,
+   largestBlobFrac and radial0..5 were constant (1.0 and 1/6): a fully lit frame
+   gives the descriptor nothing to see. Fixed at the source by making every third
+   band black (constant 1/3 area, so coverage stays fixed and brightness-neutral),
+   and holding the hues still (rotating hues with black bands would move luma).
+   Drift then passed everywhere (0.026-0.048).
+5. Breathing periods were aliased with validate.js's ~40s sample spacing; the
+   short 18-32s periods were kept for that reason.
+
+**Verified**: validateEngine() 16/16 (seeds 1-15 + 12345). Margins: avgSat
+82.9-93.8 (vs 22), peakNearWhiteFrac 0, projectedRise -40 to +26 (vs 50),
+compositionDrift 0.026-0.048 (vs 0.015), unitMotionNonRigidFrac 0.62-0.99 (vs
+0.40), fastMotion 71-97 against floors of about 9, avgMsPerFrame 8-11 at
+480x270. `node src/validate.js engines/manual/hypnospiral.html` passes on 12345.
+Frames looked at at seeds 1, 2 and 12345 (960x540, several times): bold
+saturated colour arms on black, visible wobble, no whiteout.
+
+**Novelty gate**: measured against all 91 engines in `engines/manual/` (pool
+fingerprinted fresh alongside the candidate, seeds 1 and 7, frames 200/600/1000;
+the committed cache was not updated). Nearest neighbour `truchet` at **0.717**
+(next `liesegang` 0.921), above the 0.60 threshold.
+
+`ENGINE_SUBJECTS`: `hypnospiral: 'Hypnotic Spiral Zoom'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

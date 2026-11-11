@@ -1581,5 +1581,32 @@
     "seedsVerified": "none (not built)",
     "nearestNeighbour": null,
     "nearestDistance": null
+  },
+  {
+    "date": "2026-11-11",
+    "inspirationSource": "Popular-format research (WebSearch, 2026-11-11): hypnotic black-and-colour spiral optical-illusion loops (https://www.youtube.com/watch?v=P7qTscRwlaI, 'Hypnotic Black & White Spiral Background 4K ... Optical Illusion TV screensaver'; https://www.youtube.com/watch?v=lv1rU4trGGk, 'Hypnotic Visual Loop ... Infinite Patterns for Focus & Meditation'; channel guide https://channelsurfer.tv/guides/youtube-screensavers/)",
+    "idea": "Logarithmic spiral zoom: each pixel gets s = A*ln(r) + M*theta/2pi + (breathing and wobble terms) - F*t, and the bands are rank-quantised into equal-area colour bands, with every third band black. The spiral zooms endlessly in one direction, and the arm winding and ring spacing breathe so the composition keeps developing. The pool had tunnels (polygon zoom), contour lines and escape bands, but no log-spiral zoom.",
+    "popularFormats": [
+      "Hypnotic spiral / optical-illusion loops: spiral arms on black or colour, endless zoom, meditation and TV-screensaver framing",
+      "Infinite-pattern loops for focus: repeated geometric motifs with a slow, constant drift (covered by tunnel.html and vegasphere.html)",
+      "Heart/sci-fi tunnel backgrounds: endless zoom (covered by tunnel.html; not repeated)"
+    ],
+    "engineName": "hypnospiral",
+    "outcome": "shipped",
+    "reason": "Passed the 16-seed validateEngine battery (seeds 1-15 + 12345, all PASS with margin: projectedRise -40 to +26 vs 50, compositionDrift 0.026-0.048 vs 0.015, unitMotionNonRigidFrac 0.62-0.99 vs 0.40, fastMotion 71-97 vs floors 8.7-9.6). validate.js CLI passes on 12345. Novelty gate 0.717 vs truchet (next liesegang 0.921), above the 0.60 threshold. Frames at seeds 1, 2 and 12345 looked at: bold saturated colour arms on black, visible wobble, no whiteout. Iterations: pure log-spiral zoom was self-similar (drift failed on 7/16 seeds); breathing radius term, ring wobble and pitch breathing raised unit motion but not drift; the drift descriptor was dead on a fully lit frame (coverage, radial and blob features constant at 1.0 or 1/6), so black bands were added and hues fixed (luma stays constant).",
+    "seedsVerified": "1-15 + 12345 (16/16 PASS)",
+    "nearestNeighbour": "truchet",
+    "nearestDistance": 0.717
+  },
+  {
+    "date": "2026-11-11",
+    "inspirationSource": "Random web inspiration (WebSearch, 2026-11-11): rhombus tilings of a regular dodecagon. The Frankfurt ARTS OPEN 2026 exhibit (https://www.uni-frankfurt.de/en/newsroom/meldungen/webexklusiv/mathematik-auf-der-arts-open-2026) uses fifteen coloured rhombi to form a dodecagon, and its colour corridors (de Bruijn ribbons) hold for all 908 dissections.",
+    "idea": "Zonotopal rhombus tiling of a 12-gon: every rhombus edge lies on one of six ribbon families, and each ribbon is a coloured corridor across the tiling.",
+    "engineName": null,
+    "outcome": "skipped",
+    "reason": "Not built today: one engine ships per day, and the popular-format log-spiral zoom was judged the better candidate. Corridor rhombus tilings read as stacked 3D cubes, which overlaps the pool's discrete-3D-solid vocabulary, so the idea would need an explicit novelty check before any build. Kept for a future day.",
+    "seedsVerified": null,
+    "nearestNeighbour": null,
+    "nearestDistance": null
   }
 ]
