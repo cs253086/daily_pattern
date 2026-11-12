@@ -319,7 +319,20 @@ async function callGemini({ apiKey, model, prompt, maxAttempts = 6 }) {
     }
     const parts = (cand.content && cand.content.parts) || [];
     const text = parts.map((p) => p.text || '').join('');
-    if (!text.trim()) throw new Error('Gemini returned empty text.');
+    if (!text.trim()) {
+      // Empty output (often finishReason=RECITATION, a content filter that
+      // blocks a response). Sampling is random, so a fresh request can
+      // succeed: retry instead of ending the whole call (2026-11-11: one
+      // empty response after five 503s skipped the day).
+      lastErr = new Error(`Gemini returned empty text (finishReason=${cand.finishReason || 'unknown'}).`);
+      if (attempt < maxAttempts) {
+        const wait = backoffMs(attempt);
+        console.warn(`[generate] attempt ${attempt} returned empty text; retrying in ${wait}ms`);
+        await sleep(wait);
+        continue;
+      }
+      throw lastErr;
+    }
     return text;
   }
   throw lastErr;

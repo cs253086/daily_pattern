@@ -533,7 +533,20 @@ async function chooseEngine(cli, imageInfo) {
   const genOpts = { seed, imageInfo };
 
   try {
-    const gen = await generateEngine(genOpts);
+    // The first call can fail outright (Gemini overloaded past its retries,
+    // or an empty response). Before 2026-11-12 that skipped the whole day
+    // without the repair rounds or the late retry ever running, so give it
+    // one more attempt after the same LATE_RETRY_MIN wait.
+    let gen;
+    try {
+      gen = await generateEngine(genOpts);
+    } catch (firstErr) {
+      if (LATE_RETRY_MIN <= 0) throw firstErr;
+      console.warn(`[index] first generation produced no engine: ${firstErr.message}`);
+      console.log(`[index] waiting ${LATE_RETRY_MIN} min before one more generation attempt.`);
+      await new Promise((r) => setTimeout(r, LATE_RETRY_MIN * 60000));
+      gen = await generateEngine(genOpts);
+    }
     console.log('[index] validating generated engine…');
     let result = await validateEngineSafe(gen.path, validateOpts);
     if (result.ok) {
