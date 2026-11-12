@@ -1608,5 +1608,16 @@
     "seedsVerified": null,
     "nearestNeighbour": null,
     "nearestDistance": null
+  },
+  {
+    "date": "2026-11-12",
+    "inspirationSource": "Popular-format research (WebSearch, 2026-11-12): hypnotic loop results led by spiral optical-illusion loops (https://www.youtube.com/watch?v=P7qTscRwlaI), topographic line loops (https://www.youtube.com/watch?v=RFRXRlMjUSQ), infinite-pattern focus loops (https://www.youtube.com/watch?v=lv1rU4trGGk) and the channel guide https://channelsurfer.tv/guides/youtube-screensavers/. No view counts were available, so the ranking is qualitative. Random web inspiration: ripple-tank circular-wave interference (https://en.wikipedia.org/wiki/Ripple_tank; https://pixels.com/featured/circular-wave-systems-berenice-abbott.html; https://arxiv.org/pdf/2202.09426).",
+    "idea": "Popular format: the water-drop ripple loop, not yet in the pool. Random inspiration: two or three coherent point sources emit circular waves; superposed crests and troughs give hyperbolic interference fringes. Built as ripplefield.html: a rank-quantised, equal-area colour-band field through 3-4 scattered circular windows with black between them, with the wavelength breathing slowly.",
+    "engineName": null,
+    "outcome": "skipped",
+    "reason": "Four design rounds, none shipped. (1) Three to five sources in a full-frame field: nearest liesegang at 0.318, and the banding read as liesegang's ring system. (2) Two sources, full frame: a clean ripple read, but nearest prismbloom at 0.363, since full-bleed dense colour mosaics sit together under the descriptor. (3) Two sources inside three to four scattered circular windows with black between: nearest dendrite at 0.609, a thin pass; the 16-seed battery failed seeds 6 and 7 on compositionDrift (0.0140, 0.0134 against 0.015), because a fixed-layout ripple only translates and the rotation-invariant descriptor barely sees it. (4) Fix for drift: wider source orbits and a slow breathing of the wavelength (+/-15-22% over roughly 2 minutes). The battery then passed 16/16 (compositionDrift 0.0155-0.0567, unitMotionNonRigidFrac 0.875-1.0, fastMotion 11.5-18.4 against floors of about 5-8, avgSat 60-81, projectedRise -8.5 to +10.3). But the novelty gate fell to 0.419 against diatomlattice, since scattered circular windows is that engine's composition. Per the 4-round limit, shipped nothing; the engine file was discarded. Popular-format note: the pool already covers tunnel, spiral zoom, contour lines and op-art, so a ripple-tank loop is the remaining gap. Worth revisiting with a composition that is not scattered windows, and with a drift lever that does not rely on a wavelength breath.",
+    "seedsVerified": "16/16 PASS on the final, non-shipped design (seeds 1-15 plus 12345); the battery is not evidence for any shipped engine",
+    "nearestNeighbour": "diatomlattice",
+    "nearestDistance": 0.419
   }
 ]
