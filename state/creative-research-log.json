@@ -1619,5 +1619,33 @@
     "seedsVerified": "16/16 PASS on the final, non-shipped design (seeds 1-15 plus 12345); the battery is not evidence for any shipped engine",
     "nearestNeighbour": "diatomlattice",
     "nearestDistance": 0.419
+  },
+  {
+    "date": "2026-11-14",
+    "inspirationSource": "Consolidated run covering the missed 2026-11-13 and 2026-11-14 firings. Random web inspiration: the sliding-tile (15-puzzle) construction, popularised by Sam Loyd, whose permutation group has a parity invariant that splits reachable states in two (Johnson & Story 1879, Notes on the 15 Puzzle; search snippets, https://en.wikipedia.org/wiki/15_puzzle, Wikipedia blocked in this sandbox). Popular-format research (WebSearch, 2026-11-14): gear and clockwork loops were searched but no ranked examples surfaced, and the results point to the same satisfying-loop genre already covered by tunnel, hypnospiral and topomap (https://designkit.com/blog/how-to-make-satisfying-videos; https://channelsurfer.tv/guides/youtube-screensavers/). No view counts were available, so the ranking is qualitative.",
+    "idea": "A grid of 9x5 luma-matched medallion tiles (a bright disc on a coloured square) and one empty cell. Each move slides one tile into the empty cell along an eased path, from a seeded random walk of the empty cell that never reverses. The composition genuinely reorders over the hour, while the disc breathing adds unit-level motion. Chosen over a gear-train idea, since a square lattice of meshed gears would be a frozen rotate-only composition that fails compositionDrift.",
+    "engineName": "slidepuzzle",
+    "outcome": "shipped",
+    "reason": "Consolidates the 2026-11-13 and 2026-11-14 firings into one attempt. Passed the CLI gate (seed 12345), the 16-seed battery (seeds 1-15 plus 12345, all PASS with margin: avgSat 83.6-85.9, projectedRise -15.5 to +22.5, compositionDrift 0.019-0.074, unitMotionNonRigidFrac 1.0, fastMotion 8.0-15.7 vs floors 5.4-6.1), and the novelty gate at 0.889 (nearest neighbour mashrabiya, above the 0.60 threshold). Frames were rendered and looked at.",
+    "seedsVerified": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      12345
+    ],
+    "nearestNeighbour": "mashrabiya",
+    "nearestDistance": 0.889
   }
 ]

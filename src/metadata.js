@@ -102,6 +102,7 @@ const ENGINE_SUBJECTS = {
   vegasphere: 'Bulging Op Art Checkerboard',
   tunnel: 'Endless Polygon Tunnel',
   topomap: 'Topographic Contour Lines',
+  slidepuzzle: 'Sliding Tile Puzzle',
   hypnospiral: 'Hypnotic Spiral Zoom',
   voderberg: 'Voderberg Spiral',
   voronoimosaic: 'Voronoi Mosaic',

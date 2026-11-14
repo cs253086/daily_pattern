@@ -8850,6 +8850,51 @@ the committed cache was not updated). Nearest neighbour `truchet` at **0.717**
 
 `ENGINE_SUBJECTS`: `hypnospiral: 'Hypnotic Spiral Zoom'` in `src/metadata.js`.
 
+## Sliding tile puzzle (`slidepuzzle.html`) — 2026-11-14
+
+Consolidated run covering the missed 2026-11-13 and 2026-11-14 firings (one
+engine, one log entry). Random web inspiration: the sliding-tile (15-puzzle)
+construction, popularised by Sam Loyd, whose permutation group has a parity
+invariant (Johnson & Story 1879). Popular-format research (WebSearch) found no
+ranked gear or clockwork loops, only the satisfying-loop genre already covered
+by tunnel, hypnospiral and topomap, so no popular-format engine was built.
+
+**What it is**: a 9x5 grid of luma-matched medallion tiles (a bright disc on
+a coloured square) and one empty cell. Each move slides one tile into the
+empty cell on an eased path. The moves come from a seeded random walk of the
+empty cell that never reverses, so the composition really reorders over the
+hour. This is the pool's first engine whose arrangement evolves through a
+discrete permutation rather than being rotated or warped.
+
+**Why not gears**: a square lattice of meshed gears (exact kinematics,
+alternating-sign counter-rotation) was considered, but it would be a frozen
+rotate-only composition, the failure mode that fails compositionDrift.
+
+**Motion and brightness**: the empty-cell walk keeps one tile sliding at all
+times, which gives unit-level motion. Disc breathing adds a second per-tile
+source with independent phases. The discs are a bright inset (luma 150 against
+92 for the tile). An earlier draft gave every tile and disc the same luma, and
+then fastMotion failed on seed 5 at 4.35 against 5.89: a luma-equal colour
+change is invisible to a luma diff. The bright disc fixed it, and the
+independent phases over 44 tiles keep the summed luma change from becoming a
+common-mode trend.
+
+**Verified**: the CLI gate passes on seed 12345. The 16-seed battery (seeds
+1-15 plus 12345) passes on every seed: avgSat 83.6-85.9 (vs 22), projectedRise
+-15.5 to +22.5 (vs 50), compositionDrift 0.019-0.074 (vs 0.015),
+unitMotionNonRigidFrac 1.0 on every seed, fastMotion 8.0-15.7 against floors of
+5.4-6.1, avgMsPerFrame 2-4. Frames were rendered and looked at at several cycle
+fractions and seed 12345: saturated medallions with a clearly visible
+mid-slide tile and a black empty cell.
+
+**Novelty gate**: measured against all 92 engines in `engines/manual/` (the
+pool fingerprinted fresh, seeds 1 and 7, frames 200/600/1000; the refreshed
+cache was not committed). Nearest neighbour is `mashrabiya` at distance
+**0.889** (next `impactshock` 0.959, `ikatweave` 0.991), a clear pass above
+the 0.60 threshold.
+
+`ENGINE_SUBJECTS`: `slidepuzzle: 'Sliding Tile Puzzle'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
