@@ -1647,5 +1647,33 @@
     ],
     "nearestNeighbour": "mashrabiya",
     "nearestDistance": 0.889
+  },
+  {
+    "date": "2026-11-15",
+    "inspirationSource": "Random web inspiration (WebSearch, 2026-11-15): the Mobius strip, a one-sided surface -- a strip given a half-twist and joined end to end has no inside or outside, so a stripe painted along it travels around twice before returning to its start on the opposite edge (https://www.mathwords.com/m/mobius_strip.htm; https://snexplores.org/?p=192868; https://www.math.lsu.edu/~rich/2057downloads/MoebiusStrip.pdf). Category: random Wikipedia article, resolved through open search since Wikipedia is blocked here. Popular-format research (WebSearch, 2026-11-15): results were mostly generic; the lead channels were HDCOLORS (kaleidoscope 4K loops, one source citing 30M+ views, undated) and long-form abstract wave loops (2-hour 'neon lines' screensavers); OutlierKit's channel analysis (https://outlierkit.com/channel/visuallooprelax) describes 3-10 minute seamless loops (estimates, not YouTube Analytics); https://www.neuralframes.com/post/trippy-videos. No verified ranking was available.",
+    "idea": "A continuous lit WebGL Mobius band: a 240x10 mesh over P(u,v) = ((R + s cos(u/2)) cos u, (R + s cos(u/2)) sin u, s sin(u/2)), with the half-width breathing on an integer 3-cycle travelling wave. The colour is a stripe field q = 2u/2pi + 0.5 v cos(u/2) + a slowly advancing phase, which is invariant under the (u+2pi, -v) identification, so a single stripe crosses the twist with no seam. Six equal-luma bands.",
+    "engineName": "mobius",
+    "outcome": "shipped",
+    "reason": "Shipped after a re-measured novelty gate (0.939 at the final amplitude). Two defects were found by rendering and by the battery, not by reasoning: (1) a blank first frame, caused by a startup WebGL context loss that the READY gate did not wait out (fixed by the solids3d.html recovery pattern: hold READY, then poll isContextLost for up to 1.5 s); (2) seed 10 failed compositionDrift at 0.0133, fixed by raising the width-wave depth from 0.24 to 0.32 (seed 10 now 0.0161, all other seeds 0.019-0.027). The popular-format research found no clearly uncovered format (the pool already has kaleidoscope, lightstreams, fluidmarble, tunnel, hypnospiral, topomap), so the random inspiration was used.",
+    "seedsVerified": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      12345
+    ],
+    "nearestNeighbour": "auto-2026-09-15-a-daytime-eclipse-moon-occults-venus",
+    "nearestDistance": 0.939
   }
 ]

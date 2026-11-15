@@ -103,6 +103,7 @@ const ENGINE_SUBJECTS = {
   tunnel: 'Endless Polygon Tunnel',
   topomap: 'Topographic Contour Lines',
   slidepuzzle: 'Sliding Tile Puzzle',
+  mobius: 'Mobius Stripe Band',
   hypnospiral: 'Hypnotic Spiral Zoom',
   voderberg: 'Voderberg Spiral',
   voronoimosaic: 'Voronoi Mosaic',

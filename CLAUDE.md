@@ -8895,6 +8895,92 @@ the 0.60 threshold.
 
 `ENGINE_SUBJECTS`: `slidepuzzle: 'Sliding Tile Puzzle'` in `src/metadata.js`.
 
+## Mobius stripe-band engine (`mobius.html`) — 2026-11-15
+
+Daily creative-research routine. Category was "random Wikipedia article",
+resolved through open search since Wikipedia is blocked here. An open
+WebSearch surfaced the **Mobius strip**: a strip given a half-twist and
+joined end to end is one-sided, so a stripe painted along it travels around
+twice before it returns to its start on the opposite edge (Mathwords
+https://www.mathwords.com/m/mobius_strip.htm; Science News Explores
+https://snexplores.org/?p=192868; LSU notes
+https://www.math.lsu.edu/~rich/2057downloads/MoebiusStrip.pdf).
+
+**Popular-format research (2026-11-15).** Results were mostly generic. The
+leads were HDCOLORS, a kaleidoscope-loop channel one source credits with 30M+
+views on a colour series (undated), and long-form abstract wave loops (2-hour
+"neon lines" screensavers). OutlierKit's channel analysis
+(https://outlierkit.com/channel/visuallooprelax) describes 3-10 minute seamless
+loops, but those are estimates, not YouTube Analytics. Trippy-video guides
+(https://www.neuralframes.com/post/trippy-videos) show the same families:
+kaleidoscope, tunnel, spiral and wave. No verified ranking was available, and
+the pool already covers those families (kaleidoscope, tunnel, hypnospiral,
+topomap, lightstreams, fluidmarble). So no format was clearly uncovered, and
+the random inspiration was used. The nearest gap is the flowing neon-wave-lines
+format; that is a candidate for a later day.
+
+**What it is**: a continuous, one-sided, lit WebGL band (the pool's
+twelfth real-WebGL engine). A 240x10 mesh over
+P(u,v) = ((R + s cos(u/2)) cos u, (R + s cos(u/2)) sin u, s sin(u/2)),
+with s = v h(u), u in [0, 2pi] and v in [-1, 1]. The identification
+(u + 2pi, v) = (u, -v) holds exactly, so the u = 2pi column is drawn
+directly. The half-width h(u) = W0 (1 + A sin(3u - phase)) carries an
+integer 3-cycle travelling wave, so h is periodic under the identification.
+The surface is shaded two-sided: the fragment normal is flipped toward the
+viewer, since the band has no inside or outside.
+
+**Colour** is a stripe field on the surface,
+q = 2u/2pi + 0.5 v cos(u/2) + a slowly advancing phase. Both fixed terms are
+invariant under the identification (the first gains an integer, the second's
+sign cancels), so one stripe crosses the twist with no seam. Six bands are
+assigned by floor(fract(q) * 6), each with the same Rec.709 luma (lightness
+bisected per hue), so the palette adds no brightness trend.
+
+**Coverage and motion.** The width wave's integer count makes its net area
+change zero at every instant (discrete-Fourier orthogonality, as in
+doylespiral/rosenspikes). The colour phase advances uniformly. Phases are
+accumulated, never reset across cycleSec, and only the rates reassign, per
+the geodome/hoppercrystal convention. A small bounded tilt wobble gives the
+camera a little life. Deliberately no whole-object spin, which would dilute
+the unit-motion signal (the truchet lesson).
+
+**Bugs found by rendering and by the battery, not by reasoning:**
+1. The first render was a blank white frame. The canvas had lost its WebGL
+   context at startup (the swiftshader spurious-loss risk documented for
+   solids3d.html), and READY fired at 300 ms without waiting for recovery.
+   Fixed with the solids3d.html pattern: hold READY for 300 ms, then poll
+   isContextLost for up to 1.5 s before READY is set.
+2. Seed 10 failed compositionDrift at 0.0133 (need 0.015). The width wave at
+   depth 0.24 was too weak for the rotation-invariant descriptor. Raising the
+   depth to 0.32 fixed it (seed 10 now 0.0161). Half-width peaks at 0.55,
+   well inside the centreline radius of 1.0, so the band cannot self-intersect.
+3. The first full battery run contained overlapping duplicate-seed runs from
+   a stale background process. Those results were discarded and the battery
+   was re-run serially into a clean file. The 2026-11-15 numbers below come
+   from that clean run.
+4. Visual note, not a gate: the equal-luma bisection pushes yellow-leaning
+   hues toward ochre. This is accepted (the mondrian.html trade-off);
+   palette hue sets were not retuned.
+
+**Verified** (final, depth 0.32): `validateEngine()` **16/16** on seeds 1-15
+plus the CLI default 12345, all PASS. Margins: `avgSat` 62.5-72.7 (vs the
+22 minimum), `peakNearWhiteFrac` 0, `projectedRise` -23.4 to +29.7 (vs 50),
+`compositionDrift` 0.0161-0.0273 (vs 0.015; seed 10 is the thin one),
+`unitMotionNonRigidFrac` 0.719-1.0 (vs 0.40), `fastMotion` 10.7-13.1 against
+floors of 6.1-6.4, `avgMsPerFrame` 17-33 (projected hour 25-47 min, inside the
+CI budget). Frames were rendered and looked at at 300, 600 and 900 frames
+(seed 3) and frame 1100 (seed 12345): a vivid, saturated one-sided band with
+a visibly travelling stripe across the twist, clean edges and no whiteout.
+
+**Novelty gate** (final design): measured against all 94 engines in
+`engines/manual/` (whole pool fingerprinted fresh; the refreshed cache was not
+committed). Nearest neighbour is `auto-2026-09-15-a-daytime-eclipse-moon-occults-venus`
+at distance **0.939** (next radiolarian 0.956, kaleidoscope 0.988). It
+measured 0.876 at the first depth of 0.24 and was re-measured after the
+depth change. A clean pass, not a thin-margin case.
+
+`ENGINE_SUBJECTS`: `mobius: 'Mobius Stripe Band'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
