@@ -1675,5 +1675,16 @@
     ],
     "nearestNeighbour": "auto-2026-09-15-a-daytime-eclipse-moon-occults-venus",
     "nearestDistance": 0.939
+  },
+  {
+    "date": "2026-11-16",
+    "inspirationSource": "Times-table chord circle: points spaced evenly on a circle, each joined to the point at m times its angle (Mathologer, 'Times Tables, Mandelbrot and the Heart of Mathematics'; https://www.redblobgames.com/x/1847-mathologer-modulo-circle/ ; https://nathaniel.ai/modular-multiplication/ ; https://tikz.net/times-tables-and-mandelbrot/). Category: obscure mathematical object (search snippets only). Popular-format research (WebSearch, 2026-11-16): trending loop results were evergreen tunnels, glitch and 3D-shape screensavers already covered by tunnel/hypnospiral/solids3d; no uncovered format verified, so the random inspiration was used.",
+    "idea": "A one-parameter family of chords {theta -> m*theta} whose multiplier m is a REAL number that morphs continuously between epicycloid envelopes (cardioid at 2, nephroid at 3), rendered as four independent circles in a 2x2 field with a slow rigid spin per circle. Stateless render, ink-normalised so total stroke ink stays constant as chord lengths change with m.",
+    "engineName": "timestables",
+    "outcome": "shipped",
+    "reason": "Single centred circle measured 0.285 vs geodome (centred radial/lit-disc collision). Four scattered circles in a 2x2 field measured 0.78 vs fracturepearls. Validator 16/16 on seeds 1-15 plus 12345; iterations on brightness trend (ink normalisation, slower/smaller fast swing, slow spin) and composition drift (slow drift amplitude) documented in CLAUDE.md.",
+    "seedsVerified": "1-15, 12345",
+    "nearestNeighbour": "fracturepearls",
+    "nearestDistance": 0.78
   }
 ]

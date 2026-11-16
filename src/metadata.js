@@ -104,6 +104,7 @@ const ENGINE_SUBJECTS = {
   topomap: 'Topographic Contour Lines',
   slidepuzzle: 'Sliding Tile Puzzle',
   mobius: 'Mobius Stripe Band',
+  timestables: 'Times Table Chord Circles',
   hypnospiral: 'Hypnotic Spiral Zoom',
   voderberg: 'Voderberg Spiral',
   voronoimosaic: 'Voronoi Mosaic',

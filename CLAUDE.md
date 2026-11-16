@@ -8981,6 +8981,61 @@ depth change. A clean pass, not a thin-margin case.
 
 `ENGINE_SUBJECTS`: `mobius: 'Mobius Stripe Band'` in `src/metadata.js`.
 
+## Times-table chord circles (`timestables.html`) — 2026-11-16
+
+Daily creative-research routine. Random inspiration: the "times table on a
+circle" construction (Mathologer's "Times Tables, Mandelbrot and the Heart of
+Mathematics"). Points are spaced evenly on a circle and each is joined to the
+point at m times its angle; for integer m the chord envelope is an epicycloid
+(m=2 cardioid, m=3 nephroid). Sources (search snippets only):
+https://www.redblobgames.com/x/1847-mathologer-modulo-circle/,
+https://nathaniel.ai/modular-multiplication/,
+https://tikz.net/times-tables-and-mandelbrot/.
+
+**What it is**: the multiplier is a REAL number m(t), so the chord family
+morphs continuously between envelopes instead of jumping between integers.
+m(t) is a bounded sum of two sinusoids (fast swing, slow drift), so there is
+no accumulation and no whiteout mechanism. Four independent circles sit in a
+2x2 field, each with its own multiplier phases and a slow rigid spin. Chord
+colour is fixed by start angle, and each frame's total stroke ink is
+normalised to the smallest live chord length over the multiplier range.
+
+**Popular-format research (2026-11-16)**: trending loop results were
+evergreen tunnels, glitch and 3D-shape screensavers, all already covered by
+tunnel, hypnospiral and solids3d. No uncovered format was verified, so the
+random inspiration was used and no popular-format engine was built.
+
+**Iterations, found by the gates and by looking**:
+1. A single centred circle measured **0.285** against `geodome` (a centred
+   round lit shape on black, the same collision class `diatomlattice` and
+   `temari` document). Four scattered circles in a 2x2 field fixed it:
+   **0.78** against `fracturepearls`.
+2. Brightness trends on seeds 1, 8, 13 and 14 (+50 to +75 projected). The
+   fast swing was 21-29 s per cycle, which aliases with the validator's
+   8 sample times. Raising it to 5-7 s (the house 4-15 s band) and cutting its
+   amplitude (0.3-0.4) removed the trend. Ink normalisation alone did not, so
+   the brightness dependence on m is spatial, not total-length.
+3. A slow monotone drift of m over the window read as a trend on some
+   seeds. Adding a slow RIGID spin of each diagram (a rotation of the chord
+   set, not of the frame) removed it without changing lit area or colour mix.
+4. Composition drift sat at 0.0149 on seed 7 with four circles. Widening the
+   slow multiplier drift (0.2-0.3) fixed it without a brightness cost.
+
+**Verified** (final design): `validateEngine()` **16/16** across seeds 1-15 plus
+12345. Margins: `avgSat` 47.7-69.4 (vs 22), `projectedRise` -37 to +33.5 (vs 50),
+`compositionDrift` 0.0166-0.0281 (vs 0.015; seed 10 is the thinnest),
+`unitMotionNonRigidFrac` 1.0 on every seed, `fastMotion` 20-33 against floors of
+about 9-12, `avgMsPerFrame` 43-54 (budget 100). Frames rendered and looked at
+at several cycle fractions and seeds: vivid, saturated chord envelopes with
+clear black gutters between the four circles, no whiteout.
+
+**Novelty gate**: measured against all 96 engines in `engines/manual/` (pool
+fingerprinted fresh, seeds 1 and 7, frames 200/600/1000; the committed cache
+was not updated). Nearest neighbour is `fracturepearls` at **0.78** (next
+`langtonsant` 0.881, `spinbounce` 0.968).
+
+`ENGINE_SUBJECTS`: `timestables: 'Times Table Chord Circles'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
