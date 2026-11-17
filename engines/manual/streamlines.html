@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Streamlines — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Flowing streams: a set of bright streamlines traced through a smooth,
+// divergence-free flow field. Each stream carries a travelling pulse of light
+// that runs along its own path, so the basic unit (one stream) visibly moves
+// relative to its neighbours, while the field itself slowly reshapes.
+//
+// Design:
+//   * Flow field: a stream function psi = sum_k A_k sin(k . p + ph_k(t)), with
+//     velocity v = (d psi/dy, -d psi/dx). This is divergence-free, so streamlines
+//     never bunch up into sinks or sources.
+//   * Streamlines are integrated (RK2, fixed pixel step) from a seeded, jittered
+//     grid of start points, forward and backward, every frame. The phases ph_k
+//     drift on a bounded sine (never a monotone sweep), so the streams reshape
+//     without drifting off to a degenerate field over the hour.
+//   * Every stream draws a dim base line plus a fixed-length bright pulse that
+//     wraps around its own path. The pulse length in points never changes, so
+//     total lit ink stays constant (coverage-neutral by construction).
+//   * Each stream has its own pulse rate (guaranteed-minimum magnitude, random
+//     sign), so neighbouring pulses move against each other (unit-level motion).
+//   * Colour: one hue per stream, spaced around the wheel, lightness bisected so
+//     every hue has the same Rec.709 luma. Colour is fixed per stream.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no requestAnimationFrame, opaque clear each frame.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const U = Math.min(W, H);
+  const TAU = 2 * Math.PI;
+
+  // ---- Flow field: a few plane-wave stream-function modes ----
+  const NW = 5;
+  const waves = [];
+  for (let k = 0; k < NW; k++) {
+    const ang = rand(0, TAU);
+    const lambda = rand(0.45, 0.9) * H;          // wavelength in pixels
+    const kk = TAU / lambda;
+    waves.push({
+      kx: kk * Math.cos(ang),
+      ky: kk * Math.sin(ang),
+      amp: rand(0.8, 1.2) * H / TAU * 0.55,      // velocity ~ amp * k, bounded
+      ph0: rand(0, TAU),
+      wob: rand(0.15, 0.25) * sgn(),             // phase wobble amplitude (rad)
+      rate: rand(0.035, 0.06) * SPEED,           // rad/s of wobble oscillation
+    });
+  }
+  let phNow = new Float64Array(NW);
+  function setPhases(t) {
+    for (let k = 0; k < NW; k++) {
+      const w = waves[k];
+      phNow[k] = w.ph0 + w.wob * Math.sin(TAU * w.rate * t);
+    }
+  }
+  // Unit flow direction at a point (divergence-free stream function).
+  function dirAt(x, y) {
+    let vx = 0, vy = 0;
+    for (let k = 0; k < NW; k++) {
+      const w = waves[k];
+      const th = w.kx * x + w.ky * y + phNow[k];
+      const c = w.amp * Math.cos(th);
+      vx += c * w.ky;
+      vy -= c * w.kx;
+    }
+    const m = Math.hypot(vx, vy) || 1;
+    return [vx / m, vy / m];
+  }
+
+  // ---- Streams: fixed start points, traced every frame ----
+  const N = 9 + Math.floor(rng() * 5);           // 9..13 streams per video
+  const HUE0 = rand(0, 360);
+  const STEP = 0.011 * U;                         // integration step, pixels
+  const HALF = 46;                                // points per half-stream
+  const PULSE = 16;                               // fixed pulse length (points)
+  const starts = [];
+  const cols = Math.ceil(Math.sqrt(N * W / H));
+  const rows = Math.ceil(N / cols);
+  for (let i = 0; i < N; i++) {
+    const cx = i % cols, cy = Math.floor(i / cols);
+    starts.push([
+      (cx + 0.5 + rand(-0.3, 0.3)) / cols * W,
+      (cy + 0.5 + rand(-0.3, 0.3)) / rows * H,
+    ]);
+  }
+  const pulseRate = [];
+  const pulsePh = [];
+  for (let i = 0; i < N; i++) {
+    pulseRate.push(sgn() * rand(0.12, 0.28));    // cycles per second, never ~0
+    pulsePh.push(rng());
+  }
+  const hues = [];
+  for (let i = 0; i < N; i++) hues.push(((HUE0 + i * 360 / N) % 360 + 360) % 360);
+
+  // Lightness per hue, bisected so every hue has the same Rec.709 luma.
+  const LUMA_TARGET = 135;
+  function hslToRgb(h, s, l) {
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const hp = (h / 60) % 6;
+    const x = c * (1 - Math.abs((hp % 2) - 1));
+    let r = 0, g = 0, b = 0;
+    if (hp < 1) { r = c; g = x; } else if (hp < 2) { r = x; g = c; }
+    else if (hp < 3) { g = c; b = x; } else if (hp < 4) { g = x; b = c; }
+    else if (hp < 5) { r = x; b = c; } else { r = c; b = x; }
+    const m = l - c / 2;
+    return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+  }
+  const LTAB = new Float32Array(360);
+  for (let h = 0; h < 360; h++) {
+    let lo = 0.1, hi = 0.9;
+    for (let it = 0; it < 24; it++) {
+      const mid = (lo + hi) / 2;
+      const [r, g, b] = hslToRgb(h, 0.92, mid);
+      const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      if (y < LUMA_TARGET) lo = mid; else hi = mid;
+    }
+    LTAB[h] = (lo + hi) / 2;
+  }
+
+  // Trace one streamline through (sx, sy); returns a flat [x0,y0,x1,y1,...] list.
+  function trace(sx, sy) {
+    const fwd = [[sx, sy]];
+    const bwd = [];
+    for (const dir of [1, -1]) {
+      let x = sx, y = sy;
+      const out = dir === 1 ? fwd : bwd;
+      for (let s = 0; s < HALF; s++) {
+        const [ax, ay] = dirAt(x, y);
+        const mx = x + dir * ax * STEP * 0.5, my = y + dir * ay * STEP * 0.5;
+        const [bx, by] = dirAt(mx, my);
+        x = x + dir * bx * STEP;
+        y = y + dir * by * STEP;
+        out.push([x, y]);
+      }
+    }
+    // Backward points come first, reversed, so the path runs bwd-end -> fwd-end.
+    const pts = [];
+    for (let i = bwd.length - 1; i >= 0; i--) pts.push(bwd[i]);
+    for (const p of fwd) pts.push(p);
+    return pts;
+  }
+
+  // Wrapping pulse along a point list: draw n points starting at index p.
+  function strokePulse(pts, p, n) {
+    const L = pts.length;
+    ctx.beginPath();
+    for (let j = 0; j < n; j++) {
+      const q = pts[(p + j) % L];
+      if (j === 0) ctx.moveTo(q[0], q[1]); else ctx.lineTo(q[0], q[1]);
+    }
+    ctx.stroke();
+  }
+
+  window.currentFrame = 0;
+  window.TOTAL_FRAMES = Math.round(DURATION * FPS);
+
+  function renderFrame() {
+    const t = window.currentFrame / FPS;
+    setPhases(t);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    const lw = Math.max(2, 0.0055 * U);
+    for (let i = 0; i < N; i++) {
+      const pts = trace(starts[i][0], starts[i][1]);
+      const hi = Math.round(hues[i]) % 360;
+      const L = LTAB[hi];
+      const L2 = Math.min(0.92, L + 0.08);
+      const n = pts.length;
+
+      // Base stream: dim line plus soft glow underlay.
+      ctx.beginPath();
+      for (let j = 0; j < n; j++) {
+        if (j === 0) ctx.moveTo(pts[j][0], pts[j][1]); else ctx.lineTo(pts[j][0], pts[j][1]);
+      }
+      ctx.lineWidth = lw * 3.2;
+      ctx.strokeStyle = `hsla(${hi}, 96%, ${(L * 100).toFixed(1)}%, 0.14)`;
+      ctx.stroke();
+      ctx.lineWidth = lw;
+      ctx.strokeStyle = `hsla(${hi}, 96%, ${(L * 100).toFixed(1)}%, 0.4)`;
+      ctx.stroke();
+
+      // Travelling pulse: fixed length, position wraps around the stream.
+      const frac = ((pulsePh[i] + pulseRate[i] * t) % 1 + 1) % 1;
+      const p = Math.floor(frac * n);
+      ctx.lineWidth = lw * 3.2;
+      ctx.strokeStyle = `hsla(${hi}, 100%, ${(L2 * 100).toFixed(1)}%, 0.22)`;
+      strokePulse(pts, p, PULSE);
+      ctx.lineWidth = lw * 1.3;
+      ctx.strokeStyle = `hsla(${hi}, 100%, ${(L2 * 100).toFixed(1)}%, 0.95)`;
+      strokePulse(pts, p, PULSE);
+    }
+  }
+
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

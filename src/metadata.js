@@ -103,6 +103,7 @@ const ENGINE_SUBJECTS = {
   tunnel: 'Endless Polygon Tunnel',
   topomap: 'Topographic Contour Lines',
   hypnospiral: 'Hypnotic Spiral Zoom',
+  streamlines: 'Flowing Streamlines',
   voderberg: 'Voderberg Spiral',
   voronoimosaic: 'Voronoi Mosaic',
   widmanstatten: 'Crystal Lattice Bands',
