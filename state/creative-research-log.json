@@ -1686,5 +1686,16 @@
     "seedsVerified": "1-15, 12345",
     "nearestNeighbour": "fracturepearls",
     "nearestDistance": 0.78
+  },
+  {
+    "date": "2026-11-17",
+    "inspirationSource": "Abelian sandpile model (Bak-Tang-Wiesenfeld 1987; Dhar's abelian property; the Creutz identity fractal). Category: random Wikipedia article, resolved by open search since Wikipedia is blocked here. Sources (search snippets only): https://en.wikipedia.org/wiki/Abelian_sandpile_model , https://arxiv.org/html/1602.03424 , https://nautil.us/the-math-of-the-amazing-sandpile-238320 . Popular-format research (WebSearch, 2026-11-17): results were a few 1-hour geometry-node and neon/VJ loops and tunnel screensavers, no verified ranking; tunnel, hypnospiral and solids3d already cover those formats, so no popular-format engine was chosen.",
+    "idea": "Bounded heightfield driven by a centre drop: grains fall at one point, any cell holding 4+ grains topples to its four neighbours, grains leaving the edge are lost. Height 0-3 maps to black plus three luma-equalised palette colours.",
+    "engineName": null,
+    "outcome": "skipped",
+    "reason": "Built as a candidate and rendered (128x72 sim grid, 16:9). Two variants failed on the way: (1) a moving, jittered drop washed into per-cell speckle; (2) the centre-drop growth variant with a per-cycle empty reset gave a fractal disc that reads well, but its brightness rises as the heap fills, so validate.js failed the brightness-trend gate on seeds 4 and 13 (+52, +60 projected). Keeping the heap across cycles (relocating source, 120k warm-up grains) passed all 16 seeds, but the saturated steady state renders as TV-static speckle in blue/teal/green, not bold geometry, so per the house-style visual rule it was not shipped. The only structured look (the young growing disc) conflicts with the brightness gate. Novelty gate not run, since nothing shipped. Engine file removed from the repo.",
+    "seedsVerified": "1-15, 12345 (validator battery on the persistent-heap variant; growth variant checked by eye on 12345 and 7, failed the brightness gate on 4 and 13)",
+    "nearestNeighbour": null,
+    "nearestDistance": null
   }
 ]
