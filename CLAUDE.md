@@ -9036,6 +9036,71 @@ was not updated). Nearest neighbour is `fracturepearls` at **0.78** (next
 
 `ENGINE_SUBJECTS`: `timestables: 'Times Table Chord Circles'` in `src/metadata.js`.
 
+## Crystal spiral-terrace engine (`spiralterrace.html`) — 2026-11-18
+
+Daily creative-research routine. Category was "a random featured image" (least
+recent use). An open WebSearch for a striking mineral surface surfaced
+screw-dislocation growth spirals on as-grown crystal faces: a dislocation that
+pierces a face makes every new atomic layer wind around the core as one
+continuous spiral staircase, so the face is built of terraces separated by
+single-step risers (quartz "spiral hillocks" and the elementary/macro-spiral
+literature). Sources: https://www.quartzpage.de/gro_text.html,
+https://www.sciencedirect.com/science/article/abs/pii/0146353589900051. The
+same day's popular-format search (gradient loops, liquid waves, neon crystal
+loops, https://channelsurfer.tv/guides/youtube-screensavers/) only re-surfaced
+families the pool already covers (hoppercrystal, lightstreams, fluidmarble), so
+the random inspiration was used.
+
+**What it is**: a lit WebGL height field. Several nucleation sites each carry an Archimedean step count
+T_n = r/p - (theta - A_n)/2pi. The face is the lower envelope T = min_n T_n, so
+each domain winds into terraces and domains meet along smooth grain-boundary-
+like seams. Height is H*(floor(T) + smoothstep ramp over the last 22% of each
+terrace): flat plateaus, steep lit risers. Terrace colour is picked per pixel
+from floor(T) mod 6 into six luma-equal palette bands. No other engine in the
+pool is a lit height field built from a min-envelope of spirals.
+
+**Motion**: each site's spiral turns at its own rate and sign (guaranteed
+minimum magnitude, 0.5-1.0 rad/s), so neighbouring domains rotate in different
+directions and the seams slide. Phases accumulate and never reset; only the
+rates reassign at cycleSec. No whole-scene rotation.
+
+**Bugs and iterations, found by rendering and by the battery:**
+1. The first draft coloured each vertex and the vertex grid drew the risers as
+   stair-stepped jaggies. Moved the colour into the fragment shader (a per-pixel
+   step count, so every terrace edge is a crisp iso-line).
+2. The first facet was too small: seed 12345 showed a black sliver at the top
+   edge, because the far rim of the perspective frame sits outside the plane.
+   Enlarged the facet to cover the 16:9 frame at the far edge.
+3. Full-frame coverage made the software renderer the bottleneck: 93 ms/frame
+   at 1920x1080 with multisampling on, 152 ms in the validator run while the
+   battery shared the CPU. Turning antialias off dropped the cost to ~50 ms
+   (the columnarbasalt.html fix again). Measured, not assumed: a flat-colour
+   fragment shader alone costs ~54 ms at full coverage here, so the budget is
+   set by coverage, not shader arithmetic.
+4. Seed 5 failed the brightness-trend gate (+52.4 luma projected). Tried a
+   softer ambient term (seed 5 then +27.9, passing, but it dulled the palette)
+   and a fourth nucleation site (seed 5 then -119). Shipped four sites: more
+   independent domains average the seam-driven luma swing over the window.
+
+**Verified** (final design): `validateEngine()` 16/16 on seeds 1-15 plus 12345
+(CLI default seed 12345 passes). Margins: avgSat 66.9-78.4 (vs 22),
+peakNearWhiteFrac 0, projectedRise -208.8 to +41.4 (vs 50; seed 13 is the
+closest at +41.4), compositionDrift 0.0505-0.1207 (vs 0.015),
+unitMotionNonRigidFrac exactly 1.0 on every seed, fastMotion 2.0-2.9x its
+floor at the thinnest, avgMsPerFrame 47-60 (projected hour ~71 min on the CLI
+run). Frames rendered and looked at at 25/50/75/95 percent of a 43.5s cycle at
+seeds 1, 5, 7, 12345: vivid saturated terraces, crisp riser edges, seams that
+visibly reorganise between checkpoints.
+
+**Novelty gate**: measured against all 98 engines in `engines/manual/` (the
+whole pool fingerprinted fresh alongside the candidate; the committed cache was
+not updated). Nearest neighbour is `schlieren` at distance **0.662** (next
+`auto-2026-10-01-nasa-science` 0.720, `voronoimosaic` 0.755). A clean pass
+above 0.60, though not a wide margin: the lit-spiral composition shares
+concentric-band structure with schlieren's pinwheel colour sectors.
+
+`ENGINE_SUBJECTS`: `spiralterrace: 'Crystal Spiral Terraces'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

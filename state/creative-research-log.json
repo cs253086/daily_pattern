@@ -1697,5 +1697,16 @@
     "seedsVerified": "1-15, 12345 (validator battery on the persistent-heap variant; growth variant checked by eye on 12345 and 7, failed the brightness gate on 4 and 13)",
     "nearestNeighbour": null,
     "nearestDistance": null
+  },
+  {
+    "date": "2026-11-18",
+    "inspirationSource": "WebSearch (2026-11-18): crystal surface growth spirals. Screw-dislocation spiral hillocks on as-grown crystal faces (elementary spirals, macrospirals, hillocks of dislocation origin) and quartz growth forms with spiral overgrowth. Sources: https://www.quartzpage.de/gro_text.html ; https://www.sciencedirect.com/science/article/abs/pii/0146353589900051 . Popular-format research the same day (WebSearch): gradient loops, liquid waves and neon 3D crystal loops (https://channelsurfer.tv/guides/youtube-screensavers/); the crystal/neon family is already covered by hoppercrystal, lightstreams and fluidmarble, so the random inspiration was used.",
+    "idea": "Several crystal nucleation sites grow independent Archimedean screw-dislocation spirals; the face is the lower envelope of their step counts, so every domain winds into terraces and the domains meet at seams. Terraces are flat luma-equal plateaus and single-step risers are lit walls. Rendered as one lit WebGL height-field mesh, with per-pixel terrace colour.",
+    "engineName": "spiralterrace",
+    "outcome": "shipped",
+    "reason": "Passes validate.js and the 16-seed battery (seeds 1-15 + 12345, all PASS; avgSat 67-78, projectedRise -208 to +41 vs 50, compositionDrift 0.050-0.121 vs 0.015, unitMotionNonRigidFrac 1.0, fastMotion 2.0-2.9x its floor at worst, avgMsPerFrame 47-60). Novelty 0.662 vs schlieren (>= 0.60). Frames looked at at several cycle fractions and seeds.",
+    "seedsVerified": "1-15, 12345",
+    "nearestNeighbour": "schlieren",
+    "nearestDistance": 0.662
   }
 ]

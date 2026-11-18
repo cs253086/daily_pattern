@@ -105,6 +105,7 @@ const ENGINE_SUBJECTS = {
   slidepuzzle: 'Sliding Tile Puzzle',
   mobius: 'Mobius Stripe Band',
   timestables: 'Times Table Chord Circles',
+  spiralterrace: 'Crystal Spiral Terraces',
   hypnospiral: 'Hypnotic Spiral Zoom',
   voderberg: 'Voderberg Spiral',
   voronoimosaic: 'Voronoi Mosaic',
