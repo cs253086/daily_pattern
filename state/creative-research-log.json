@@ -1708,5 +1708,16 @@
     "seedsVerified": "1-15, 12345",
     "nearestNeighbour": "schlieren",
     "nearestDistance": 0.662
+  },
+  {
+    "date": "2026-11-19",
+    "inspirationSource": "WebSearch (2026-11-19), category 'traditional textile/tiling/ornament tradition from a randomly chosen culture': seigaiha, the Japanese 'blue sea waves' ornament, a unit of stacked concentric arcs in staggered overlapping rows (https://musubikiln.com/blogs/glossary/seigaiha, https://amanaut.com/seigaiha-wave-pattern/). Origin story disputed; the geometry is not. Popular-format research the same day (WebSearch, https://channelsurfer.tv/guides/youtube-screensavers/ and linked loop results: geometry-node loops, DNA-icon loops, 3D tunnel screensavers) only re-surfaced formats the pool already covers (tunnel, hypnospiral, solids3d), so no popular-format engine was built.",
+    "idea": "Seigaiha: staggered rows of nested concentric discs, each lower row painted over the upper, so only the lower arcs of every unit show as a field of fan-shaped scales. Unit-level motion: each unit's ring radii breathe on a travelling wave across the row-major unit index (integer cycles, zero-sum), with a lag between rings of one unit so the bands slide against each other. Ring luma is graded dark rim to bright core. Canvas2D.",
+    "engineName": "seigaiha",
+    "outcome": "shipped",
+    "reason": "validate.js CLI (seed 12345) ok; 16-seed battery (seeds 1-15 + 12345) 16/16 PASS on the final file. Thinnest margins: compositionDrift 0.0177 at seed 14 (floor 0.015), projectedRise -10 to +18 (vs 50), avgSat 83-91, unitMotionNonRigidFrac 1.0 on every seed, fastMotion 8-23 vs floors 3.9-5.8, avgMsPerFrame 8-11. Novelty gate (final file, 101 fingerprinted incl. candidate): nearest real neighbour taniko 0.651, then schlieren 0.664. The candidate file was present in engines/manual, so its own self-match row (distance 0) was excluded from the ranking. Earlier pale-background draft measured 0.629 vs taniko; the background change only touched gap colour and was re-measured.",
+    "seedsVerified": "1-15, 12345",
+    "nearestNeighbour": "taniko",
+    "nearestDistance": 0.651
   }
 ]

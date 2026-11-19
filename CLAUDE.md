@@ -9101,6 +9101,78 @@ concentric-band structure with schlieren's pinwheel colour sectors.
 
 `ENGINE_SUBJECTS`: `spiralterrace: 'Crystal Spiral Terraces'` in `src/metadata.js`.
 
+## Seigaiha wave-scale engine (`seigaiha.html`) — 2026-11-19
+
+Daily creative-research routine. Category was "traditional textile/tiling/
+ornament tradition from a randomly chosen culture" (last used 2026-10-29 for
+`kolam.html`). An open WebSearch within the category surfaced **seigaiha**,
+the Japanese "blue sea waves" ornament: a unit of stacked concentric arcs,
+laid out in staggered rows with each row overlapping the one above, so only
+the lower arcs of every unit show as a field of nested fan-shaped scales.
+The origin story is disputed (haniwa figures versus Persian and Silk Road
+accounts), but the geometry is not. Sources (search snippets):
+https://musubikiln.com/blogs/glossary/seigaiha,
+https://amanaut.com/seigaiha-wave-pattern/.
+
+**Popular-format research, same day (CLAUDE.md 2026-11-09 requirement).**
+Search surfaced long-form geometry-node loops, DNA-icon loops and 3D tunnel
+screensavers (https://channelsurfer.tv/guides/youtube-screensavers/). All
+of these are formats the pool already covers (tunnel, hypnospiral,
+solids3d), so no popular-format engine was built. No view counts were
+available, so the ranking is qualitative.
+
+**What it is**: Canvas2D, one unit per centre, each unit a stack of four
+nested discs painted outermost first. Rows are staggered by half a unit and
+painted top to bottom, so the lower row overlaps the upper. This is a
+composition decided by painter-order overlap, not by an imbricated ellipse
+lattice (`wingscales.html`) or a polygon tiling.
+
+**Motion** is unit-level. Each unit's ring radii breathe on a travelling
+wave over the row-major unit index with an integer number of whole cycles,
+so the summed radius change is exactly zero at every instant
+(discrete-Fourier orthogonality, as in doylespiral/rosenspikes). Each ring
+also lags its neighbour inside the unit, so the bands slide against one
+another rather than scaling as one rigid unit. Rates have a guaranteed
+minimum magnitude with random sign and are reassigned, not reset, at each
+cycleSec boundary.
+
+**Bugs and iterations, found by rendering and by the gates:**
+1. The first draft's rings all had the same luma, because each was
+   luma-equalised to 112. `validate.js` then reported the frame as flat
+   (peakStd 1.98, "lacks spatial structure"). This is the herringbone.html
+   lesson again. Fixed by giving each ring index its own luma level (78,
+   114, 150, 186, dark rim to bright core). The breathing is zero-sum, so
+   the ring-area mix still does not trend brightness.
+2. The first breathing (AMP 0.12) left compositionDrift at 0.0118, below the
+   0.015 floor. Raising AMP to 0.2 and adding the per-ring lag fixed it.
+3. Rendered frames showed small pale specks at the cusps between rows, where
+   the background showed through during breathing. The background was the
+   innermost (palest) ring colour. Switching it to the outer ring colour
+   makes any gap blend into the rim. Measured again afterwards, since the
+   change touches frame luma and fingerprints.
+4. Final battery had one thin seed. AMP 0.27 and lag 1.0 (the final values)
+   raised seed 14's compositionDrift from 0.0148 to 0.0184.
+
+**Verified** (final file): `node src/validate.js engines/manual/seigaiha.html`
+passes on seed 12345 (projectedRise 17.9, compositionDrift 0.0225,
+unitMotionNonRigidFrac 1.0, fastMotion 17.5 vs floor 4.6, avgMsPerFrame 9.2).
+The 16-seed battery (seeds 1-15 plus 12345) passes 16/16. Thinnest margins:
+compositionDrift 0.0177 at seed 14 (floor 0.015), projectedRise -10 to +18
+(vs 50), avgSat 83-91 (vs 22), unitMotionNonRigidFrac 1.0 on every seed,
+fastMotion 8-23 against floors of 3.9-5.8, avgMsPerFrame 8-11. Frames were
+rendered and looked at at 25/50/75/95/105% of a 43.5s cycle at seeds 1, 7
+and 12345. They show bold, saturated scales with clear staggered rows, and
+the breathing reads between checkpoints.
+
+**Novelty gate** (final file): measured against all 101 entries in
+`engines/manual/`, which included the candidate itself, so its own self-match
+row is excluded from the ranking. Nearest real neighbour is `taniko` at
+distance **0.651**, then `schlieren` at 0.664. Both are textile or band
+engines, so this is a clear pass but not a wide margin. The pale-background
+draft measured 0.629 vs taniko. The background change moved it to 0.651.
+
+`ENGINE_SUBJECTS`: `seigaiha: 'Seigaiha Wave Scales'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
