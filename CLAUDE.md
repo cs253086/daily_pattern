@@ -561,6 +561,24 @@ them:
    describing the soundtrack — don't let these two drift out of sync if
    editing either.
 
+## Standing requirement: videos must be full and flourishing (2026-11-20)
+
+User request, repeated on 2026-11-12, 2026-11-17 and 2026-11-20 after
+sparse, mostly-black videos: "I want videos flourishing" / "a video to be
+full rather than blankish". This is a durable rule, not a one-off tweak:
+
+- Every published frame should be densely filled with vivid, saturated
+  colour, layered from big structures down to fine detail, with black only
+  as deliberate negative space. A frame that reads as a few thin lines on
+  black is a failure, even if it passes every numeric gate.
+- Judge density by rendering a mid-hour frame and looking at it, not by
+  the gate numbers. The 2026-11-17 check showed `streamlines.html` drawing
+  9-13 thin streams on black; raising it to 26-33 long, thick streams
+  filled the frame.
+- Any new engine or Gemini prompt change must keep this bar. Density must
+  not come at the cost of clarity: a few clearly readable structures
+  layered over the field, not hundreds of tiny indistinct marks.
+
 ## Editing engine/prompt template literals — a gotcha to know about
 
 `src/generate.js`'s `buildPrompt`/`buildRepairPrompt` are giant backtick
