@@ -8850,6 +8850,378 @@ the committed cache was not updated). Nearest neighbour `truchet` at **0.717**
 
 `ENGINE_SUBJECTS`: `hypnospiral: 'Hypnotic Spiral Zoom'` in `src/metadata.js`.
 
+## Sliding tile puzzle (`slidepuzzle.html`) — 2026-11-14
+
+Consolidated run covering the missed 2026-11-13 and 2026-11-14 firings (one
+engine, one log entry). Random web inspiration: the sliding-tile (15-puzzle)
+construction, popularised by Sam Loyd, whose permutation group has a parity
+invariant (Johnson & Story 1879). Popular-format research (WebSearch) found no
+ranked gear or clockwork loops, only the satisfying-loop genre already covered
+by tunnel, hypnospiral and topomap, so no popular-format engine was built.
+
+**What it is**: a 9x5 grid of luma-matched medallion tiles (a bright disc on
+a coloured square) and one empty cell. Each move slides one tile into the
+empty cell on an eased path. The moves come from a seeded random walk of the
+empty cell that never reverses, so the composition really reorders over the
+hour. This is the pool's first engine whose arrangement evolves through a
+discrete permutation rather than being rotated or warped.
+
+**Why not gears**: a square lattice of meshed gears (exact kinematics,
+alternating-sign counter-rotation) was considered, but it would be a frozen
+rotate-only composition, the failure mode that fails compositionDrift.
+
+**Motion and brightness**: the empty-cell walk keeps one tile sliding at all
+times, which gives unit-level motion. Disc breathing adds a second per-tile
+source with independent phases. The discs are a bright inset (luma 150 against
+92 for the tile). An earlier draft gave every tile and disc the same luma, and
+then fastMotion failed on seed 5 at 4.35 against 5.89: a luma-equal colour
+change is invisible to a luma diff. The bright disc fixed it, and the
+independent phases over 44 tiles keep the summed luma change from becoming a
+common-mode trend.
+
+**Verified**: the CLI gate passes on seed 12345. The 16-seed battery (seeds
+1-15 plus 12345) passes on every seed: avgSat 83.6-85.9 (vs 22), projectedRise
+-15.5 to +22.5 (vs 50), compositionDrift 0.019-0.074 (vs 0.015),
+unitMotionNonRigidFrac 1.0 on every seed, fastMotion 8.0-15.7 against floors of
+5.4-6.1, avgMsPerFrame 2-4. Frames were rendered and looked at at several cycle
+fractions and seed 12345: saturated medallions with a clearly visible
+mid-slide tile and a black empty cell.
+
+**Novelty gate**: measured against all 92 engines in `engines/manual/` (the
+pool fingerprinted fresh, seeds 1 and 7, frames 200/600/1000; the refreshed
+cache was not committed). Nearest neighbour is `mashrabiya` at distance
+**0.889** (next `impactshock` 0.959, `ikatweave` 0.991), a clear pass above
+the 0.60 threshold.
+
+`ENGINE_SUBJECTS`: `slidepuzzle: 'Sliding Tile Puzzle'` in `src/metadata.js`.
+
+## Mobius stripe-band engine (`mobius.html`) — 2026-11-15
+
+Daily creative-research routine. Category was "random Wikipedia article",
+resolved through open search since Wikipedia is blocked here. An open
+WebSearch surfaced the **Mobius strip**: a strip given a half-twist and
+joined end to end is one-sided, so a stripe painted along it travels around
+twice before it returns to its start on the opposite edge (Mathwords
+https://www.mathwords.com/m/mobius_strip.htm; Science News Explores
+https://snexplores.org/?p=192868; LSU notes
+https://www.math.lsu.edu/~rich/2057downloads/MoebiusStrip.pdf).
+
+**Popular-format research (2026-11-15).** Results were mostly generic. The
+leads were HDCOLORS, a kaleidoscope-loop channel one source credits with 30M+
+views on a colour series (undated), and long-form abstract wave loops (2-hour
+"neon lines" screensavers). OutlierKit's channel analysis
+(https://outlierkit.com/channel/visuallooprelax) describes 3-10 minute seamless
+loops, but those are estimates, not YouTube Analytics. Trippy-video guides
+(https://www.neuralframes.com/post/trippy-videos) show the same families:
+kaleidoscope, tunnel, spiral and wave. No verified ranking was available, and
+the pool already covers those families (kaleidoscope, tunnel, hypnospiral,
+topomap, lightstreams, fluidmarble). So no format was clearly uncovered, and
+the random inspiration was used. The nearest gap is the flowing neon-wave-lines
+format; that is a candidate for a later day.
+
+**What it is**: a continuous, one-sided, lit WebGL band (the pool's
+twelfth real-WebGL engine). A 240x10 mesh over
+P(u,v) = ((R + s cos(u/2)) cos u, (R + s cos(u/2)) sin u, s sin(u/2)),
+with s = v h(u), u in [0, 2pi] and v in [-1, 1]. The identification
+(u + 2pi, v) = (u, -v) holds exactly, so the u = 2pi column is drawn
+directly. The half-width h(u) = W0 (1 + A sin(3u - phase)) carries an
+integer 3-cycle travelling wave, so h is periodic under the identification.
+The surface is shaded two-sided: the fragment normal is flipped toward the
+viewer, since the band has no inside or outside.
+
+**Colour** is a stripe field on the surface,
+q = 2u/2pi + 0.5 v cos(u/2) + a slowly advancing phase. Both fixed terms are
+invariant under the identification (the first gains an integer, the second's
+sign cancels), so one stripe crosses the twist with no seam. Six bands are
+assigned by floor(fract(q) * 6), each with the same Rec.709 luma (lightness
+bisected per hue), so the palette adds no brightness trend.
+
+**Coverage and motion.** The width wave's integer count makes its net area
+change zero at every instant (discrete-Fourier orthogonality, as in
+doylespiral/rosenspikes). The colour phase advances uniformly. Phases are
+accumulated, never reset across cycleSec, and only the rates reassign, per
+the geodome/hoppercrystal convention. A small bounded tilt wobble gives the
+camera a little life. Deliberately no whole-object spin, which would dilute
+the unit-motion signal (the truchet lesson).
+
+**Bugs found by rendering and by the battery, not by reasoning:**
+1. The first render was a blank white frame. The canvas had lost its WebGL
+   context at startup (the swiftshader spurious-loss risk documented for
+   solids3d.html), and READY fired at 300 ms without waiting for recovery.
+   Fixed with the solids3d.html pattern: hold READY for 300 ms, then poll
+   isContextLost for up to 1.5 s before READY is set.
+2. Seed 10 failed compositionDrift at 0.0133 (need 0.015). The width wave at
+   depth 0.24 was too weak for the rotation-invariant descriptor. Raising the
+   depth to 0.32 fixed it (seed 10 now 0.0161). Half-width peaks at 0.55,
+   well inside the centreline radius of 1.0, so the band cannot self-intersect.
+3. The first full battery run contained overlapping duplicate-seed runs from
+   a stale background process. Those results were discarded and the battery
+   was re-run serially into a clean file. The 2026-11-15 numbers below come
+   from that clean run.
+4. Visual note, not a gate: the equal-luma bisection pushes yellow-leaning
+   hues toward ochre. This is accepted (the mondrian.html trade-off);
+   palette hue sets were not retuned.
+
+**Verified** (final, depth 0.32): `validateEngine()` **16/16** on seeds 1-15
+plus the CLI default 12345, all PASS. Margins: `avgSat` 62.5-72.7 (vs the
+22 minimum), `peakNearWhiteFrac` 0, `projectedRise` -23.4 to +29.7 (vs 50),
+`compositionDrift` 0.0161-0.0273 (vs 0.015; seed 10 is the thin one),
+`unitMotionNonRigidFrac` 0.719-1.0 (vs 0.40), `fastMotion` 10.7-13.1 against
+floors of 6.1-6.4, `avgMsPerFrame` 17-33 (projected hour 25-47 min, inside the
+CI budget). Frames were rendered and looked at at 300, 600 and 900 frames
+(seed 3) and frame 1100 (seed 12345): a vivid, saturated one-sided band with
+a visibly travelling stripe across the twist, clean edges and no whiteout.
+
+**Novelty gate** (final design): measured against all 94 engines in
+`engines/manual/` (whole pool fingerprinted fresh; the refreshed cache was not
+committed). Nearest neighbour is `auto-2026-09-15-a-daytime-eclipse-moon-occults-venus`
+at distance **0.939** (next radiolarian 0.956, kaleidoscope 0.988). It
+measured 0.876 at the first depth of 0.24 and was re-measured after the
+depth change. A clean pass, not a thin-margin case.
+
+`ENGINE_SUBJECTS`: `mobius: 'Mobius Stripe Band'` in `src/metadata.js`.
+
+## Times-table chord circles (`timestables.html`) — 2026-11-16
+
+Daily creative-research routine. Random inspiration: the "times table on a
+circle" construction (Mathologer's "Times Tables, Mandelbrot and the Heart of
+Mathematics"). Points are spaced evenly on a circle and each is joined to the
+point at m times its angle; for integer m the chord envelope is an epicycloid
+(m=2 cardioid, m=3 nephroid). Sources (search snippets only):
+https://www.redblobgames.com/x/1847-mathologer-modulo-circle/,
+https://nathaniel.ai/modular-multiplication/,
+https://tikz.net/times-tables-and-mandelbrot/.
+
+**What it is**: the multiplier is a REAL number m(t), so the chord family
+morphs continuously between envelopes instead of jumping between integers.
+m(t) is a bounded sum of two sinusoids (fast swing, slow drift), so there is
+no accumulation and no whiteout mechanism. Four independent circles sit in a
+2x2 field, each with its own multiplier phases and a slow rigid spin. Chord
+colour is fixed by start angle, and each frame's total stroke ink is
+normalised to the smallest live chord length over the multiplier range.
+
+**Popular-format research (2026-11-16)**: trending loop results were
+evergreen tunnels, glitch and 3D-shape screensavers, all already covered by
+tunnel, hypnospiral and solids3d. No uncovered format was verified, so the
+random inspiration was used and no popular-format engine was built.
+
+**Iterations, found by the gates and by looking**:
+1. A single centred circle measured **0.285** against `geodome` (a centred
+   round lit shape on black, the same collision class `diatomlattice` and
+   `temari` document). Four scattered circles in a 2x2 field fixed it:
+   **0.78** against `fracturepearls`.
+2. Brightness trends on seeds 1, 8, 13 and 14 (+50 to +75 projected). The
+   fast swing was 21-29 s per cycle, which aliases with the validator's
+   8 sample times. Raising it to 5-7 s (the house 4-15 s band) and cutting its
+   amplitude (0.3-0.4) removed the trend. Ink normalisation alone did not, so
+   the brightness dependence on m is spatial, not total-length.
+3. A slow monotone drift of m over the window read as a trend on some
+   seeds. Adding a slow RIGID spin of each diagram (a rotation of the chord
+   set, not of the frame) removed it without changing lit area or colour mix.
+4. Composition drift sat at 0.0149 on seed 7 with four circles. Widening the
+   slow multiplier drift (0.2-0.3) fixed it without a brightness cost.
+
+**Verified** (final design): `validateEngine()` **16/16** across seeds 1-15 plus
+12345. Margins: `avgSat` 47.7-69.4 (vs 22), `projectedRise` -37 to +33.5 (vs 50),
+`compositionDrift` 0.0166-0.0281 (vs 0.015; seed 10 is the thinnest),
+`unitMotionNonRigidFrac` 1.0 on every seed, `fastMotion` 20-33 against floors of
+about 9-12, `avgMsPerFrame` 43-54 (budget 100). Frames rendered and looked at
+at several cycle fractions and seeds: vivid, saturated chord envelopes with
+clear black gutters between the four circles, no whiteout.
+
+**Novelty gate**: measured against all 96 engines in `engines/manual/` (pool
+fingerprinted fresh, seeds 1 and 7, frames 200/600/1000; the committed cache
+was not updated). Nearest neighbour is `fracturepearls` at **0.78** (next
+`langtonsant` 0.881, `spinbounce` 0.968).
+
+`ENGINE_SUBJECTS`: `timestables: 'Times Table Chord Circles'` in `src/metadata.js`.
+
+## Crystal spiral-terrace engine (`spiralterrace.html`) — 2026-11-18
+
+Daily creative-research routine. Category was "a random featured image" (least
+recent use). An open WebSearch for a striking mineral surface surfaced
+screw-dislocation growth spirals on as-grown crystal faces: a dislocation that
+pierces a face makes every new atomic layer wind around the core as one
+continuous spiral staircase, so the face is built of terraces separated by
+single-step risers (quartz "spiral hillocks" and the elementary/macro-spiral
+literature). Sources: https://www.quartzpage.de/gro_text.html,
+https://www.sciencedirect.com/science/article/abs/pii/0146353589900051. The
+same day's popular-format search (gradient loops, liquid waves, neon crystal
+loops, https://channelsurfer.tv/guides/youtube-screensavers/) only re-surfaced
+families the pool already covers (hoppercrystal, lightstreams, fluidmarble), so
+the random inspiration was used.
+
+**What it is**: a lit WebGL height field. Several nucleation sites each carry an Archimedean step count
+T_n = r/p - (theta - A_n)/2pi. The face is the lower envelope T = min_n T_n, so
+each domain winds into terraces and domains meet along smooth grain-boundary-
+like seams. Height is H*(floor(T) + smoothstep ramp over the last 22% of each
+terrace): flat plateaus, steep lit risers. Terrace colour is picked per pixel
+from floor(T) mod 6 into six luma-equal palette bands. No other engine in the
+pool is a lit height field built from a min-envelope of spirals.
+
+**Motion**: each site's spiral turns at its own rate and sign (guaranteed
+minimum magnitude, 0.5-1.0 rad/s), so neighbouring domains rotate in different
+directions and the seams slide. Phases accumulate and never reset; only the
+rates reassign at cycleSec. No whole-scene rotation.
+
+**Bugs and iterations, found by rendering and by the battery:**
+1. The first draft coloured each vertex and the vertex grid drew the risers as
+   stair-stepped jaggies. Moved the colour into the fragment shader (a per-pixel
+   step count, so every terrace edge is a crisp iso-line).
+2. The first facet was too small: seed 12345 showed a black sliver at the top
+   edge, because the far rim of the perspective frame sits outside the plane.
+   Enlarged the facet to cover the 16:9 frame at the far edge.
+3. Full-frame coverage made the software renderer the bottleneck: 93 ms/frame
+   at 1920x1080 with multisampling on, 152 ms in the validator run while the
+   battery shared the CPU. Turning antialias off dropped the cost to ~50 ms
+   (the columnarbasalt.html fix again). Measured, not assumed: a flat-colour
+   fragment shader alone costs ~54 ms at full coverage here, so the budget is
+   set by coverage, not shader arithmetic.
+4. Seed 5 failed the brightness-trend gate (+52.4 luma projected). Tried a
+   softer ambient term (seed 5 then +27.9, passing, but it dulled the palette)
+   and a fourth nucleation site (seed 5 then -119). Shipped four sites: more
+   independent domains average the seam-driven luma swing over the window.
+
+**Verified** (final design): `validateEngine()` 16/16 on seeds 1-15 plus 12345
+(CLI default seed 12345 passes). Margins: avgSat 66.9-78.4 (vs 22),
+peakNearWhiteFrac 0, projectedRise -208.8 to +41.4 (vs 50; seed 13 is the
+closest at +41.4), compositionDrift 0.0505-0.1207 (vs 0.015),
+unitMotionNonRigidFrac exactly 1.0 on every seed, fastMotion 2.0-2.9x its
+floor at the thinnest, avgMsPerFrame 47-60 (projected hour ~71 min on the CLI
+run). Frames rendered and looked at at 25/50/75/95 percent of a 43.5s cycle at
+seeds 1, 5, 7, 12345: vivid saturated terraces, crisp riser edges, seams that
+visibly reorganise between checkpoints.
+
+**Novelty gate**: measured against all 98 engines in `engines/manual/` (the
+whole pool fingerprinted fresh alongside the candidate; the committed cache was
+not updated). Nearest neighbour is `schlieren` at distance **0.662** (next
+`auto-2026-10-01-nasa-science` 0.720, `voronoimosaic` 0.755). A clean pass
+above 0.60, though not a wide margin: the lit-spiral composition shares
+concentric-band structure with schlieren's pinwheel colour sectors.
+
+`ENGINE_SUBJECTS`: `spiralterrace: 'Crystal Spiral Terraces'` in `src/metadata.js`.
+
+## Seigaiha wave-scale engine (`seigaiha.html`) — 2026-11-19
+
+Daily creative-research routine. Category was "traditional textile/tiling/
+ornament tradition from a randomly chosen culture" (last used 2026-10-29 for
+`kolam.html`). An open WebSearch within the category surfaced **seigaiha**,
+the Japanese "blue sea waves" ornament: a unit of stacked concentric arcs,
+laid out in staggered rows with each row overlapping the one above, so only
+the lower arcs of every unit show as a field of nested fan-shaped scales.
+The origin story is disputed (haniwa figures versus Persian and Silk Road
+accounts), but the geometry is not. Sources (search snippets):
+https://musubikiln.com/blogs/glossary/seigaiha,
+https://amanaut.com/seigaiha-wave-pattern/.
+
+**Popular-format research, same day (CLAUDE.md 2026-11-09 requirement).**
+Search surfaced long-form geometry-node loops, DNA-icon loops and 3D tunnel
+screensavers (https://channelsurfer.tv/guides/youtube-screensavers/). All
+of these are formats the pool already covers (tunnel, hypnospiral,
+solids3d), so no popular-format engine was built. No view counts were
+available, so the ranking is qualitative.
+
+**What it is**: Canvas2D, one unit per centre, each unit a stack of four
+nested discs painted outermost first. Rows are staggered by half a unit and
+painted top to bottom, so the lower row overlaps the upper. This is a
+composition decided by painter-order overlap, not by an imbricated ellipse
+lattice (`wingscales.html`) or a polygon tiling.
+
+**Motion** is unit-level. Each unit's ring radii breathe on a travelling
+wave over the row-major unit index with an integer number of whole cycles,
+so the summed radius change is exactly zero at every instant
+(discrete-Fourier orthogonality, as in doylespiral/rosenspikes). Each ring
+also lags its neighbour inside the unit, so the bands slide against one
+another rather than scaling as one rigid unit. Rates have a guaranteed
+minimum magnitude with random sign and are reassigned, not reset, at each
+cycleSec boundary.
+
+**Bugs and iterations, found by rendering and by the gates:**
+1. The first draft's rings all had the same luma, because each was
+   luma-equalised to 112. `validate.js` then reported the frame as flat
+   (peakStd 1.98, "lacks spatial structure"). This is the herringbone.html
+   lesson again. Fixed by giving each ring index its own luma level (78,
+   114, 150, 186, dark rim to bright core). The breathing is zero-sum, so
+   the ring-area mix still does not trend brightness.
+2. The first breathing (AMP 0.12) left compositionDrift at 0.0118, below the
+   0.015 floor. Raising AMP to 0.2 and adding the per-ring lag fixed it.
+3. Rendered frames showed small pale specks at the cusps between rows, where
+   the background showed through during breathing. The background was the
+   innermost (palest) ring colour. Switching it to the outer ring colour
+   makes any gap blend into the rim. Measured again afterwards, since the
+   change touches frame luma and fingerprints.
+4. Final battery had one thin seed. AMP 0.27 and lag 1.0 (the final values)
+   raised seed 14's compositionDrift from 0.0148 to 0.0184.
+
+**Verified** (final file): `node src/validate.js engines/manual/seigaiha.html`
+passes on seed 12345 (projectedRise 17.9, compositionDrift 0.0225,
+unitMotionNonRigidFrac 1.0, fastMotion 17.5 vs floor 4.6, avgMsPerFrame 9.2).
+The 16-seed battery (seeds 1-15 plus 12345) passes 16/16. Thinnest margins:
+compositionDrift 0.0177 at seed 14 (floor 0.015), projectedRise -10 to +18
+(vs 50), avgSat 83-91 (vs 22), unitMotionNonRigidFrac 1.0 on every seed,
+fastMotion 8-23 against floors of 3.9-5.8, avgMsPerFrame 8-11. Frames were
+rendered and looked at at 25/50/75/95/105% of a 43.5s cycle at seeds 1, 7
+and 12345. They show bold, saturated scales with clear staggered rows, and
+the breathing reads between checkpoints.
+
+**Novelty gate** (final file): measured against all 101 entries in
+`engines/manual/`, which included the candidate itself, so its own self-match
+row is excluded from the ranking. Nearest real neighbour is `taniko` at
+distance **0.651**, then `schlieren` at 0.664. Both are textile or band
+engines, so this is a clear pass but not a wide margin. The pale-background
+draft measured 0.629 vs taniko. The background change moved it to 0.651.
+
+`ENGINE_SUBJECTS`: `seigaiha: 'Seigaiha Wave Scales'` in `src/metadata.js`.
+
+## Brick-bond wall engine (`brickbond.html`) — 2026-11-20
+
+Daily creative-research routine. Category was "random architectural or
+typographic movement" (least recently used by the log tally). A WebSearch
+for masonry bond surfaced the bond pattern: the arrangement of joints
+between bricks that changes from course to course (stretcher, header,
+running and Flemish-style mixes). Sources (search snippets): en.wikipedia.org/
+wiki/Bond_(masonry) (blocked in this sandbox), brickbondpatterns.com (bond
+glossary). Popular-format research the same day found no geometric or
+hypnotic pattern-loop channel or format, so no popular-format engine was
+built.
+
+**What it is**: nine courses of periodic brick runs. The generative object
+is the set of joint positions, not a motif: each course is a periodic
+partition of a fixed wall width (bricks 1 to 3 units wide, running-bond
+offset alternating by course), and every joint moves on an integer-wave
+travelling wave over the joint index. The period never changes, so each
+course stays fully covered and total brick area is constant. Bricks are
+luma-equal, the mortar is a fixed black gap, and adjacent bricks take
+different hue slots.
+
+**Bugs and iterations, found by rendering and by the gates**:
+1. A 9-unit period with 1-2 unit bricks read as horizontal bars rather
+   than a wall. Period 12 with 1-3 unit bricks and neighbour-distinct hue
+   slots fixed it, confirmed by looking at the PNG.
+2. A periodic-copy wrap bug left a black sliver at the right frame edge:
+   the last joint of each copy was not shifted by the copy offset. Fixed
+   by applying the copy offset to the joint end too.
+3. The joint-wave count K was re-drawn at every cycle boundary. That pops
+   every joint at once, so only the per-course rates are reassigned now.
+
+**Verified**: `node src/validate.js` (seed 12345) ok: projectedRise -9.9,
+compositionDrift 0.029, unitMotionNonRigidFrac 1.0, fastMotion 15.5 vs floor
+4.06, avgMsPerFrame 2. The 16-seed battery (seeds 1-15 plus 12345) passes
+16/16: avgSat 82-91 (vs 22), projectedRise -23 to +38 (vs 50),
+compositionDrift 0.0185-0.0542 (vs 0.015; seed 1 is the thinnest),
+unitMotionNonRigidFrac 1.0 on every seed, fastMotion 12.7-16.0 against
+floors of 3.6-4.3, avgMsPerFrame 1.4-2.3. Frames were rendered and looked
+at for seeds 1-3 at 25/50/75/95/105% of a 43.5s cycle.
+
+**Novelty gate**: all 101 engines in `engines/manual/` fingerprinted fresh
+alongside the candidate. Nearest neighbour is `mondrian` at distance
+**0.981** (next `slidepuzzle` 1.253, `impactshock` 1.256), a clean pass
+above 0.60. The guillotine rectangles of mondrian are the closest
+composition, but its black-line cuts and one-cut-per-leaf structure differ
+from staggered courses of periodic bricks.
+
+`ENGINE_SUBJECTS`: `brickbond: 'Brick Bond Wall'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

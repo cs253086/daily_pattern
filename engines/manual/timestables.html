@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Times Table Chord Circle — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine). An open WebSearch surfaced the "times table on
+// a circle" construction popularised by Mathologer's "Times Tables, Mandelbrot
+// and the Heart of Mathematics": N points are spaced evenly around a circle
+// and each point is joined to the point whose angle is m times its own. For
+// integer m the envelope of the chords is a famous epicycloid (m=2 gives the
+// cardioid, m=3 the nephroid). Sources (search snippets, not opened):
+// https://www.redblobgames.com/x/1847-mathologer-modulo-circle/ (interactive
+// modular times-table circle), https://nathaniel.ai/modular-multiplication/
+// (cardioid as the envelope for multiplier 2, Mandelbrot link),
+// https://tikz.net/times-tables-and-mandelbrot/ (times-table cardioid and
+// the Mandelbrot connection).
+//
+// A genuinely different construction PRINCIPLE from every other engine in the
+// pool: the multiplier is a REAL number, not an integer, so the chord family
+// {theta -> m*theta} morphs CONTINUOUSLY between epicycloid envelopes. No
+// tiling, wave field, growth process or walker is involved; the picture is a
+// one-parameter family of straight chords whose envelope is the object.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. The render is stateless: every frame is
+// recomputed from the current multiplier m(t), so nothing accumulates and no
+// whiteout mechanism exists. m(t) is a bounded sum of two sinusoids, so its
+// range is fixed by construction. Chord start angles, colours and count are
+// fixed once per video, so luma-neutral motion comes from the chords moving.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Mulberry32's first outputs for consecutive small seeds are correlated;
+  // discard a few draws (same convention as the other engines).
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  // ---- Diagrams: a 2x2 field of independent times-table circles -------------
+  // One centred circle lands in the same archetype as the pool's other centred
+  // radial engines (the novelty gate measured it against geodome). Four
+  // independent circles on a grid break that centred symmetry, the same
+  // multi-instance fix the other scattered-window engines use.
+  const COLS = 2, ROWS = 2;
+  const cellW = W / COLS, cellH = H / ROWS;
+  const RD = 0.45 * Math.min(cellW, cellH);
+  const LW_CORE = Math.max(1.2, RD * 0.0085);
+  const LW_GLOW = LW_CORE * 4;
+  const DIAGRAMS = [];
+  for (let d = 0; d < COLS * ROWS; d++) {
+    const col = d % COLS, row = Math.floor(d / COLS);
+    const cx = (col + 0.5) * cellW + rand(-0.03, 0.03) * cellW;
+    const cy = (row + 0.5) * cellH + rand(-0.03, 0.03) * cellH;
+    const N = Math.max(110, Math.min(170, Math.round(rand(120, 165) * DENSITY)));
+    const dg = {
+      cx, cy, N,
+      MC: rand(3.0, 3.6),            // central multiplier (nephroid to 4-fold envelope)
+      A1: rand(0.3, 0.4),            // fast swing amplitude
+      A2: rand(0.2, 0.3),            // slow drift amplitude
+      W1: sgn() * rand(0.9, 1.2),    // fast swing rate (rad/s), never near zero
+      W2: sgn() * rand(0.08, 0.1),
+      PH1: rand(0, Math.PI * 2), PH2: rand(0, Math.PI * 2),
+      // Slow rigid spin of the diagram: a monotone angle drift that does not
+      // change lit area or the colour mix, so it cannot read as a brightness trend.
+      SPIN: sgn() * rand(0.03, 0.05),
+      chords: [],
+      inkRef: Infinity,
+    };
+    // Chord colours are fixed per start angle (an axis the motion never moves).
+    for (let i = 0; i < dg.N; i++) {
+      const th = (2 * Math.PI * i) / dg.N;
+      const c = PAL[(Math.floor((i * PAL.length) / dg.N) + d) % PAL.length];
+      dg.chords.push({ th, col: `hsl(${c[0]}, ${c[1]}%, ${c[2]}%)`, colGlow: `hsla(${c[0]}, ${c[1]}%, ${c[2]}%, 0.12)` });
+    }
+    // Reference ink = the smallest total chord length over the multiplier range,
+    // so alpha = inkRef / L is always <= 1 and total stroke ink stays constant.
+    for (let q = 0; q <= 400; q++) {
+      const m = (dg.MC - dg.A1 - dg.A2) + (2 * (dg.A1 + dg.A2) * q) / 400;
+      let L = 0;
+      for (const ch of dg.chords) L += Math.abs(2 * Math.sin((m - 1) * ch.th / 2));
+      if (L < dg.inkRef) dg.inkRef = L;
+    }
+    DIAGRAMS.push(dg);
+  }
+
+  // Multiplier at time t (seconds). Bounded: |m - MC| <= A1 + A2.
+  function multiplierAt(dg, t) {
+    return dg.MC + dg.A1 * Math.sin(dg.W1 * SPEED * t + dg.PH1) + dg.A2 * Math.sin(dg.W2 * SPEED * t + dg.PH2);
+  }
+
+  function renderAt(t) {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'lighter';
+
+    for (const dg of DIAGRAMS) {
+      const m = multiplierAt(dg, t);
+      const spin = dg.SPIN * SPEED * t;
+      const pt = (a) => [dg.cx + RD * Math.cos(a), dg.cy + RD * Math.sin(a)];
+      // Live chord length (for ink normalisation).
+      let L = 0;
+      for (const ch of dg.chords) {
+        const a = ch.th + spin, b = m * a;
+        L += Math.abs(2 * Math.sin((b - a) / 2));
+      }
+      ctx.globalAlpha = Math.min(1, dg.inkRef / Math.max(L, 1e-6));
+
+      ctx.lineWidth = LW_GLOW;
+      for (const ch of dg.chords) {
+        const [x0, y0] = pt(ch.th + spin);
+        const [x1, y1] = pt(m * (ch.th + spin));
+        ctx.strokeStyle = ch.colGlow;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      }
+      ctx.lineWidth = LW_CORE;
+      for (const ch of dg.chords) {
+        const [x0, y0] = pt(ch.th + spin);
+        const [x1, y1] = pt(m * (ch.th + spin));
+        ctx.strokeStyle = ch.col;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      }
+    }
+
+    // Rim dots, one per chord endpoint, drawn at full alpha over the lines.
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#fff';
+    const rd = LW_CORE * 1.4;
+    for (const dg of DIAGRAMS) {
+      const spin = dg.SPIN * SPEED * t;
+      for (const ch of dg.chords) {
+        const a = ch.th + spin;
+        ctx.beginPath(); ctx.arc(dg.cx + RD * Math.cos(a), dg.cy + RD * Math.sin(a), rd, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  }
+
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  window.advanceFrame = function () {
+    renderAt(window.currentFrame / FPS);
+    window.currentFrame++;
+  };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

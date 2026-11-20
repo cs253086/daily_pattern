@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generative Art Screensaver</title>
+    <meta name="pattern-name" content="Chromatic Orbital Filaments">
+    <style>
+        body { margin: 0; overflow: hidden; background-color: black; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="glcanvas"></canvas>
+
+    <script>
+        // --- Configuration and PRNG ---
+        const canvas = document.getElementById('glcanvas');
+        let gl; // WebGL context
+        let program; // Shader program
+        let positionBuffer, colorBuffer, indexBuffer; // GL buffers
+
+        // Shader uniform locations
+        let u_worldMatrixLoc, u_viewMatrixLoc, u_projectionMatrixLoc, u_lightDirectionLoc, u_lightColorLoc, u_ambientColorLoc;
+        let u_timeLoc; // Uniform for time
+
+        // URL parameters with defaults
+        const urlParams = new URLSearchParams(window.location.search);
+        const width = parseInt(urlParams.get('width')) || 1920;
+        const height = parseInt(urlParams.get('height')) || 1080;
+        let seed = parseInt(urlParams.get('seed')) || 20261118;
+        const fps = parseInt(urlParams.get('fps')) || 24;
+        const duration = parseFloat(urlParams.get('duration')) || 3600;
+        const speed = parseFloat(urlParams.get('speed')) || 1;
+        const density = parseFloat(urlParams.get('density')) || 1;
+        const cycleSec = parseFloat(urlParams.get('cycleSec')) || 90;
+
+        canvas.width = width;
+        canvas.height = height;
+
+        window.TOTAL_FRAMES = Math.round(duration * fps);
+        window.currentFrame = 0;
+        window.READY = false;
+
+        // Mulberry32 PRNG
+        let prng_state = seed;
+        function mulberry32() {
+            prng_state |= 0;
+            prng_state = prng_state + 0x6D2B79F5 | 0;
+            let t = Math.imul(prng_state ^ prng_state >>> 15, 1 | prng_state);
+            t = (t + Math.imul(t ^ t >>> 7, 61 | t)) ^ t;
+            return ((t ^ t >>> 14) >>> 0) / 4294967296;
+        }
+
+        function rand(min, max) {
+            return min + (max - min) * mulberry32();
+        }
+
+        function randInt(min, max) {
+            return Math.floor(rand(min, max + 1));
+        }
+
+        function randSign() {
+            return mulberry32() < 0.5 ? 1 : -1;
+        }
+
+        // HSV to RGB conversion
+        function hsvToRgb(h, s, v) {
+            let r, g, b;
+            let i = Math.floor(h / 60);
+            let f = h / 60 - i;
+            let p = v * (1 - s);
+            let q = v * (1 - f * s);
+            let t = v * (1 - (1 - f) * s);
+
+            switch (i % 6) {
+                case 0: r = v, g = t, b = p; break;
+                case 1: r = q, g = v, b = p; break;
+                case 2: r = p, g = v, b = t; break;
+                case 3: r = p, g = q, b = v; break;
+                case 4: r = t, g = p, b = v; break;
+                case 5: r = v, g = p, b = q; break;
+            }
+            return [r, g, b, 1.0]; // Add alpha for consistency
+        }
+
+        // --- Math Helpers (4x4 Matrix and Vector) ---
+        const vec3 = {
+            create() { return new Float32Array(3); },
+            normalize(out, a) {
+                let x = a[0], y = a[1], z = a[2];
+                let len = x * x + y * y + z * z;
+                if (len > 0) {
+                    len = 1 / Math.sqrt(len);
+                }
+                out[0] = a[0] * len;
+                out[1] = a[1] * len;
+                out[2] = a[2] * len;
+                return out;
+            }
+        };
+
+        const mat4 = {
+            create() { return new Float32Array(16); },
+            identity(out) {
+                out[0] = 1; out[1] = 0; out[2] = 0; out[3] = 0;
+                out[4] = 0; out[5] = 1; out[6] = 0; out[7] = 0;
+                out[8] = 0; out[9] = 0; out[10] = 1; out[11] = 0;
+                out[12] = 0; out[13] = 0; out[14] = 0; out[15] = 1;
+                return out;
+            },
+            multiply(out, a, b) {
+                let a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+                let a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+                let a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+                let a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+
+                let b0 = b[0], b1 = b[1], b2 = b[2], b3 = b[3];
+                out[0] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+                out[1] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+                out[2] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+                out[3] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+
+                b0 = b[4]; b1 = b[5]; b2 = b[6]; b3 = b[7];
+                out[4] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+                out[5] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+                out[6] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+                out[7] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+
+                b0 = b[8]; b1 = b[9]; b2 = b[10]; b3 = b[11];
+                out[8] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+                out[9] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+                out[10] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+                out[11] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+
+                b0 = b[12]; b1 = b[13]; b2 = b[14]; b3 = b[15];
+                out[12] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+                out[13] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+                out[14] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+                out[15] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+                return out;
+            },
+            translate(out, a, v) {
+                let x = v[0], y = v[1], z = v[2];
+                let a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+                let a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+                let a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+                let a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+
+                out[0] = a00; out[1] = a01; out[2] = a02; out[3] = a03;
+                out[4] = a10; out[5] = a11; out[6] = a12; out[7] = a13;
+                out[8] = a20; out[9] = a21; out[10] = a22; out[11] = a23;
+
+                out[12] = a00 * x + a10 * y + a20 * z + a30;
+                out[13] = a01 * x + a11 * y + a21 * z + a31;
+                out[14] = a02 * x + a12 * y + a22 * z + a32;
+                out[15] = a03 * x + a13 * y + a23 * z + a33;
+                return out;
+            },
+            rotate(out, a, rad, axis) {
+                let x = axis[0], y = axis[1], z = axis[2];
+                let len = Math.hypot(x, y, z);
+                if (len < 0.0001) { return a; } // Return original if axis is zero or too small
+                len = 1 / len;
+                x *= len;
+                y *= len;
+                z *= len;
+
+                let s = Math.sin(rad);
+                let c = Math.cos(rad);
+                let t = 1 - c;
+
+                let a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+                let a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+                let a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+
+                let b00 = x * x * t + c;
+                let b01 = y * x * t + z * s;
+                let b02 = z * x * t - y * s;
+                let b10 = x * y * t - z * s;
+                let b11 = y * y * t + c;
+                let b12 = z * y * t + x * s;
+                let b20 = x * z * t + y * s;
+                let b21 = y * z * t - x * s;
+                let b22 = z * z * t + c;
+
+                out[0] = a00 * b00 + a10 * b01 + a20 * b02;
+                out[1] = a01 * b00 + a11 * b01 + a21 * b02;
+                out[2] = a02 * b00 + a12 * b01 + a22 * b02;
+                out[3] = a03 * b00 + a13 * b01 + a23 * b02;
+
+                out[4] = a00 * b10 + a10 * b11 + a20 * b12;
+                out[5] = a01 * b10 + a11 * b11 + a21 * b12;
+                out[6] = a02 * b10 + a12 * b11 + a22 * b12;
+                out[7] = a03 * b10 + a13 * b11 + a23 * b12;
+
+                out[8] = a00 * b20 + a10 * b21 + a20 * b22;
+                out[9] = a01 * b20 + a11 * b21 + a21 * b22;
+                out[10] = a02 * b20 + a12 * b21 + a22 * b22;
+                out[11] = a03 * b20 + a13 * b21 + a23 * b22;
+
+                if (a !== out) { // If a and out are different, copy over the translation part
+                    out[12] = a[12];
+                    out[13] = a[13];
+                    out[14] = a[14];
+                    out[15] = a[15];
+                }
+                return out;
+            },
+            scale(out, a, v) {
+                let x = v[0], y = v[1], z = v[2];
+
+                out[0] = a[0] * x;
+                out[1] = a[1] * x;
+                out[2] = a[2] * x;
+                out[3] = a[3] * x;
+                out[4] = a[4] * y;
+                out[5] = a[5] * y;
+                out[6] = a[6] * y;
+                out[7] = a[7] * y;
+                out[8] = a[8] * z;
+                out[9] = a[9] * z;
+                out[10] = a[10] * z;
+                out[11] = a[11] * z;
+                out[12] = a[12];
+                out[13] = a[13];
+                out[14] = a[14];
+                out[15] = a[15];
+                return out;
+            },
+            perspective(out, fovy, aspect, near, far) {
+                const f = 1.0 / Math.tan(fovy / 2);
+                out[0] = f / aspect;
+                out[1] = 0;
+                out[2] = 0;
+                out[3] = 0;
+                out[4] = 0;
+                out[5] = f;
+                out[6] = 0;
+                out[7] = 0;
+                out[8] = 0;
+                out[9] = 0;
+                out[10] = (far + near) / (near - far);
+                out[11] = -1;
+                out[12] = 0;
+                out[13] = 0;
+                out[14] = (2 * far * near) / (near - far);
+                out[15] = 0;
+                return out;
+            },
+            lookAt(out, eye, center, up) {
+                let eyex = eye[0], eyey = eye[1], eyez = eye[2];
+                let upx = up[0], upy = up[1], upz = up[2];
+                let centerx = center[0], centery = center[1], centerz = center[2];
+
+                if (Math.abs(eyex - centerx) < 0.000001 && Math.abs(eyey - centery) < 0.000001 && Math.abs(eyez - centerz) < 0.000001) {
+                    return mat4.identity(out);
+                }
+
+                let z0 = eyex - centerx, z1 = eyey - centery, z2 = eyez - centerz;
+                let len = 1 / Math.hypot(z0, z1, z2);
+                z0 *= len; z1 *= len; z2 *= len;
+
+                let x0 = upy * z2 - upz * z1, x1 = upz * z0 - upx * z2, x2 = upx * z1 - upy * z0;
+                len = Math.hypot(x0, x1, x2);
+                if (len === 0) { x0 = 0; x1 = 0; x2 = 0; } else { len = 1 / len; x0 *= len; x1 *= len; x2 *= len; }
+
+                let y0 = z1 * x2 - z2 * x1, y1 = z2 * x0 - z0 * x2, y2 = z0 * x1 - z1 * x0;
+                len = Math.hypot(y0, y1, y2);
+                if (len === 0) { y0 = 0; y1 = 0; y2 = 0; } else { len = 1 / len; y0 *= len; y1 *= len; y2 *= len; }
+
+                out[0] = x0; out[1] = y0; out[2] = z0; out[3] = 0;
+                out[4] = x1; out[5] = y1; out[6] = z1; out[7] = 0;
+                out[8] = x2; out[9] = y2; out[10] = z2; out[11] = 0;
+                out[12] = -(x0 * eyex + x1 * eyey + x2 * eyez);
+                out[13] = -(y0 * eyex + y1 * eyey + y2 * eyez);
+                out[14] = -(z0 * eyex + z1 * eyey + z2 * eyez);
+                out[15] = 1;
+                return out;
+            }
+        };
+
+        // --- Shader Sources ---
+        const vsSource = `
+            attribute vec4 a_position;
+            attribute vec4 a_color;
+            uniform mat4 u_worldMatrix;
+            uniform mat4 u_viewMatrix;
+            uniform mat4 u_projectionMatrix;
+            varying vec4 v_color;
+
+            void main() {
+                gl_Position = u_projectionMatrix * u_viewMatrix * u_worldMatrix * a_position;
+                v_color = a_color;
+            }
+        `;
+
+        const fsSource = `
+            precision mediump float;
+            varying vec4 v_color;
+            void main() {
+                gl_FragColor = v_color;
+            }
+        `;
+
+        // --- WebGL Initialization ---
+        function initGL() {
+            gl = canvas.getContext('webgl', { preserveDrawingBuffer: true });
+            if (!gl) {
+                throw new Error('Unable to initialize WebGL. Your browser may not support it or preserveDrawingBuffer failed.');
+            }
+
+            // Compile shaders
+            const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+            // Link program
+            program = createProgram(gl, vertexShader, fragmentShader);
+            gl.useProgram(program);
+
+            // Get attribute and uniform locations
+            const a_positionLoc = gl.getAttribLocation(program, 'a_position');
+            const a_colorLoc = gl.getAttribLocation(program, 'a_color');
+            u_worldMatrixLoc = gl.getUniformLocation(program, 'u_worldMatrix');
+            u_viewMatrixLoc = gl.getUniformLocation(program, 'u_viewMatrix');
+            u_projectionMatrixLoc = gl.getUniformLocation(program, 'u_projectionMatrix');
+            // u_lightDirectionLoc = gl.getUniformLocation(program, 'u_lightDirection');
+            // u_lightColorLoc = gl.getUniformLocation(program, 'u_lightColor');
+            // u_ambientColorLoc = gl.getUniformLocation(program, 'u_ambientColor');
+            // u_timeLoc = gl.getUniformLocation(program, 'u_time'); // Not strictly needed for this shader
+
+            // Create buffers
+            positionBuffer = gl.createBuffer();
+            if (!positionBuffer) throw new Error('Failed to create position buffer.');
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.enableVertexAttribArray(a_positionLoc);
+            gl.vertexAttribPointer(a_positionLoc, 3, gl.FLOAT, false, 0, 0);
+
+            colorBuffer = gl.createBuffer();
+            if (!colorBuffer) throw new Error('Failed to create color buffer.');
+            gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+            gl.enableVertexAttribArray(a_colorLoc);
+            gl.vertexAttribPointer(a_colorLoc, 4, gl.FLOAT, false, 0, 0); // 4 components for RGBA
+
+            indexBuffer = gl.createBuffer();
+            if (!indexBuffer) throw new Error('Failed to create index buffer.');
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+
+            gl.enable(gl.DEPTH_TEST);
+            gl.depthFunc(gl.LEQUAL);
+
+            // Enable blending for glow effect
+            gl.enable(gl.BLEND);
+            // gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // Additive blending for glow
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); // Default alpha blending for source-over
+            gl.clearColor(0.0, 0.0, 0.0, 1.0); // Black background
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); // Clear buffers
+        }
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            if (!shader) throw new Error('Failed to create shader.');
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                const info = gl.getShaderInfoLog(shader);
+                gl.deleteShader(shader);
+                throw new Error('Could not compile shader:\n' + info);
+            }
+            return shader;
+        }
+
+        function createProgram(gl, vs, fs) {
+            const program = gl.createProgram();
+            if (!program) throw new Error('Failed to create program.');
+            gl.attachShader(program, vs);
+            gl.attachShader(program, fs);
+            gl.linkProgram(program);
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                const info = gl.getProgramInfoLog(program);
+                gl.deleteProgram(program);
+                throw new Error('Could not link program:\n' + info);
+            }
+            return program;
+        }
+
+        // --- Geometry Generation ---
+        let sphereGeo = { positions: [], colors: [], indices: [] };
+        let torusGeo = { positions: [], colors: [], indices: [] };
+        let objects = []; // Array to hold scene objects
+        let baseHue;
+        let hueShiftSpeed, satCycleSpeed, lightCycleSpeed;
+        let globalRotationSpeed;
+        let globalTransform = mat4.create();
+
+        function generateSphere(radius, latBands, longBands) {
+            const positions = [];
+            const indices = [];
+
+            for (let latNumber = 0; latNumber <= latBands; latNumber++) {
+                const theta = latNumber * Math.PI / latBands;
+                const sinTheta = Math.sin(theta);
+                const cosTheta = Math.cos(theta);
+
+                for (let longNumber = 0; longNumber <= longBands; longNumber++) {
+                    const phi = longNumber * 2 * Math.PI / longBands;
+                    const sinPhi = Math.sin(phi);
+                    const cosPhi = Math.cos(phi);
+
+                    const x = radius * cosPhi * sinTheta;
+                    const y = radius * sinPhi * sinTheta;
+                    const z = radius * cosTheta;
+
+                    positions.push(x, y, z);
+                }
+            }
+
+            for (let latNumber = 0; latNumber < latBands; latNumber++) {
+                for (let longNumber = 0; longNumber < longBands; longNumber++) {
+                    const first = (latNumber * (longBands + 1)) + longNumber;
+                    const second = first + longBands + 1;
+                    indices.push(first, second, first + 1);
+                    indices.push(second, second + 1, first + 1);
+                }
+            }
+            return { positions: new Float32Array(positions), indices: new Uint16Array(indices) };
+        }
+
+        function generateTorus(outerRadius, innerRadius, radialSegments, tubularSegments) {
+            const positions = [];
+            const indices = [];
+
+            for (let j = 0; j <= radialSegments; j++) {
+                for (let i = 0; i <= tubularSegments; i++) {
+                    const u = i / tubularSegments * 2 * Math.PI;
+                    const v = j / radialSegments * 2 * Math.PI;
+
+                    const x = (outerRadius + innerRadius * Math.cos(u)) * Math.cos(v);
+                    const y = (outerRadius + innerRadius * Math.cos(u)) * Math.sin(v);
+                    const z = innerRadius * Math.sin(u);
+
+                    positions.push(x, y, z);
+                }
+            }
+
+            for (let j = 0; j < radialSegments; j++) {
+                for (let i = 0; i < tubularSegments; i++) {
+                    const a = (j * (tubularSegments + 1)) + i;
+                    const b = ((j + 1) * (tubularSegments + 1)) + i;
+                    const c = ((j + 1) * (tubularSegments + 1)) + i + 1;
+                    const d = (j * (tubularSegments + 1)) + i + 1;
+
+                    indices.push(a, b, d);
+                    indices.push(b, c, d);
+                }
+            }
+            return { positions: new Float32Array(positions), indices: new Uint16Array(indices) };
+        }
+
+        function buildGeometry() {
+            // Re-seed PRNG for consistent object generation across cycles
+            let currentSeed = prng_state;
+
+            // Generate base geometries only once or when needed
+            sphereGeo = generateSphere(0.5, 24, 24);
+            torusGeo = generateTorus(0.75, 0.25, 24, 24);
+
+            // Palette and global animation properties (fixed per cycle for stability)
+            baseHue = rand(0, 360);
+            hueShiftSpeed = randSign() * rand(0.5, 1.5) * speed; // per second
+            satCycleSpeed = randSign() * rand(0.8, 1.8) * speed;
+            lightCycleSpeed = randSign() * rand(0.7, 1.7) * speed;
+            globalRotationSpeed = randSign() * rand(0.05, 0.2) * speed; // rad/s for global scene rotation
+
+            const numObjects = Math.floor(rand(10, 20) * density);
+            objects = [];
+
+            for (let i = 0; i < numObjects; i++) {
+                const objectScale = rand(0.8, 1.5);
+                objects.push({
+                    type: randInt(0, 1), // 0 for sphere, 1 for torus
+                    position: [rand(-3, 3), rand(-3, 3), rand(-3, 3)],
+                    scale: objectScale,
+                    rotationAxis: vec3.normalize(vec3.create(), [rand(-1, 1), rand(-1, 1), rand(-1, 1)]),
+                    rotationSpeed: randSign() * rand(0.4, 1.5) * speed, // radians per second
+                    orbitAxis: vec3.normalize(vec3.create(), [rand(-1, 1), rand(-1, 1), rand(-1, 1)]),
+                    orbitRadius: rand(3, 8),
+                    orbitSpeed: randSign() * rand(0.2, 0.8) * speed, // radians per second for orbit
+                    hueOffset: rand(-60, 60), // Offset from base hue
+                    currentOffset: [0, 0, 0], // Current morph target offset
+                    targetOffset: [rand(-2, 2), rand(-2, 2), rand(-2, 2)], // Next morph target
+                    offsetCurrentTime: 0, // Time when current morph started
+                    offsetTargetTime: 0, // Time when target was chosen
+                    offsetDuration: rand(5, 15), // Duration for current morph
+                    offsetSpeed: rand(0.8, 1.2) // Speed multiplier for morph interpolation
+                });
+            }
+            // Restore PRNG state after object generation
+            prng_state = currentSeed;
+        }
+
+        function updateGeometryBuffers(geometry, color) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, geometry.positions, gl.STATIC_DRAW);
+
+            // Create a color array for the entire object
+            const colors = new Float32Array(geometry.positions.length / 3 * 4);
+            for (let i = 0; i < geometry.positions.length / 3; i++) {
+                colors[i * 4 + 0] = color[0];
+                colors[i * 4 + 1] = color[1];
+                colors[i * 4 + 2] = color[2];
+                colors[i * 4 + 3] = color[3]; // Alpha
+            }
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
+
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, geometry.indices, gl.STATIC_DRAW);
+        }
+
+        // --- Render Loop ---
+        let projectionMatrix = mat4.create();
+        let viewMatrix = mat4.create();
+        let worldMatrix = mat4.create();
+        let cameraPosition = [0, 0, 15]; // Camera fixed
+        let lookAtTarget = [0, 0, 0];
+        let upVector = [0, 1, 0];
+        let aspect = width / height;
+
+        function drawScene(time) {
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); // Clear buffers to black every frame
+
+            mat4.perspective(projectionMatrix, Math.PI / 4, aspect, 0.1, 100.0);
+            mat4.lookAt(viewMatrix, cameraPosition, lookAtTarget, upVector);
+
+            gl.uniformMatrix4fv(u_projectionMatrixLoc, false, projectionMatrix);
+            gl.uniformMatrix4fv(u_viewMatrixLoc, false, viewMatrix);
+
+            // Global rotation of the entire scene
+            mat4.identity(globalTransform);
+            mat4.rotate(globalTransform, globalTransform, time * globalRotationSpeed, [0, 1, 0]); // Rotate around Y axis
+
+            for (let i = 0; i < objects.length; i++) {
+                const obj = objects[i];
+                const dt = 1.0 / fps; // Delta time per frame
+
+                // Morphing and position targets for continuous evolution
+                // Update target and duration if current morph is complete
+                if (time > obj.offsetTargetTime + obj.offsetDuration) {
+                    obj.offsetTargetTime = time;
+                    obj.offsetCurrentTime = time;
+                    obj.targetOffset = [rand(-2, 2), rand(-2, 2), rand(-2, 2)];
+                    obj.offsetDuration = rand(5, 15); // New duration for next morph cycle
+                    obj.offsetSpeed = rand(0.8, 1.2);
+                }
+
+                // Interpolate currentOffset towards targetOffset
+                const progress = Math.min(1, (time - obj.offsetCurrentTime) / obj.offsetDuration);
+                obj.currentOffset[0] = obj.currentOffset[0] + (obj.targetOffset[0] - obj.currentOffset[0]) * progress * dt * obj.offsetSpeed;
+                obj.currentOffset[1] = obj.currentOffset[1] + (obj.targetOffset[1] - obj.currentOffset[1]) * progress * dt * obj.offsetSpeed;
+                obj.currentOffset[2] = obj.currentOffset[2] + (obj.targetOffset[2] - obj.currentOffset[2]) * progress * dt * obj.offsetSpeed;
+
+                let currentGeo = (obj.type === 0) ? sphereGeo : torusGeo;
+
+                mat4.identity(worldMatrix);
+
+                // Apply global transformation
+                mat4.multiply(worldMatrix, globalTransform, worldMatrix);
+
+                // Object orbit around a dynamically rotated center
+                const orbitAngle = time * obj.orbitSpeed;
+                let orbitTransform = mat4.create();
+                mat4.identity(orbitTransform);
+                mat4.rotate(orbitTransform, orbitTransform, orbitAngle * 0.5, obj.orbitAxis); // Rotate the orbit plane
+                let orbitPos = [
+                    obj.orbitRadius * Math.cos(orbitAngle),
+                    obj.orbitRadius * Math.sin(orbitAngle),
+                    0
+                ];
+                let rotatedOrbitPos = [
+                    orbitTransform[0] * orbitPos[0] + orbitTransform[4] * orbitPos[1] + orbitTransform[8] * orbitPos[2],
+                    orbitTransform[1] * orbitPos[0] + orbitTransform[5] * orbitPos[1] + orbitTransform[9] * orbitPos[2],
+                    orbitTransform[2] * orbitPos[0] + orbitTransform[6] * orbitPos[1] + orbitTransform[10] * orbitPos[2]
+                ];
+
+                mat4.translate(worldMatrix, worldMatrix, [
+                    obj.position[0] + obj.currentOffset[0] + rotatedOrbitPos[0],
+                    obj.position[1] + obj.currentOffset[1] + rotatedOrbitPos[1],
+                    obj.position[2] + obj.currentOffset[2] + rotatedOrbitPos[2]
+                ]);
+
+                // Individual rotation
+                mat4.rotate(worldMatrix, worldMatrix, time * obj.rotationSpeed, obj.rotationAxis);
+
+                // Scale
+                mat4.scale(worldMatrix, worldMatrix, [obj.scale, obj.scale, obj.scale]);
+
+                gl.uniformMatrix4fv(u_worldMatrixLoc, false, worldMatrix);
+
+                // Dynamic color based on time and object properties
+                let h = (baseHue + obj.hueOffset + time * hueShiftSpeed) % 360;
+                if (h < 0) h += 360;
+                let s = Math.min(1.0, Math.max(0.75, 0.85 + 0.15 * Math.sin(time * satCycleSpeed))); // 75-100%
+                let v = Math.min(0.70, Math.max(0.35, 0.50 + 0.20 * Math.sin(time * lightCycleSpeed))); // 35-70% (adjusted to meet spec)
+
+                const color = hsvToRgb(h, s, v);
+
+                // Draw solid core
+                updateGeometryBuffers(currentGeo, color);
+                gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); // Source-over for opaque parts
+                gl.drawElements(gl.TRIANGLES, currentGeo.indices.length, gl.UNSIGNED_SHORT, 0);
+
+                // Draw glow effect (larger, semi-transparent, additive)
+                // Use a different color or simply lower the alpha significantly for the glow
+                const glowColor = [color[0], color[1], color[2], rand(0.08, 0.15)]; // Low alpha for glow
+                const glowScale = obj.scale * rand(1.05, 1.15); // Slightly larger for glow
+                mat4.scale(worldMatrix, worldMatrix, [glowScale/obj.scale, glowScale/obj.scale, glowScale/obj.scale]); // Apply glow scale relative to current
+                gl.uniformMatrix4fv(u_worldMatrixLoc, false, worldMatrix);
+
+                updateGeometryBuffers(currentGeo, glowColor);
+                gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // Additive blending for glow
+                gl.drawElements(gl.TRIANGLES, currentGeo.indices.length, gl.UNSIGNED_SHORT, 0);
+            }
+        }
+
+        let animationTime = 0; // The continuous time in seconds
+        let lastCycleResetTime = 0; // Time in seconds for the last scene rebuild
+
+        window.advanceFrame = function() {
+            if (!gl) return;
+
+            const dt = 1.0 / fps;
+            animationTime = (window.currentFrame / fps) * speed;
+
+            // Mandatory hard reset for scene composition evolution
+            if (cycleSec > 0 && animationTime >= lastCycleResetTime + cycleSec) {
+                // Evolve the scene by re-building parameters with a new seed
+                prng_state = seed + Math.floor(animationTime / cycleSec); // Use time to evolve seed
+                buildGeometry(); // This will re-generate objects with new properties
+                lastCycleResetTime = animationTime;
+            }
+
+            drawScene(animationTime);
+
+            window.currentFrame++;
+            if (window.currentFrame >= window.TOTAL_FRAMES) {
+                window.currentFrame = window.TOTAL_FRAMES - 1; // Cap at TOTAL_FRAMES - 1
+            }
+        };
+
+        window.advanceFrames = function(n) {
+            for (let i = 0; i < n; i++) {
+                window.advanceFrame();
+            }
+        };
+
+        function init() {
+            // Context loss handling
+            canvas.addEventListener('webglcontextlost', function(event) {
+                event.preventDefault();
+                console.log('WebGL context lost. Attempting to restore...');
+                gl = null; // Mark context as lost
+            }, false);
+
+            canvas.addEventListener('webglcontextrestored', function() {
+                console.log('WebGL context restored. Re-initializing GL resources.');
+                try {
+                    initGL();
+                    buildGeometry();
+                    window.READY = true; // Set READY after successful re-init
+                    console.log("Engine READY after restore");
+                } catch (e) {
+                    console.error("Failed to re-initialize WebGL on restore:", e);
+                }
+            }, false);
+
+            try {
+                initGL();
+                buildGeometry();
+            } catch (e) {
+                console.error("Failed to initialize WebGL:", e);
+                return;
+            }
+
+            // Short delay to allow for early context loss/restore
+            setTimeout(() => {
+                if (gl) { // Only set ready if context is still active
+                    window.READY = true;
+                    console.log("Engine READY");
+                }
+            }, 300); // 300ms delay
+        }
+
+        // Call init to start the engine
+        init();
+    </script>
+</body>
+</html>

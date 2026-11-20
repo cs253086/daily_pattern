@@ -126,6 +126,9 @@ function repairFixes(reasons) {
   if (text.includes('total_frames') || text.includes('total frames')) {
     blocks.push('FIX FOR TOTAL_FRAMES: the renderer reads window.TOTAL_FRAMES, which is currently undefined. Add the exact line window.TOTAL_FRAMES = Math.round(duration * fps); during startup, before window.READY is set to true.');
   }
+  if (text.includes('math.fmod')) {
+    blocks.push('FIX FOR Math.fmod: Math.fmod does not exist in JavaScript and throws "is not a function". Replace every Math.fmod(a, b) with the % operator (a % b), or with a - b * Math.floor(a / b) for a negative-safe remainder.');
+  }
   if (text.includes('shadersource') || text.includes('webglshader') || text.includes('page errors') || text.includes('readyerror') || text.includes('is not defined') || text.includes('is not a function') || text.includes('runtime error') || text.includes('before initialization')) {
     blocks.push('FIX FOR THE RUNTIME ERROR: check every createShader, createProgram and createBuffer result for null and throw a clear Error if one is null. Declare every helper and variable above the first line that uses it, and call init() only at the very end of the file. Use only functions you define yourself in the file (a matrix or vector helper such as mat4.copy must be written out in the file, not assumed from a library).');
   }
@@ -173,7 +176,7 @@ Output ONLY the raw HTML document. Start with <!DOCTYPE html>. No markdown, no c
    - advanceFrame(): advances the simulation by exactly dt = 1/fps seconds, draws exactly one frame to the canvas, and increments currentFrame by 1.
    - advanceFrames(n): calls advanceFrame() n times.
 6. Time-based motion: all motion must be expressed per-second and multiplied by dt = 1/fps per frame, so playback looks identically paced at any fps.
-7. Self-contained: pure JavaScript + Canvas2D (or WebGL). NO external resources, NO network/fetch, NO imports, NO fonts, NO images.
+7. Self-contained: pure JavaScript + Canvas2D (or WebGL). NO external resources, NO network/fetch, NO imports, NO fonts, NO images. JavaScript has no Math.fmod, so use the % operator for a remainder; a call to Math.fmod fails at runtime (2026-11-19 run: every attempt failed on it).
 8. Visual rules: NO text/letters/numbers drawn on the canvas. Use default 'source-over' compositing for fills; at most one 'lighter' pass per shape, and see the NUMERIC BUDGET below (2026-11-09 and 2026-11-10 both skipped after every attempt blew out to white when this line asked for additive blending everywhere). Slow, hypnotic, smoothly looping/evolving motion suitable as an ambient background. Black background.
 
 === VISUAL RICHNESS (REQUIRED — this is what makes it watchable) ===

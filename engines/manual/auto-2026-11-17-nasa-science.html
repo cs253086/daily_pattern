@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="pattern-name" content="Kinetic Filament Clusters">
+    <title>Generative Art Screensaver</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: black; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<script>
+    // --- Global Configuration and Utilities ---
+    const urlParams = new URLSearchParams(window.location.search);
+    const getParam = (name, defaultValue, type = 'float') => {
+        const value = urlParams.get(name);
+        if (value === null) return defaultValue;
+        if (type === 'int') return parseInt(value);
+        if (type === 'float') return parseFloat(value);
+        return value;
+    };
+
+    const seed = getParam('seed', 20261117, 'int');
+    const width = getParam('width', 1920, 'int');
+    const height = getParam('height', 1080, 'int');
+    const fps = getParam('fps', 24, 'int');
+    const duration = getParam('duration', 3600, 'int'); // seconds
+    const speed = getParam('speed', 1.0, 'float');
+    const density = getParam('density', 1.0, 'float');
+    const cycleSec = getParam('cycleSec', 90.0, 'float');
+
+    // Seeded PRNG (Mulberry32)
+    let mulberry32_a = seed;
+    function mulberry32_rand() {
+        let t = mulberry32_a += 0x6D2B79F5;
+        t = Math.imul(t ^ t >>> 15, t | 1);
+        t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    }
+    // Initialize PRNG state for the first use
+    for (let i = 0; i < 10; i++) mulberry32_rand(); // warm up
+
+    function rand(min, max) {
+        return min + (max - min) * mulberry32_rand();
+    }
+
+    function randInt(min, max) {
+        return Math.floor(rand(min, max + 1));
+    }
+
+    function randSign() {
+        return mulberry32_rand() < 0.5 ? -1 : 1;
+    }
+
+    // Palette Generation (HSL to CSS string)
+    function generatePalette() {
+        const generatedPalette = [];
+        const baseHue = rand(0, 360);
+        const numColors = randInt(3, 5);
+        for (let i = 0; i < numColors; i++) {
+            let hue = (baseHue + i * rand(40, 70)) % 360;
+            if (hue < 0) hue += 360;
+            let saturation = rand(75, 100);
+            let lightness = rand(40, 60);
+            generatedPalette.push({h: hue, s: saturation, l: lightness});
+        }
+        return generatedPalette;
+    }
+
+    let currentPalette = generatePalette();
+
+    // Canvas setup
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = width;
+    canvas.height = height;
+
+    // --- Scene Objects ---
+    const maxFilaments = Math.floor(12 * density); // Fewer filaments for performance
+    const filaments = [];
+
+    // Pre-allocate arrays for vector operations to avoid per-frame allocations
+    const vec2 = {
+        create: () => [0, 0],
+        set: (out, x, y) => { out[0] = x; out[1] = y; return out; },
+        add: (out, a, b) => { out[0] = a[0] + b[0]; out[1] = a[1] + b[1]; return out; },
+        sub: (out, a, b) => { out[0] = a[0] - b[0]; out[1] = a[1] - b[1]; return out; },
+        mulScalar: (out, a, s) => { out[0] = a[0] * s; out[1] = a[1] * s; return out; },
+        len: (a) => Math.sqrt(a[0]*a[0] + a[1]*a[1]),
+        normalize: (out, a) => {
+            const l = vec2.len(a);
+            if (l > 0) { out[0] = a[0] / l; out[1] = a[1] / l; }
+            return out;
+        },
+        rotate: (out, a, angle) => {
+            const x = a[0];
+            const y = a[1];
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            out[0] = x * cos - y * sin;
+            out[1] = x * sin + y * cos;
+            return out;
+        }
+    };
+
+    let globalRotationSpeed = randSign() * rand(0.02, 0.05) * speed; // rad/s
+    let mainOrbitSpeed = randSign() * rand(0.05, 0.1) * speed; // rad/s
+    let mainOrbitAngle = 0;
+
+    const filamentBaseRadius = width * 0.08 * density;
+    const filamentLength = height * 0.3 * density;
+    const filamentSegmentCount = 10; // Fewer segments for performance
+
+    function createFilament(index) {
+        const colorEntry = currentPalette[index % currentPalette.length];
+        return {
+            center: vec2.create(),
+            rotationAngle: rand(0, Math.PI * 2),
+            rotationSpeed: randSign() * rand(0.3, 0.8) * speed, // rad/s
+            hueOffset: colorEntry.h,
+            saturation: colorEntry.s,
+            lightness: colorEntry.l,
+            scalePulseSpeed: randSign() * rand(0.5, 1.0) * speed,
+            scalePulseOffset: rand(0, Math.PI * 2),
+            waveOffset: rand(0, Math.PI * 2), // for travelling wave effect on segments
+            waveSpeed: randSign() * rand(1.0, 2.5) * speed, // for travelling wave effect
+            segmentOffsets: Array.from({length: filamentSegmentCount}, () => rand(-1, 1) * filamentBaseRadius * 0.1),
+            orbitOffsetAngle: rand(0, Math.PI * 2) // for spreading filaments around main center
+        };
+    }
+
+    const filamentPoints = []; // Pre-allocated storage for segment points
+    for(let i=0; i < filamentSegmentCount; ++i) {
+        filamentPoints.push(vec2.create());
+    }
+    const tempVec1 = vec2.create();
+    const tempVec2 = vec2.create();
+
+    function resetScene() {
+        mulberry32_a = seed + Math.floor(window.currentFrame / (fps * cycleSec)); // Re-seed PRNG for new cycle
+        for (let i = 0; i < 10; i++) mulberry32_rand(); // warm up
+
+        currentPalette = generatePalette();
+        filaments.length = 0;
+        for (let i = 0; i < maxFilaments; i++) {
+            filaments.push(createFilament(i));
+        }
+        globalRotationSpeed = randSign() * rand(0.02, 0.05) * speed;
+        mainOrbitSpeed = randSign() * rand(0.05, 0.1) * speed;
+        mainOrbitAngle = 0;
+    }
+
+    // --- Drawing Functions ---
+    const dt = 1 / fps;
+    window.currentFrame = 0;
+    let accumulatedCycleTime = 0; // For tracking actual time progression for cycleSec
+
+    function drawFilament(filament, x, y, time) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(filament.rotationAngle);
+
+        const currentFilamentLength = filamentLength * (1.0 + 0.1 * Math.sin(time * filament.scalePulseSpeed + filament.scalePulseOffset));
+        const segmentLength = currentFilamentLength / filamentSegmentCount;
+
+        // HSL color calculation
+        const baseHue = (filament.hueOffset + time * 10 * rand(0.01, 0.05)) % 360;
+        const currentSat = Math.min(100, Math.max(75, filament.saturation + Math.sin(time * 0.5) * 10));
+        const currentLight = Math.min(70, Math.max(35, filament.lightness + Math.cos(time * 0.5) * 5));
+        const colorCore = `hsla(${baseHue}, ${currentSat}%, ${currentLight + 10}%, 0.9)`;
+        const colorGlow = `hsla(${baseHue}, ${currentSat}%, ${currentLight}%, 0.25)`;
+
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        // Calculate segment points
+        for (let i = 0; i < filamentSegmentCount; i++) {
+            const segmentCenterOffset = i * segmentLength - currentFilamentLength / 2;
+            const waveEffect = filament.segmentOffsets[i] * Math.sin(time * filament.waveSpeed + (i / filamentSegmentCount) * Math.PI * 2 + filament.waveOffset);
+            vec2.set(filamentPoints[i], segmentCenterOffset, waveEffect);
+        }
+
+        // Draw glow layer
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = colorGlow;
+        ctx.lineWidth = filamentBaseRadius * 0.6; // Wider for glow
+
+        ctx.beginPath();
+        ctx.moveTo(filamentPoints[0][0], filamentPoints[0][1]);
+        for (let i = 1; i < filamentSegmentCount; i++) {
+            ctx.lineTo(filamentPoints[i][0], filamentPoints[i][1]);
+        }
+        ctx.stroke();
+
+        // Draw core layer
+        ctx.globalCompositeOperation = 'source-over'; // Reset to default for core
+        ctx.strokeStyle = colorCore;
+        ctx.lineWidth = filamentBaseRadius * 0.15; // Thinner for core
+
+        ctx.beginPath();
+        ctx.moveTo(filamentPoints[0][0], filamentPoints[0][1]);
+        for (let i = 1; i < filamentSegmentCount; i++) {
+            ctx.lineTo(filamentPoints[i][0], filamentPoints[i][1]);
+        }
+        ctx.stroke();
+
+        ctx.restore();
+    }
+
+    function advanceFrame() {
+        accumulatedCycleTime += dt;
+
+        // Mandate a full reset every cycleSec seconds
+        if (accumulatedCycleTime >= cycleSec) {
+            resetScene();
+            accumulatedCycleTime = 0; // Reset accumulated time after full reset
+        }
+
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, width, height);
+
+        mainOrbitAngle += mainOrbitSpeed * dt * speed;
+
+        for (let i = 0; i < filaments.length; i++) {
+            const filament = filaments[i];
+
+            // Update individual filament rotations
+            filament.rotationAngle += filament.rotationSpeed * dt * speed;
+
+            // Orbital movement around a central point
+            const orbitDistance = width * 0.25;
+            const orbitAngle = mainOrbitAngle + filament.orbitOffsetAngle + globalRotationSpeed * accumulatedCycleTime;
+            const centerX = width / 2 + orbitDistance * Math.cos(orbitAngle);
+            const centerY = height / 2 + orbitDistance * Math.sin(orbitAngle);
+            
+            drawFilament(filament, centerX, centerY, accumulatedCycleTime);
+        }
+
+        window.currentFrame++;
+    }
+
+    // --- External API ---
+    window.TOTAL_FRAMES = Math.round(duration * fps);
+    window.currentFrame = 0; // Initialize here for clarity
+
+    window.advanceFrames = function(n) {
+        for (let i = 0; i < n; i++) {
+            window.advanceFrame();
+        }
+    };
+
+    // --- Initialization ---
+    function init() {
+        resetScene(); // Initial scene setup
+        window.READY = true;
+    }
+
+    init(); // Call init at the very end
+</script>
+</body>
+</html>

@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sliding Tile Puzzle — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find
+// (today's creative-research routine, consolidated 2026-11-13/14, category
+// "random featured image" / "obscure mathematical object", resolved through
+// open search): the SLIDING-TILE (15-puzzle) construction. A grid of tiles and
+// one empty cell; each move slides a tile into the empty cell. The 15-puzzle
+// was popularised by Sam Loyd and its permutation group is a classic example of
+// a finite, fully reachable state space (Johnson & Story 1879, "Notes on the
+// 15 Puzzle"; the parity invariant that splits reachable states in two).
+// Search snippets only: https://en.wikipedia.org/wiki/15_puzzle (Wikipedia is
+// blocked in this sandbox).
+//
+// A genuinely different construction PRINCIPLE from every other engine in the
+// pool: the arrangement itself evolves, one discrete permutation at a time.
+// Not a fixed tiling that is only rotated or warped (quasicrystal, voronoimosaic,
+// vegasphere, tessellation), not a wave field (chladni, moire), not a cut-and-
+// slide partition (mondrian, kumiko). The tiles keep their identity; only which
+// cell each occupies changes, so the composition really develops over time.
+//
+// MOTION: every move slides one tile into the empty cell over MOVE_SEC with an
+// eased path, so there is always a tile in motion (unit-level motion, not a
+// rigid whole-frame transform). Each disc inside a tile also breathes on its
+// own phase and rate (guaranteed-minimum magnitude, random sign). The moves are
+// a seeded random walk of the empty cell that never immediately reverses, so
+// the puzzle keeps scrambling for the whole hour.
+//
+// BRIGHTNESS: exactly one cell is always empty and every tile is luma-equalised,
+// so the lit area is constant by construction and the disc breathing swaps
+// only luma-neutral colour (disc and tile share the same luma). Nothing
+// accumulates across frames: each frame is drawn from scratch, so there is no
+// whiteout mechanism.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const dt = 1 / FPS;
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Burn 4 draws first: Mulberry32's first outputs for small consecutive seeds
+  // are correlated (pendulumwave.html / spinbounce.html fix).
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  // Grid: 9 columns x 5 rows, one empty cell, 44 tiles.
+  const COLS = 9, ROWS = 5, NCELL = COLS * ROWS;
+  const cell = Math.min(W / COLS, H / ROWS);
+  const ox = (W - COLS * cell) / 2, oy = (H - ROWS * cell) / 2;
+
+  // Move cadence: one slide every MOVE_SEC seconds, no pauses.
+  const MOVE_SEC = 0.45 / Math.max(0.1, SPEED);
+  const MAX_MOVES = Math.ceil(DURATION / MOVE_SEC) + 64;
+
+  // Bounded hue set (no yellow/orange, which need olive or pastel lightness to
+  // match luma), chosen so vivid colours share a similar natural luma.
+  const HUE_SETS = {
+    aurora: [140, 190, 230, 280, 320, 165],
+    ember:  [10, 345, 320, 355, 300, 25],
+    ocean:  [185, 205, 225, 250, 270, 195],
+    neon:   [0, 165, 144, 216, 288, 300],
+    sunset: [10, 330, 280, 355, 190, 300],
+  };
+  const setNames = Object.keys(HUE_SETS);
+  function resolveSet() {
+    const raw = params.get('palette');
+    if (raw && HUE_SETS[raw]) return raw;
+    return setNames[SEED % setNames.length];
+  }
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out.map((c) => c[0]) : null;
+  }
+  const HUES = parseColors() || HUE_SETS[resolveSet()];
+
+  // Rec.709 luma of an HSL colour, and lightness bisection to a shared luma.
+  function hslToRgb(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [255 * f(0), 255 * f(8), 255 * f(4)];
+  }
+  function lumaOf(h, s, l) {
+    const [r, g, b] = hslToRgb(h, s, l);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+  const LUMA_TARGET = 92;   // tile fill luma
+  const DISC_LUMA = 150;   // disc luma: a bright inset, so disc breathing is visible in luma
+  function equaliseLightness(h, s, target = LUMA_TARGET, lMin = 40, lMax = 70) {
+    let lo = 18, hi = 90;
+    for (let i = 0; i < 28; i++) {
+      const mid = (lo + hi) / 2;
+      if (lumaOf(h, s, mid) < target) lo = mid; else hi = mid;
+    }
+    return Math.max(lMin, Math.min(lMax, (lo + hi) / 2));
+  }
+  const SAT = 88;
+  // Per-hue colours, all at the same luma: a tile fill and a disc colour.
+  const fillCol = HUES.map((h) => `hsl(${h}, ${SAT}%, ${equaliseLightness(h, SAT, LUMA_TARGET, 25, 85).toFixed(2)}%)`);
+  const discCol = HUES.map((h) => `hsl(${(h + 150) % 360}, ${SAT}%, ${equaliseLightness((h + 150) % 360, SAT, DISC_LUMA, 25, 85).toFixed(2)}%)`);
+
+  // ---- Tiles: id = solved cell index for ids 0..NCELL-2; the empty cell is -1.
+  const NTILE = NCELL - 1;
+  const tileFill = new Array(NTILE), tileDisc = new Array(NTILE);
+  const discPh = new Float64Array(NTILE), discRate = new Float64Array(NTILE);
+  for (let id = 0; id < NTILE; id++) {
+    const k = id % HUES.length;
+    tileFill[id] = fillCol[k];
+    tileDisc[id] = discCol[(k + 2) % HUES.length];
+    discPh[id] = rand(0, 2 * Math.PI);
+    discRate[id] = sgn() * rand(1.5, 2.2) * SPEED;
+  }
+
+  // ---- Move list: seeded random walk of the empty cell, never reversing.
+  // Each move is (from, to): the tile at `from` slides into the empty `to`.
+  const mvFrom = new Int16Array(MAX_MOVES), mvTo = new Int16Array(MAX_MOVES);
+  {
+    let blank = NCELL - 1, prev = -1;
+    for (let m = 0; m < MAX_MOVES; m++) {
+      const c = blank % COLS, r = (blank - c) / COLS;
+      const opts = [];
+      if (c > 0) opts.push(blank - 1);
+      if (c < COLS - 1) opts.push(blank + 1);
+      if (r > 0) opts.push(blank - COLS);
+      if (r < ROWS - 1) opts.push(blank + COLS);
+      let pick = opts.filter((o) => o !== prev);
+      if (pick.length === 0) pick = opts;
+      const nxt = pick[Math.floor(rng() * pick.length)];
+      mvFrom[m] = nxt; mvTo[m] = blank;
+      prev = blank; blank = nxt;
+    }
+  }
+
+  // Live state, advanced monotonically. grid[cell] = tile id or -1 (empty).
+  const grid = new Int16Array(NCELL);
+  for (let i = 0; i < NCELL; i++) grid[i] = i < NTILE ? i : -1;
+  let applied = 0;
+  function advanceTo(n) {
+    if (n < applied) { // rewind (not expected in normal sequential use)
+      grid.fill(0); for (let i = 0; i < NCELL; i++) grid[i] = i < NTILE ? i : -1;
+      applied = 0;
+    }
+    while (applied < n && applied < MAX_MOVES) {
+      const f = mvFrom[applied], t = mvTo[applied];
+      grid[t] = grid[f]; grid[f] = -1;
+      applied++;
+    }
+  }
+
+  const smooth = (x) => x * x * (3 - 2 * x);
+  const cellXY = (i) => ({ x: ox + (i % COLS) * cell, y: oy + Math.floor(i / COLS) * cell });
+
+  function drawTile(id, x, y, t) {
+    const g = cell * 0.035;
+    const s = cell - 2 * g;
+    const px = x + g, py = y + g;
+    ctx.fillStyle = tileFill[id];
+    ctx.fillRect(px, py, s, s);
+    // Breathing disc: radius in [0.18, 0.34] of the cell. The disc is a bright
+    // inset, so its breathing is a real, bounded luma change spread over 44 tiles
+    // with independent phases (no common-mode trend).
+    const rad = cell * (0.26 + 0.08 * Math.sin(discPh[id] + discRate[id] * t));
+    ctx.fillStyle = tileDisc[id];
+    ctx.beginPath();
+    ctx.arc(x + cell / 2, y + cell / 2, rad, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function renderFrame() {
+    window.currentFrame++;
+    const t = window.currentFrame * dt;
+    const m = Math.floor(t / MOVE_SEC);
+    const frac = (t - m * MOVE_SEC) / MOVE_SEC;
+    advanceTo(m);
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    const moving = m < MAX_MOVES ? mvFrom[m] : -1;
+    for (let i = 0; i < NCELL; i++) {
+      const id = grid[i];
+      if (id < 0 || i === moving) continue;
+      const p = cellXY(i);
+      drawTile(id, p.x, p.y, t);
+    }
+    if (moving >= 0) {
+      const id = grid[moving];
+      const a = cellXY(moving), b = cellXY(mvTo[m]);
+      const e = smooth(Math.max(0, Math.min(1, frac)));
+      drawTile(id, a.x + (b.x - a.x) * e, a.y + (b.y - a.y) * e, t);
+    }
+  }
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  window.advanceFrame = function () { renderFrame(); };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) renderFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
