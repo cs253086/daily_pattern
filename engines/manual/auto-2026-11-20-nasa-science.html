@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="pattern-name" content="Interstellar Rings"/>
+    <title>Interstellar Rings</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: black; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<script>
+    // Global variables required by the renderer
+    window.READY = false;
+    window.TOTAL_FRAMES = 0;
+    window.currentFrame = 0;
+
+    const canvas = document.getElementById('canvas');
+    let ctx; // Canvas2D context
+
+    let width = 1920;
+    let height = 1080;
+    let seed = 0;
+    let fps = 24;
+    let duration = 3600;
+    let speed = 1;
+    let density = 1;
+    let cycleSec = 90;
+
+    let dt;
+    let time = 0;
+    let prng;
+
+    // --- Utility Functions ---
+    function getQueryParam(name, defaultValue) {
+        const urlParams = new URLSearchParams(window.location.search);
+        const value = urlParams.get(name);
+        if (typeof defaultValue === 'number') {
+            return value !== null ? parseFloat(value) : defaultValue;
+        }
+        return value !== null ? value : defaultValue;
+    }
+
+    // Mulberry32 PRNG
+    function mulberry32(a) {
+        return function () {
+            let t = a += 0x6D2B79F5;
+            t = Math.imul(t ^ t >>> 15, t | 1);
+            t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+            return ((t ^ t >>> 14) >>> 0) / 4294967296;
+        };
+    }
+
+    function rand(min, max) {
+        return prng() * (max - min) + min;
+    }
+
+    function randInt(min, max) {
+        return Math.floor(rand(min, max));
+    }
+
+    function randSign() {
+        return prng() < 0.5 ? -1 : 1;
+    }
+
+    function HSLtoStr(h, s, l, alpha = 1) {
+        return `hsla(${h}, ${s}%, ${l}%, ${alpha})`;
+    }
+
+    // --- Scene State ---
+    const MAX_RING_COUNT = 10;
+    let rings = [];
+    let paletteHSL = [];
+    let currentPalette = [];
+    let targetPalette = [];
+    let paletteInterpolationFactor = 0;
+    let paletteChangeRate = 0; // Rate at which palette interpolates
+
+    const PI2 = Math.PI * 2;
+
+    // --- Geometry & Palettes ---
+    function generatePalette() {
+        const baseHue = rand(0, 360);
+        paletteHSL = [];
+        const numHues = randInt(3, 5); // 3 to 5 distinct hues
+        for (let i = 0; i < numHues; i++) {
+            let hue = (baseHue + rand(i * (360 / numHues) + 20, (i + 1) * (360 / numHues) - 20)) % 360;
+            hue = (hue + 360) % 360; // Ensure positive hue
+
+            const saturation = rand(75, 95); // High saturation
+            const lightness = rand(40, 65); // Mid lightness
+            paletteHSL.push([hue, saturation, lightness]);
+        }
+    }
+
+    function generateNewTargetPalette() {
+        const tempPrng = prng; // Save current PRNG state
+        prng = mulberry32(seed + window.currentFrame + 12345); // Use a different seed for target palette
+
+        targetPalette = [];
+        const numHues = currentPalette.length; // Keep same number of hues
+        const baseHueOffset = rand(0, 360); // Shift base hue for variety
+        for (let i = 0; i < numHues; i++) {
+            let hue = (baseHueOffset + rand(i * (360 / numHues) + 20, (i + 1) * (360 / numHues) - 20)) % 360;
+            hue = (hue + 360) % 360;
+            const saturation = rand(75, 95);
+            const lightness = rand(40, 65);
+            targetPalette.push([hue, saturation, lightness]);
+        }
+        paletteChangeRate = rand(0.02, 0.05) * speed; // Slower change for longer evolution
+        prng = tempPrng; // Restore original PRNG state
+    }
+
+    function generateRings() {
+        rings = [];
+        const baseRadius = rand(width / 10, width / 4) * density;
+        const numRings = Math.max(1, Math.round(rand(3, MAX_RING_COUNT) * density));
+
+        for (let i = 0; i < numRings; i++) {
+            const radius = baseRadius + i * rand(20, 80) * density;
+            const segments = Math.max(30, Math.floor(radius / 8)); // More segments for larger rings
+            const lineWidth = rand(1, 3) * density;
+
+            rings.push({
+                radius: radius,
+                segments: segments,
+                lineWidth: lineWidth,
+                colorIndex: randInt(0, paletteHSL.length),
+                rotationSpeed: randSign() * rand(0.2, 0.8) * speed, // radians per second
+                oscillationMagnitude: rand(0.05, 0.15), // scale oscillation
+                oscillationSpeed: randSign() * rand(0.8, 1.5) * speed, // Hz for scale oscillation
+                waveSpeed: randSign() * rand(0.5, 1.2) * speed, // Wave speed around ring
+                waveMagnitude: rand(5, 15) * density, // Wave amplitude
+                offsetSpeed: randSign() * rand(0.05, 0.15) * speed, // Radial offset oscillation
+            });
+        }
+    }
+
+    // --- Initialization ---
+    function initSceneState() {
+        seed = getQueryParam('seed', 0);
+        prng = mulberry32(seed);
+
+        width = getQueryParam('width', 1920);
+        height = getQueryParam('height', 1080);
+        fps = getQueryParam('fps', 24);
+        duration = getQueryParam('duration', 3600);
+        speed = getQueryParam('speed', 1);
+        density = getQueryParam('density', 1);
+        cycleSec = getQueryParam('cycleSec', 90);
+
+        canvas.width = width;
+        canvas.height = height;
+        ctx = canvas.getContext('2d');
+        dt = 1 / fps;
+        window.TOTAL_FRAMES = Math.round(duration * fps);
+        window.currentFrame = 0;
+
+        generatePalette();
+        currentPalette = [...paletteHSL];
+        generateNewTargetPalette();
+        generateRings();
+    }
+
+    // --- Render Loop ---
+    function drawScene() {
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, width, height);
+
+        const centerX = width / 2;
+        const centerY = height / 2;
+
+        paletteInterpolationFactor += paletteChangeRate * dt;
+        if (paletteInterpolationFactor >= 1.0) {
+            paletteInterpolationFactor = 0.0;
+            currentPalette = [...targetPalette];
+            generateNewTargetPalette();
+        }
+
+        // Hard reset for accumulation if trails were used (but we clear every frame now)
+        // If we were using fade trails, this would be:
+        // if (time % cycleSec < dt) {
+        //    ctx.fillStyle = 'rgba(0,0,0,1)';
+        //    ctx.fillRect(0,0,width,height);
+        // }
+
+        rings.forEach((ring, i) => {
+            ctx.save();
+            ctx.translate(centerX, centerY);
+
+            const startHSL = currentPalette[ring.colorIndex % currentPalette.length];
+            const endHSL = targetPalette[ring.colorIndex % targetPalette.length];
+
+            const interpolatedH = startHSL[0] + (endHSL[0] - startHSL[0]) * paletteInterpolationFactor;
+            const interpolatedS = startHSL[1] + (endHSL[1] - startHSL[1]) * paletteInterpolationFactor;
+            const interpolatedL = startHSL[2] + (endHSL[2] - startHSL[2]) * paletteInterpolationFactor;
+
+            const baseRotation = ring.rotationSpeed * time;
+            const scaleFactor = 1 + Math.sin(time * ring.oscillationSpeed) * ring.oscillationMagnitude;
+            const currentRadius = ring.radius * scaleFactor;
+
+            ctx.rotate(baseRotation);
+
+            // Draw glowing outer strokes
+            ctx.lineWidth = ring.lineWidth * 6; // Wide glow
+            ctx.strokeStyle = HSLtoStr(interpolatedH, interpolatedS, interpolatedL, 0.15); // Low alpha
+            drawRing(currentRadius, ring.segments, ring.waveSpeed, ring.waveMagnitude, ring.offsetSpeed);
+
+            // Draw brighter core strokes
+            ctx.lineWidth = ring.lineWidth; // Thin core
+            ctx.strokeStyle = HSLtoStr(interpolatedH, interpolatedS, interpolatedL, 0.8); // High alpha
+            drawRing(currentRadius, ring.segments, ring.waveSpeed, ring.waveMagnitude, ring.offsetSpeed);
+
+            ctx.restore();
+        });
+    }
+
+    function drawRing(radius, segments, waveSpeed, waveMagnitude, offsetSpeed) {
+        ctx.beginPath();
+        for (let j = 0; j <= segments; j++) {
+            const angle = PI2 * (j / segments);
+            const waveOffset = Math.sin(angle * waveSpeed + time * offsetSpeed) * waveMagnitude;
+            const x = (radius + waveOffset) * Math.cos(angle);
+            const y = (radius + waveOffset) * Math.sin(angle);
+            if (j === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        }
+        ctx.closePath();
+        ctx.stroke();
+    }
+
+
+    // --- Renderer Interface ---
+    window.advanceFrame = function () {
+        time += dt;
+        drawScene();
+        window.currentFrame++;
+    };
+
+    window.advanceFrames = function (n) {
+        for (let i = 0; i < n; i++) {
+            window.advanceFrame();
+        }
+    };
+
+    // --- Initialization ---
+    function initialize() {
+        initSceneState();
+        window.READY = true;
+    }
+
+    initialize();
+
+</script>
+</body>
+</html>
