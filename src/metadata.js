@@ -107,6 +107,7 @@ const ENGINE_SUBJECTS = {
   timestables: 'Times Table Chord Circles',
   spiralterrace: 'Crystal Spiral Terraces',
   seigaiha: 'Seigaiha Wave Scales',
+  brickbond: 'Brick Bond Wall',
   hypnospiral: 'Hypnotic Spiral Zoom',
   voderberg: 'Voderberg Spiral',
   voronoimosaic: 'Voronoi Mosaic',

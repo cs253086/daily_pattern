@@ -9173,6 +9173,55 @@ draft measured 0.629 vs taniko. The background change moved it to 0.651.
 
 `ENGINE_SUBJECTS`: `seigaiha: 'Seigaiha Wave Scales'` in `src/metadata.js`.
 
+## Brick-bond wall engine (`brickbond.html`) — 2026-11-20
+
+Daily creative-research routine. Category was "random architectural or
+typographic movement" (least recently used by the log tally). A WebSearch
+for masonry bond surfaced the bond pattern: the arrangement of joints
+between bricks that changes from course to course (stretcher, header,
+running and Flemish-style mixes). Sources (search snippets): en.wikipedia.org/
+wiki/Bond_(masonry) (blocked in this sandbox), brickbondpatterns.com (bond
+glossary). Popular-format research the same day found no geometric or
+hypnotic pattern-loop channel or format, so no popular-format engine was
+built.
+
+**What it is**: nine courses of periodic brick runs. The generative object
+is the set of joint positions, not a motif: each course is a periodic
+partition of a fixed wall width (bricks 1 to 3 units wide, running-bond
+offset alternating by course), and every joint moves on an integer-wave
+travelling wave over the joint index. The period never changes, so each
+course stays fully covered and total brick area is constant. Bricks are
+luma-equal, the mortar is a fixed black gap, and adjacent bricks take
+different hue slots.
+
+**Bugs and iterations, found by rendering and by the gates**:
+1. A 9-unit period with 1-2 unit bricks read as horizontal bars rather
+   than a wall. Period 12 with 1-3 unit bricks and neighbour-distinct hue
+   slots fixed it, confirmed by looking at the PNG.
+2. A periodic-copy wrap bug left a black sliver at the right frame edge:
+   the last joint of each copy was not shifted by the copy offset. Fixed
+   by applying the copy offset to the joint end too.
+3. The joint-wave count K was re-drawn at every cycle boundary. That pops
+   every joint at once, so only the per-course rates are reassigned now.
+
+**Verified**: `node src/validate.js` (seed 12345) ok: projectedRise -9.9,
+compositionDrift 0.029, unitMotionNonRigidFrac 1.0, fastMotion 15.5 vs floor
+4.06, avgMsPerFrame 2. The 16-seed battery (seeds 1-15 plus 12345) passes
+16/16: avgSat 82-91 (vs 22), projectedRise -23 to +38 (vs 50),
+compositionDrift 0.0185-0.0542 (vs 0.015; seed 1 is the thinnest),
+unitMotionNonRigidFrac 1.0 on every seed, fastMotion 12.7-16.0 against
+floors of 3.6-4.3, avgMsPerFrame 1.4-2.3. Frames were rendered and looked
+at for seeds 1-3 at 25/50/75/95/105% of a 43.5s cycle.
+
+**Novelty gate**: all 101 engines in `engines/manual/` fingerprinted fresh
+alongside the candidate. Nearest neighbour is `mondrian` at distance
+**0.981** (next `slidepuzzle` 1.253, `impactshock` 1.256), a clean pass
+above 0.60. The guillotine rectangles of mondrian are the closest
+composition, but its black-line cuts and one-cut-per-leaf structure differ
+from staggered courses of periodic bricks.
+
+`ENGINE_SUBJECTS`: `brickbond: 'Brick Bond Wall'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to
