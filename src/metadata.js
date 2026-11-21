@@ -108,6 +108,7 @@ const ENGINE_SUBJECTS = {
   spiralterrace: 'Crystal Spiral Terraces',
   seigaiha: 'Seigaiha Wave Scales',
   brickbond: 'Brick Bond Wall',
+  mudcrack: 'Mud Crack Network',
   hypnospiral: 'Hypnotic Spiral Zoom',
   voderberg: 'Voderberg Spiral',
   voronoimosaic: 'Voronoi Mosaic',

@@ -9240,6 +9240,69 @@ from staggered courses of periodic bricks.
 
 `ENGINE_SUBJECTS`: `brickbond: 'Brick Bond Wall'` in `src/metadata.js`.
 
+## Mud-crack network engine (`mudcrack.html`) — 2026-11-21
+
+Daily creative-research routine. Category was "random natural structure" (last
+used 2026-11-07 for `ammonite.html`). A WebSearch on desiccation mud cracks
+surfaced the physics of crack networks: a crack relieves stress perpendicular
+to its faces, so a later crack that reaches an older one bends to meet it at a
+right angle (a T-junction), and repeated drying relaxes the network toward
+120-degree Y-junctions. Sources (search snippets): https://arxiv.org/pdf/1211.6762,
+https://physicstoday.aip.org/features/cracking-mud-freezing-dirt-and-breaking-rocks,
+https://www.physics.utoronto.ca/nonlinear/preprints/MM_phy479_2015.pdf,
+https://arxiv.org/pdf/2609.11048.
+
+**Popular-format research, same day (CLAUDE.md 2026-11-09 requirement).** The
+recurring formats were endless geometric tunnels, spiral optical-illusion
+loops, optical-art starbursts and mandala loops. All are covered by
+`tunnel.html`, `hypnospiral.html`, `vegasphere.html` and `kaleidoscope.html`,
+so no popular-format engine was built. No view counts were available.
+
+**What it is**: the frame is cut into convex cells by a drying history. Each
+new crack starts on a random point of an existing edge, runs perpendicular to
+that edge with a jitter of up to +-0.5 rad, and stops on the far boundary.
+Every new crack therefore meets an older crack at a right angle. Cells are
+greedily coloured from six luma-equal hue slots so no two touching cells share
+a slot. Black crack strokes are a fixed width. This is a fragmentation
+construction, not a seed-based partition: `voronoimosaic`/`columnarbasalt`/
+`foamcoarsen` place seeds and take proximity cells, `mondrian` cuts
+axis-aligned rectangles, and none of them bends each new cut to meet older ones
+at right angles.
+
+**Motion**: a zero-sum travelling lightness wave over the cells, phased by
+cumulative area fraction in a diagonal sort order, with an integer wave count
+K in 2-3 (the doylespiral/rosenspikes technique). Its rate has a guaranteed
+minimum magnitude with random sign and is reassigned, not reset, at each
+cycleSec boundary. The crack geometry is fixed for the whole video, so the
+motion is colour, not a moving network.
+
+**Iteration, found by rendering and looking**: the first draft (about 30 cracks,
++-0.28 rad jitter, minimum cell 1% of the frame) produced a few large,
+near-rectangular cells that read as a Mondrian-style partition. Raising the
+crack count to 46, widening the jitter to +-0.5 rad, and lowering the minimum
+cell area to 0.45% of the frame gave the irregular polygon network shipped.
+
+**Verified**: `node src/validate.js engines/manual/mudcrack.html` (seed 12345)
+ok: projectedRise -0.2, compositionDrift 0.0294, unitMotionNonRigidFrac 1.0,
+fastMotion 25.7 vs floor 5.75, avgMsPerFrame 7.3. The 16-seed battery (seeds
+1-15 plus 12345) passes 16/16: avgSat 81.6-88.9 (vs 22), peakNearWhiteFrac 0,
+projectedRise -14 to +5.5 (vs 50), compositionDrift 0.017-0.040 (vs 0.015;
+seed 6 is the thinnest), unitMotionNonRigidFrac 1.0 on every seed, fastMotion
+22-29 against floors of 5.5-6.0, avgMsPerFrame 5-8. Frames were rendered and
+looked at at 25/50/75/95/105% of a 43.5s cycle at seed 1 and at two fractions
+at seed 7: dense, saturated polygons with crisp black cracks and no black
+gaps, which meets the 2026-11-20 "full and flourishing" requirement.
+
+**Novelty gate**: all 103 engines in `engines/manual/` fingerprinted fresh
+alongside the candidate (seeds 1 and 7, frames 200/600/1000; the committed
+cache was not updated). Nearest neighbour is `liesegang` at distance **0.742**
+(next `prismbloom` 0.755, `voronoimosaic` 0.769, `tessellation` 0.791). A clean
+pass above 0.60, though not a wide margin, since a colour-blind composition
+descriptor places any full-bleed partition of coloured cells near the other
+partition engines.
+
+`ENGINE_SUBJECTS`: `mudcrack: 'Mud Crack Network'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

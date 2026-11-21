@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Mud Crack Network — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a random web find (today's
+// creative-research routine, category "random natural structure", least
+// recently used): DESICCATION MUD-CRACK NETWORKS. As a wet clay layer dries,
+// it cracks into polygons. Physics (Goehring & Morris; Miedema lab report;
+// phase-field study arXiv 2609.11048): a crack relieves stress perpendicular
+// to its faces, so a later crack that approaches an older one bends to meet it
+// at a RIGHT ANGLE, forming a T-junction. Over repeated drying the network
+// relaxes toward 120-degree Y-junctions. Sources (search snippets only):
+// https://arxiv.org/pdf/1211.6762 (fracture patterns: columnar joints, mud
+// cracks, polygonal terrain), https://physicstoday.aip.org/features/cracking-mud-freezing-dirt-and-breaking-rocks,
+// https://www.physics.utoronto.ca/nonlinear/preprints/MM_phy479_2015.pdf,
+// https://arxiv.org/pdf/2609.11048.
+//
+// A genuinely different construction PRINCIPLE from the rest of the pool: the
+// network is FRAGMENTED, not placed or sampled. Each new crack starts on an
+// existing edge, runs perpendicular to it (Irwin's rule) and stops on the far
+// boundary, so every polygon is a convex piece cut out of the one before. The
+// Voronoi engines (voronoimosaic, columnarbasalt, foamcoarsen) use seed
+// proximity; mondrian cuts axis-aligned rectangles; none bends each new cut to
+// meet older ones at right angles.
+//
+// BRIGHTNESS / COVERAGE: the cells tile the frame exactly (every cut splits a
+// convex cell into two), and the gutters are a fixed black width. Each cell's
+// colour is luma-equal across hue slots (lightness bisected per hue), and the
+// lightness pulse is a zero-sum travelling wave in CUMULATIVE AREA fraction,
+// so the summed luma does not trend (the doylespiral / rosenspikes technique).
+//
+// MOTION (unit-level): the wave runs across the cells in area order, so each
+// polygon brightens and dims at its own phase. Neighbouring cells are never
+// in the same phase, so no single rigid transform explains the change. The
+// wave rate has a guaranteed minimum magnitude with random sign and is only
+// reassigned, never reset, at each cycleSec boundary.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE_SEC = fltP('cycleSec', 43.5);
+  const dt = 1 / FPS;
+  const TWO_PI = Math.PI * 2;
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Burn 4 draws first: Mulberry32's first outputs for small consecutive seeds
+  // are correlated (pendulumwave.html / spinbounce.html fix).
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+  const randInt = (a, b) => a + Math.floor(rng() * (b - a + 1));
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  // Hue sets per palette, chosen so vivid colours share a similar natural luma.
+  const palettes = {
+    aurora: [[140, 90], [190, 88], [230, 82], [280, 78], [320, 70]],
+    ember:  [[10, 95], [345, 90], [320, 82], [355, 95], [300, 80]],
+    ocean:  [[185, 92], [205, 90], [225, 85], [250, 75], [270, 68]],
+    neon:   [[0, 95], [165, 88], [144, 88], [216, 92], [288, 94]],
+    sunset: [[10, 95], [330, 88], [280, 75], [355, 90], [190, 70]],
+    ice:    [[185, 88], [205, 84], [225, 80], [250, 76], [270, 72]],
+    gold:   [[20, 92], [350, 85], [300, 80], [160, 85], [240, 85]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out.map((c) => [c[0], c[1]]) : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const HUES = parseColors() || palettes[resolvePalette()];
+
+  function hslToRgb(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [255 * f(0), 255 * f(8), 255 * f(4)];
+  }
+  function lumaOf(h, s, l) {
+    const [r, g, b] = hslToRgb(h, s, l);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+  function lightnessForLuma(h, s, target) {
+    let lo = 10, hi = 95;
+    for (let i = 0; i < 28; i++) {
+      const mid = (lo + hi) / 2;
+      if (lumaOf(h, s, mid) < target) lo = mid; else hi = mid;
+    }
+    return Math.max(15, Math.min(90, (lo + hi) / 2));
+  }
+
+  // ---- Polygon helpers (convex cells) ----
+  const polyArea = (p) => {
+    let a = 0;
+    for (let i = 0; i < p.length; i++) {
+      const [x1, y1] = p[i], [x2, y2] = p[(i + 1) % p.length];
+      a += x1 * y2 - x2 * y1;
+    }
+    return Math.abs(a) / 2;
+  };
+  const polyPerim = (p) => {
+    let s = 0;
+    for (let i = 0; i < p.length; i++) {
+      const [x1, y1] = p[i], [x2, y2] = p[(i + 1) % p.length];
+      s += Math.hypot(x2 - x1, y2 - y1);
+    }
+    return s;
+  };
+  const polyCentroid = (p) => {
+    let x = 0, y = 0;
+    for (const q of p) { x += q[0]; y += q[1]; }
+    return [x / p.length, y / p.length];
+  };
+  // Keep the part of a convex polygon on one side of the line through P with
+  // normal n (Sutherland-Hodgman against a single half-plane).
+  function halfPlane(poly, n, P, keepPos) {
+    const out = [];
+    const sg = keepPos ? 1 : -1;
+    const f = (q) => sg * ((q[0] - P[0]) * n[0] + (q[1] - P[1]) * n[1]);
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      const fa = f(a), fb = f(b);
+      if (fa >= 0) out.push(a);
+      if ((fa >= 0) !== (fb >= 0)) {
+        const t = fa / (fa - fb);
+        out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+      }
+    }
+    return out;
+  }
+
+  // ---- Geometry, built once per video ----
+  const FRAME_AREA = W * H;
+  const MIN_DIM = Math.min(W, H);
+  const GAP = Math.max(3, Math.round(MIN_DIM * 0.011)); // fixed black crack width (px)
+  const MIN_AREA = FRAME_AREA * 0.0045;
+  const MIN_THICK = MIN_DIM * 0.028;                   // reject slivers (2*area/perimeter)
+  const CRACKS = Math.max(20, Math.round(46 * DENSITY));
+
+  // Drying history: each new crack starts on a random point of an existing edge,
+  // runs perpendicular to that edge (with a small jitter) and stops on the far
+  // boundary. Every new cut therefore meets an older crack at a right angle.
+  let cells = [[[0, 0], [W, 0], [W, H], [0, H]]];
+  let tries = 0;
+  while (cells.length < CRACKS + 1 && tries < 6000) {
+    tries++;
+    // Choose a cell with probability biased toward large ones, so cracks spread
+    // over the frame instead of piling into one corner.
+    let j = -1, best = -1;
+    for (let k = 0; k < cells.length; k++) {
+      const score = polyArea(cells[k]) * (0.5 + rng());
+      if (score > best) { best = score; j = k; }
+    }
+    const poly = cells[j];
+    const n = poly.length;
+    const i = randInt(0, n - 1);
+    const a = poly[i], b = poly[(i + 1) % n];
+    const t = rand(0.12, 0.88);
+    const P = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    let ex = b[0] - a[0], ey = b[1] - a[1];
+    const L = Math.hypot(ex, ey) || 1; ex /= L; ey /= L;
+    // Edge tangent t = (ex,ey). The crack runs along the edge normal (-ey,ex),
+    // turned inward toward the cell's centre.
+    let nx = -ey, ny = ex;
+    const c = polyCentroid(poly);
+    if ((c[0] - P[0]) * nx + (c[1] - P[1]) * ny < 0) { nx = -nx; ny = -ny; }
+    const jit = rand(-0.5, 0.5);
+    const dx = nx * Math.cos(jit) - ny * Math.sin(jit);
+    const dy = nx * Math.sin(jit) + ny * Math.cos(jit);
+    // Splitting line has normal perpendicular to its direction (dx,dy).
+    const m = [-dy, dx];
+    const A = halfPlane(poly, m, P, true);
+    const B = halfPlane(poly, m, P, false);
+    if (A.length < 3 || B.length < 3) continue;
+    const ok = (p) => polyArea(p) >= MIN_AREA && (2 * polyArea(p)) / polyPerim(p) >= MIN_THICK;
+    if (!ok(A) || !ok(B)) continue;
+    cells.splice(j, 1, A, B);
+  }
+
+  // Adjacency: two cells touch if the midpoint of an edge of one lies on an
+  // edge of the other (within a pixel or two).
+  const distSeg = (px, py, a, b) => {
+    const vx = b[0] - a[0], vy = b[1] - a[1];
+    const l2 = vx * vx + vy * vy || 1;
+    let t = ((px - a[0]) * vx + (py - a[1]) * vy) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(a[0] + vx * t - px, a[1] + vy * t - py);
+  };
+  const N = cells.length;
+  const adj = Array.from({ length: N }, () => []);
+  for (let p = 0; p < N; p++) {
+    for (let q = p + 1; q < N; q++) {
+      let touch = false;
+      const A = cells[p];
+      for (let i = 0; i < A.length && !touch; i++) {
+        const a = A[i], b = A[(i + 1) % A.length];
+        const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+        const B = cells[q];
+        for (let k = 0; k < B.length; k++) {
+          if (distSeg(mx, my, B[k], B[(k + 1) % B.length]) < 1.5) { touch = true; break; }
+        }
+      }
+      if (touch) { adj[p].push(q); adj[q].push(p); }
+    }
+  }
+
+  // Equal-luma colour slots, one per hue. Greedy colouring so touching cells
+  // never share a slot, which keeps every crack readable as a boundary.
+  const BASE_LUMA = 135;
+  const SLOTS = HUES.map(([h, s]) => {
+    const sat = Math.max(84, Math.min(94, s));
+    return { h, s: sat, l: lightnessForLuma(h, sat, BASE_LUMA) };
+  });
+  const slotOf = new Array(N).fill(-1);
+  for (let p = 0; p < N; p++) {
+    const used = new Set(adj[p].map((q) => slotOf[q]).filter((v) => v >= 0));
+    const order = [];
+    for (let s = 0; s < SLOTS.length; s++) order.push(s);
+    for (let s = order.length - 1; s > 0; s--) { const r = randInt(0, s); [order[s], order[r]] = [order[r], order[s]]; }
+    slotOf[p] = order.find((s) => !used.has(s)) ?? order[0];
+  }
+
+  // Cumulative-area phase axis: cells sorted by a diagonal coordinate, each
+  // assigned the fraction of total area that lies before its centre. A
+  // whole-cycle integer wave over that axis has zero net area-weighted change.
+  const totalArea = cells.reduce((s, p) => s + polyArea(p), 0);
+  const cInfo = cells.map((p, idx) => {
+    const [cx, cy] = polyCentroid(p);
+    return { idx, key: cx + 0.35 * cy, area: polyArea(p), cx, cy };
+  }).sort((p, q) => p.key - q.key);
+  const cfrac = new Array(N).fill(0);
+  let accA = 0;
+  for (const it of cInfo) {
+    cfrac[it.idx] = (accA + it.area / 2) / totalArea;
+    accA += it.area;
+  }
+  const WAVE_K = randInt(2, 3);
+  const WAVE_AMP = 8.5; // lightness points
+  const phase0 = rng() * TWO_PI;
+  const polyPaths = cells.map((p) => {
+    const path = new Path2D();
+    path.moveTo(p[0][0], p[0][1]);
+    for (let i = 1; i < p.length; i++) path.lineTo(p[i][0], p[i][1]);
+    path.closePath();
+    return path;
+  });
+
+  let wt = 0;                                           // accumulated wave phase
+  let rate = sgn() * rand(1.0, 1.5) * SPEED;           // rad/s
+  const cycleFrames = Math.max(1, Math.round(CYCLE_SEC * FPS));
+  let cycleFrame = 0;
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  function renderFrame() {
+    cycleFrame++;
+    wt += rate * dt;
+    if (cycleFrame >= cycleFrames) {
+      cycleFrame = 0;
+      rate = sgn() * rand(1.0, 1.5) * SPEED;          // rate only, phases continue
+    }
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    for (let p = 0; p < N; p++) {
+      const sl = SLOTS[slotOf[p]];
+      const L = sl.l + WAVE_AMP * Math.sin(TWO_PI * WAVE_K * cfrac[p] + phase0 - wt);
+      ctx.fillStyle = `hsl(${sl.h}, ${sl.s}%, ${Math.max(14, Math.min(92, L)).toFixed(2)}%)`;
+      ctx.fill(polyPaths[p]);
+    }
+    // Cracks: black strokes along every polygon edge.
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = GAP;
+    ctx.lineJoin = 'round';
+    for (let p = 0; p < N; p++) ctx.stroke(polyPaths[p]);
+    window.currentFrame++;
+  }
+
+  window.advanceFrame = function () { renderFrame(); };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) renderFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
