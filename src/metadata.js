@@ -109,6 +109,7 @@ const ENGINE_SUBJECTS = {
   seigaiha: 'Seigaiha Wave Scales',
   brickbond: 'Brick Bond Wall',
   hypnospiral: 'Hypnotic Spiral Zoom',
+  infinitemirror: 'Infinite Mirror Tunnel',
   streamlines: 'Flowing Streamlines',
   voderberg: 'Voderberg Spiral',
   voronoimosaic: 'Voronoi Mosaic',
