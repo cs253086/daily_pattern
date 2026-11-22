@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Bioluminescent Mandala — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated engine: BIOLUMINESCENT MANDALA. A Gielis superformula rosette
+// (r(theta) = [|cos(m*theta/4)|^n2 + |sin(m*theta/4)|^n3]^(-1/n1)) sets the
+// outline of a symmetric flower-star. The frame is filled with nested copies
+// of that outline, one every fixed step outward in log-radius, so the frame
+// reads as luminous concentric mandala contours of deep teal, blue and violet.
+//
+// Construction (stateless per frame, a pure function of time):
+//   For pixel p with angle theta and radius d = |p|, let
+//       F(p) = ln d - ln R(theta)
+//   Level sets of F are the superformula outline scaled by a constant ratio, so
+//   the contours nest outward. The scalar S = fract(F / STEP) repeats once per
+//   contour, where STEP = ln(1.22) fixes the contour spacing.
+//   The shape parameters (m fixed per video; n1, n2, n3 breathing on bounded
+//   sine loops) morph the outline continuously. Nothing accumulates.
+//
+// Brightness neutrality: each frame S is RANK-QUANTISED into K equal-area bands,
+// so the area mix and mean luma cannot drift as the outline morphs. Every third
+// band is black (a fixed 1/3 of the frame); the coloured bands keep fixed
+// bioluminescent hues. Each band's luma is equalised, so colour changes are
+// structural, not brightness trends.
+//
+// Motion: the outline breathes through its shape parameters, rotates slowly,
+// and the contours drift outward with the shared phase, so the rings bloom and
+// settle. The shape never resets, so the hour keeps developing.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32 (4-draw burn-in), no requestAnimationFrame.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Mulberry32's first draws for consecutive small seeds are correlated, so burn
+  // 4 draws first (same convention as the other curated engines).
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  // Bioluminescent palette: a teal-to-violet hue family, or a colors= override.
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  const COLS = parseColors();
+  const H0 = COLS ? COLS[0][0] : rand(170, 200);            // base teal
+  const HSPAN = COLS ? 90 : rand(80, 110);                   // spread across the wheel
+  const BAND_S = 92, BAND_L = 58;
+
+  // ---- per-video shape constants ------------------------------------------------
+  const M = Math.floor(rand(5, 10));                         // symmetry count, 5..9
+  const N1 = rand(1.5, 2.4), N2 = rand(1.2, 2.2), N3 = rand(1.2, 2.2);
+  const A1 = rand(0.18, 0.28), A2 = rand(0.25, 0.45), A3 = rand(0.25, 0.45);
+  const T1 = rand(28, 40) / SPEED, T2 = rand(32, 46) / SPEED, T3 = rand(36, 50) / SPEED;
+  const P1 = rand(0, 2 * Math.PI), P2 = rand(0, 2 * Math.PI), P3 = rand(0, 2 * Math.PI);
+  const ROT = sgn() * rand(0.035, 0.06) * SPEED;             // slow rotation, rad/s
+  const STEP = Math.log(1.22);                               // contour spacing in ln(radius)
+  const TWO_PI = 2 * Math.PI;
+
+  // ---- field grid -------------------------------------------------------------
+  // Computed at a capped resolution and nearest-upscaled (crisp, house style).
+  const CW = Math.min(W, 640);
+  const CH = Math.max(1, Math.round(CW * H / W));
+  const N = CW * CH;
+  const K = 12;                 // equal-area bands
+  const NB = 4096;              // histogram bins over S in [0,1)
+
+  // Static per-pixel data: ln radius and angle (fixed for the video).
+  const LNR = new Float32Array(N);
+  const TH = new Float32Array(N);
+  {
+    let i = 0;
+    for (let py = 0; py < CH; py++) {
+      const y = (CH / 2 - py - 0.5) / (CH / 2);
+      for (let px = 0; px < CW; px++) {
+        const x = (px + 0.5 - CW / 2) / (CH / 2);
+        const d = Math.max(1e-6, Math.sqrt(x * x + y * y));
+        LNR[i] = Math.log(d);
+        const th = Math.atan2(y, x);
+        TH[i] = th;
+        i++;
+      }
+    }
+  }
+
+  const off = document.createElement('canvas');
+  off.width = CW; off.height = CH;
+  const offCtx = off.getContext('2d');
+  const img = offCtx.createImageData(CW, CH);
+  const data = img.data;
+
+  // ---- colour LUT: K bands ------------------------------------------------------
+  function hslToRgb(h, s, l) {
+    h = ((h % 360) + 360) % 360; s /= 100; l /= 100;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = l - c / 2;
+    let r = 0, g = 0, b = 0;
+    if (h < 60) { r = c; g = x; } else if (h < 120) { r = x; g = c; }
+    else if (h < 180) { g = c; b = x; } else if (h < 240) { g = x; b = c; }
+    else if (h < 300) { r = x; b = c; } else { r = c; b = x; }
+    return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+  }
+  const lut = new Uint8ClampedArray(K * 3);
+  const isBlack = (k) => k % 3 === 1;          // every third band black (1/3 of frame)
+  function buildLUT() {
+    for (let k = 0; k < K; k++) {
+      if (isBlack(k)) { lut[k * 3] = 0; lut[k * 3 + 1] = 0; lut[k * 3 + 2] = 0; continue; }
+      const rgb = hslToRgb(H0 + (k * HSPAN) / K, BAND_S, BAND_L);
+      lut[k * 3] = rgb[0]; lut[k * 3 + 1] = rgb[1]; lut[k * 3 + 2] = rgb[2];
+    }
+  }
+
+  const binOf = new Uint16Array(N);
+  const binCount = new Uint32Array(NB);
+  const bandOfBin = new Uint8Array(NB);
+
+  // Superformula radius term, evaluated per pixel with the frame's shape params.
+  function computeField(clk) {
+    binCount.fill(0);
+    const n1 = N1 + A1 * Math.sin(TWO_PI * clk / T1 + P1);
+    const n2 = N2 + A2 * Math.sin(TWO_PI * clk / T2 + P2);
+    const n3 = N3 + A3 * Math.sin(TWO_PI * clk / T3 + P3);
+    const rot = ROT * clk;
+    const inv1 = -1 / n1;
+    for (let i = 0; i < N; i++) {
+      // Superformula term at the rotated angle (rotation shifts theta by rot).
+      const a = M * (TH[i] - rot) / 4;
+      const c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a));
+      let term = Math.pow(c, n2) + Math.pow(s, n3);
+      if (term < 1e-4) term = 1e-4;
+      let lnR = inv1 * Math.log(term);               // ln R(theta)
+      if (lnR > 3) lnR = 3; else if (lnR < -3) lnR = -3;
+      const F = LNR[i] - lnR;
+      const S = F / STEP;
+      const s2 = S - Math.floor(S);
+      let bin = (s2 * NB) | 0;
+      if (bin >= NB) bin = NB - 1;
+      binOf[i] = bin;
+      binCount[bin]++;
+    }
+  }
+
+  // Rank-quantise: bins walked in order of S so each band holds 1/K of pixels.
+  function assignBands() {
+    let cum = 0;
+    for (let b = 0; b < NB; b++) {
+      const c = binCount[b];
+      const q = N > 0 ? (cum + c / 2) / N : 0;
+      bandOfBin[b] = Math.min(K - 1, Math.floor(q * K));
+      cum += c;
+    }
+  }
+
+  function paint() {
+    for (let i = 0, p = 0; i < N; i++, p += 4) {
+      const b3 = bandOfBin[binOf[i]] * 3;
+      data[p] = lut[b3]; data[p + 1] = lut[b3 + 1]; data[p + 2] = lut[b3 + 2]; data[p + 3] = 255;
+    }
+    offCtx.putImageData(img, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(off, 0, 0, W, H);
+  }
+
+  let clk = 0;
+  function renderFrame() {
+    clk += 1 / FPS;
+    buildLUT();
+    computeField(clk);
+    assignBands();
+    paint();
+  }
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
