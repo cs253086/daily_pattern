@@ -1,0 +1,5 @@
+{
+  "date": "20261123",
+  "engine": "engines/manual/snowflakes.html",
+  "note": "One-day override: 2026-11-23 scheduled run uses snowflakes. Delete this file afterwards."
+}
