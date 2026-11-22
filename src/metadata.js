@@ -110,7 +110,6 @@ const ENGINE_SUBJECTS = {
   brickbond: 'Brick Bond Wall',
   mudcrack: 'Mud Crack Network',
   hypnospiral: 'Hypnotic Spiral Zoom',
-  snowflakes: 'Falling Snowflakes',
   voderberg: 'Voderberg Spiral',
   voronoimosaic: 'Voronoi Mosaic',
   widmanstatten: 'Crystal Lattice Bands',
