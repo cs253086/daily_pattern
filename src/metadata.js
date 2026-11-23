@@ -105,6 +105,7 @@ const ENGINE_SUBJECTS = {
   slidepuzzle: 'Sliding Tile Puzzle',
   mobius: 'Mobius Stripe Band',
   timestables: 'Times Table Chord Circles',
+  harmonograph: 'Harmonograph Trails',
   spiralterrace: 'Crystal Spiral Terraces',
   seigaiha: 'Seigaiha Wave Scales',
   brickbond: 'Brick Bond Wall',

@@ -9303,6 +9303,54 @@ partition engines.
 
 `ENGINE_SUBJECTS`: `mudcrack: 'Mud Crack Network'` in `src/metadata.js`.
 
+## Harmonograph trails (`harmonograph.html`) — 2026-11-23
+
+Daily creative-research routine. Category was "a random featured image"; the
+Wikimedia featured-picture search returned no usable specific picture, so the
+category was resolved through a harmonograph: the Victorian pendulum drawing
+machine. Each screen coordinate is a sum of two sinusoids (two pendulums per
+axis), so the pen path is a superposed Lissajous figure. Sources (search
+snippets): https://mathworld.wolfram.com/Harmonograph.html,
+https://paulbourke.net/geometry/harmonograph,
+https://www.johndcook.com/blog/2019/10/08/harmonographs/. The same day's
+popular-format search found no verifiable ranking of loop formats (only generic
+satisfying-loop commentary), and nothing uncovered, so no popular-format engine
+was built.
+
+**What it is**: four independent harmonographs in a 2x2 field. Each pen path is
+drawn as a 16-second trail, banded by palette colour along its length, so
+coloured stretches sweep along each figure. Phases drift at guaranteed-minimum
+rates with random sign, so the figures keep rebuilding. Clear-and-redraw each
+frame, nothing accumulates.
+
+**Iterations, found by the gates and by looking**:
+1. A breathing amplitude envelope drew sparse figures that covered about a third
+   of the frame, and seed 12345 failed the brightness-trend gate (+69.5 luma
+   projected). Amplitude was held constant and each figure's stroke alpha is now
+   scaled by its live trail length against a reference length. This holds total
+   ink constant, the same lesson `timestables.html` documents.
+2. Figures were too small (about 0.46 of a cell) and too thin for the house
+   style. Excursion went to 0.6 of the cell and the trail to 16 seconds, which
+   filled the frame with overlapping loops.
+3. Per-sample strokes made the validator battery far too slow. Each trail is now
+   batched into band polylines, one stroke call per band, with no change to the
+   geometry.
+
+**Verified**: `validateEngine()` 16/16 on seeds 1-15 plus 12345. avgSat 52-65.5
+(vs 22), projectedRise -11.4 to +9.7 (vs 50), compositionDrift 0.035-0.050 (vs
+0.015), unitMotionNonRigidFrac 1.0 on every seed, avgMsPerFrame 17-21. The
+thinnest margins are fastMotion: seed 2 at 5.01 against a 4.87 floor, seed 11 at
+5.44 against 5.30, seed 12 at 5.30 against 4.43. Frames at seeds 7 and 12345
+were rendered and looked at: dense, saturated, interlaced looping figures on
+black, with no whiteout.
+
+**Novelty gate**: measured against all 104 engines in `engines/manual/`
+(fingerprinted fresh; the committed cache was not updated). Nearest neighbour is
+`phyllotaxis.html` at distance **0.707**, with `composer.html` at 0.723. A clean
+pass above 0.60.
+
+`ENGINE_SUBJECTS`: `harmonograph: 'Harmonograph Trails'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

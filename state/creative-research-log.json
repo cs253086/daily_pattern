@@ -1752,5 +1752,16 @@
     "seedsVerified": "Pre-ship battery (seeds 1-15 + 12345) on the final shrink-only version: 0/16 passed the brightness-trend gate; on the expanding-fill version 16/16 passed brightness but 4 of 16 failed unitMotion (seeds 8, 10, 12, 13 earlier). Single-frame renders at seeds 1, 7, 12345.",
     "nearestNeighbour": null,
     "nearestDistance": null
+  },
+  {
+    "date": "2026-11-23",
+    "inspirationSource": "Random web inspiration (WebSearch, 2026-11-23), category: a random featured image -- the Wikimedia Commons featured-picture search returned no usable specific picture, so the category was resolved through the harmonograph (Victorian pendulum drawing machine): https://mathworld.wolfram.com/Harmonograph.html ; https://paulbourke.net/geometry/harmonograph ; https://www.johndcook.com/blog/2019/10/08/harmonographs/ (damped-oscillator model, Lissajous as the undamped limit).",
+    "idea": "A harmonograph: each screen coordinate is a sum of two sinusoids (two pendulums per axis), so the pen path is a superposed Lissajous figure. Four independent harmonographs in a 2x2 field, each drawn as a 16-second trail with palette bands sweeping along it, phases drifting at guaranteed-minimum rates, and stroke alpha normalised by trail length so total ink stays constant.",
+    "engineName": "harmonograph",
+    "outcome": "shipped",
+    "reason": "Built engines/manual/harmonograph.html. Iterations: (1) first draft with a breathing amplitude envelope drew sparse figures (about a third of the frame) and failed the brightness-trend gate on seed 12345 (+69.5 projected), so amplitude was held constant and each trail's stroke alpha was normalised by its live length against a reference; (2) enlarged excursion to 0.6 of the cell and lengthened the trail to 16 s so the frame fills; (3) batched each trail into band polylines for render cost. Looked at frames at seeds 7 and 12345: dense, saturated, interlaced looping figures with no whiteout. Popular-format research the same day found no uncovered format (only generic satisfying-loop commentary, no verifiable view rankings), so no popular-format engine was built.",
+    "seedsVerified": "validateEngine() 16/16 on seeds 1-15 plus 12345 (avgSat 52-65.5, projectedRise -11.4 to +9.7, compositionDrift 0.035-0.050, unitMotionNonRigidFrac 1.0 on all, fastMotion margins thinnest on seed 2 (5.01 vs 4.87), seed 11 (5.44 vs 5.30) and seed 12 (5.30 vs 4.43), avgMsPerFrame 17-21).",
+    "nearestNeighbour": "phyllotaxis.html",
+    "nearestDistance": 0.707
   }
 ]

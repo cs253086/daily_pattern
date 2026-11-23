@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Harmonograph Trails — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "obscure mathematical object / physical
+// phenomenon"). An open WebSearch surfaced the HARMONOGRAPH, the Victorian
+// pendulum drawing machine: two pendulums at right angles, each a damped
+// harmonic oscillator, move a pen over paper. Each screen coordinate is a
+// sum of two sinusoids, x(t) = a1 sin(f1 t + p1) + a2 sin(f2 t + p2) and the
+// same for y, so the path is a superposed Lissajous figure. Sources (search
+// snippets, not opened): https://mathworld.wolfram.com/Harmonograph.html,
+// https://paulbourke.net/geometry/harmonograph (damped-oscillator model),
+// https://www.johndcook.com/blog/2019/10/08/harmonographs/ (cosine times
+// decaying exponential, the Lissajous limit with zero damping).
+//
+// A genuinely different construction PRINCIPLE from every other engine in the
+// pool: the picture is a TRAIL of a parametric pen path over a moving time
+// window, not a fixed curve family (spirograph/timestables), a wave field
+// sampled per pixel (chladni/moire), or a growth/tiling process. The pen's
+// phases drift at guaranteed-minimum rates, so the figure rebuilds itself
+// continuously. Four independent harmonographs in a 2x2 field break the
+// centred symmetry a single figure would share with the pool's other radial
+// engines.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. Clear-and-redraw each frame, so nothing
+// accumulates. Amplitudes are constant (no damping), so no figure ever shrinks
+// to a point over the hour. Each figure's stroke alpha is scaled by its trail
+// length relative to a reference, so the total ink stays steady.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE = Math.max(5, fltP('cycleSec', 43.5));
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Mulberry32's first outputs for consecutive small seeds are correlated;
+  // discard a few draws (same convention as the other engines).
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  // ---- Four harmonographs in a 2x2 field ------------------------------------
+  const COLS = 2, ROWS = 2;
+  const cellW = W / COLS, cellH = H / ROWS;
+  const R = 0.6 * Math.min(cellW, cellH);            // max pen excursion
+  const LW_CORE = Math.max(1.6, R * 0.024);
+  const LW_GLOW = LW_CORE * 4;
+  const TRAIL = 16.0;                                   // seconds of path shown
+  const NS = Math.round(1400 * DENSITY);                 // samples per trail
+  const HARMS = [];
+  for (let d = 0; d < COLS * ROWS; d++) {
+    const col = d % COLS, row = Math.floor(d / COLS);
+    const cx = (col + 0.5) * cellW + rand(-0.02, 0.02) * cellW;
+    const cy = (row + 0.5) * cellH + rand(-0.02, 0.02) * cellH;
+    const h = {
+      cx, cy,
+      // Frequencies in a band that gives intricate but readable figures.
+      fx1: rand(1.6, 2.6), fx2: rand(2.8, 4.2),
+      fy1: rand(1.5, 2.5), fy2: rand(3.0, 4.6),
+      // Relative amplitudes (the two pendulums on each axis).
+      ax1: rand(0.55, 0.7), ax2: rand(0.3, 0.45),
+      ay1: rand(0.55, 0.7), ay2: rand(0.3, 0.45),
+      // Phase drift: each phase advances at a guaranteed-minimum rate, so the
+      // figure rebuilds itself. Random sign per term.
+      dpx1: sgn() * rand(0.22, 0.4), dpx2: sgn() * rand(0.22, 0.4),
+      dpy1: sgn() * rand(0.22, 0.4), dpy2: sgn() * rand(0.22, 0.4),
+      px1: rand(0, Math.PI * 2), px2: rand(0, Math.PI * 2),
+      py1: rand(0, Math.PI * 2), py2: rand(0, Math.PI * 2),
+      // Unused by the render (the envelope is held at 1); kept so the draw order matches the validated build.
+      envPh: rand(0, Math.PI * 2),
+      pal: (d + Math.floor(rand(0, PAL.length))) % PAL.length,
+    };
+    HARMS.push(h);
+  }
+
+  // Pen position at time t for harmonograph h.
+  function penAt(h, t) {
+    const env = 1; // constant amplitude
+    const x = h.ax1 * Math.sin(h.fx1 * t + h.px1 + h.dpx1 * t) + h.ax2 * Math.sin(h.fx2 * t + h.px2 + h.dpx2 * t);
+    const y = h.ay1 * Math.sin(h.fy1 * t + h.py1 + h.dpy1 * t) + h.ay2 * Math.sin(h.fy2 * t + h.py2 + h.dpy2 * t);
+    return [h.cx + R * env * x / (h.ax1 + h.ax2), h.cy + R * env * y / (h.ay1 + h.ay2)];
+  }
+
+  // Trail path length of one harmonograph at time t. Overlap of the trail is
+  // what moves mean luma, so each figure's stroke alpha is scaled by
+  // (reference length / live length): total ink stays constant over the hour.
+  function trailLength(h, t) {
+    let L = 0, px = null, py = null;
+    for (let i = 0; i <= NS; i++) {
+      const [x, y] = penAt(h, t - TRAIL + (i * TRAIL) / NS);
+      if (px !== null) L += Math.hypot(x - px, y - py);
+      px = x; py = y;
+    }
+    return L;
+  }
+  for (const h of HARMS) {
+    let s2 = 0;
+    const Q = 60;
+    for (let q = 0; q < Q; q++) s2 += trailLength(h, (q * CYCLE) / Q + 40);
+    h.inkRef = s2 / Q;
+  }
+
+  function renderAt(t) {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (const h of HARMS) {
+      const Lnow = trailLength(h, t);
+      const norm = Math.min(1, h.inkRef / Math.max(Lnow, 1e-6));
+      ctx.globalAlpha = norm;
+      // Trail: the last TRAIL seconds drawn as BANDS of NB polylines. Colour
+      // is set by band age (old = palette start, new = palette end), so each
+      // figure shows coloured stretches that sweep along the path. A band
+      // polyline is one stroke call, which keeps the per-frame cost low.
+      const NB = PAL.length * 2;
+      const per = Math.ceil(NS / NB);
+      for (let b = 0; b < NB; b++) {
+        const c = PAL[(h.pal + Math.floor((b * PAL.length) / NB)) % PAL.length];
+        ctx.strokeStyle = `hsla(${c[0]}, ${c[1]}%, ${c[2]}%, 0.16)`;
+        ctx.lineWidth = LW_GLOW;
+        ctx.beginPath();
+        const i0 = b * per, i1 = Math.min(NS, (b + 1) * per);
+        for (let i = i0; i <= i1; i++) {
+          const [x, y] = penAt(h, t - TRAIL + (i * TRAIL) / NS);
+          if (i === i0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.strokeStyle = `hsl(${c[0]}, ${c[1]}%, ${c[2]}%)`;
+        ctx.lineWidth = LW_CORE;
+        ctx.stroke();
+      }
+      // Bright pen head.
+      ctx.globalAlpha = 1;
+      const [hx, hy] = penAt(h, t);
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(hx, hy, LW_CORE * 1.3, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  window.advanceFrame = function () {
+    renderAt(window.currentFrame / FPS);
+    window.currentFrame++;
+  };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
