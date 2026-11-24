@@ -1763,5 +1763,16 @@
     "seedsVerified": "validateEngine() 16/16 on seeds 1-15 plus 12345 (avgSat 52-65.5, projectedRise -11.4 to +9.7, compositionDrift 0.035-0.050, unitMotionNonRigidFrac 1.0 on all, fastMotion margins thinnest on seed 2 (5.01 vs 4.87), seed 11 (5.44 vs 5.30) and seed 12 (5.30 vs 4.43), avgMsPerFrame 17-21).",
     "nearestNeighbour": "phyllotaxis.html",
     "nearestDistance": 0.707
+  },
+  {
+    "date": "2026-11-24",
+    "inspirationSource": "Random web inspiration (WebSearch, 2026-11-24), category: traditional textile/tiling/ornament tradition from a randomly chosen culture (least recently used category in the tally). Celtic knot interlace construction: grid plaitwork with over/under alternation along each strand (Dunham, Bridges, https://www.d.umn.edu/~ddunham/dunbrid00.pdf; Parabola UNSW walk-and-alternate rule, https://parabola.unsw.edu.au/sites/default/files/2024-02/vol58_no1_7.pdf; Columbia barrier-free grid proof, https://www.cs.columbia.edu/~gross/research/SIGGRAPH09ACXG-TransACMgraphics.pdf).",
+    "idea": "Celtic plait ribbons: a 45-degree lattice of straight ribbons in two families, with a 2-over-2-under block rule so each ribbon goes over, over, under, under along its length, drawn as outlined bands with black gutters at under-crossings. Motion: a zero-sum travelling width wave weighted by each ribbon's visible length. Luma-equalised palette.",
+    "engineName": null,
+    "outcome": "skipped",
+    "reason": "Built and iterated on the full gate battery; the engine was removed and not shipped. Findings: (1) the per-colour palette luma had to be equalised, since width changes otherwise moved brightness between differently coloured ribbons; the target luma was raised to 150 to keep the palette vivid. (2) The width wave's zero-sum over ribbon count left a residual brightness trend because edge ribbons are shorter; weighting the wave by each ribbon's visible length fixed that. (3) The offset wave shifted crossings near the frame edges and produced a brightness trend of its own, so it was removed; the width amplitude then went to 0.22 for fast motion. Final battery (seeds 1-15 + 12345) reached 10/11 at the point it was stopped, and seed 10 failed compositionDrift at 0.0088 against the 0.015 minimum (the composition is still mostly straight ribbons with a width breath, so it barely develops). Iteration budget (about 4 rounds) exhausted, so the novelty gate was not run. Popular-format research (WebSearch, same day): results were slime/neon-mixing and ASMR-satisfying channels plus generic loop commentary; no verifiable uncovered geometric format (covered by fluidmarble, lightstreams, tunnel, hypnospiral), so no popular-format engine was built.",
+    "seedsVerified": "1-11 (seeds 1-9 and 11 passed; seed 10 failed compositionDrift); seeds 12-15 and 12345 not reached",
+    "nearestNeighbour": null,
+    "nearestDistance": null
   }
 ]
