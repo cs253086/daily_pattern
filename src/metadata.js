@@ -111,6 +111,7 @@ const ENGINE_SUBJECTS = {
   brickbond: 'Brick Bond Wall',
   mudcrack: 'Mud Crack Network',
   hypnospiral: 'Hypnotic Spiral Zoom',
+  scrollvines: 'Scroll Vine Ornaments',
   voderberg: 'Voderberg Spiral',
   voronoimosaic: 'Voronoi Mosaic',
   widmanstatten: 'Crystal Lattice Bands',
