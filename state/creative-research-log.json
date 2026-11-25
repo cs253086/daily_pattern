@@ -1774,5 +1774,16 @@
     "seedsVerified": "1-11 (seeds 1-9 and 11 passed; seed 10 failed compositionDrift); seeds 12-15 and 12345 not reached",
     "nearestNeighbour": null,
     "nearestDistance": null
+  },
+  {
+    "date": "2026-11-25",
+    "inspirationSource": "Not researched: today slot occupied by one-day engine override (state/engine-override.json, commits 9d93e54 and 3e3186d, scroll-vine engine engines/manual/scrollvines.html).",
+    "idea": "None built today. Slot already filled by the scroll-vine override.",
+    "engineName": null,
+    "outcome": "skipped",
+    "reason": "Today slot is occupied by the one-day engine override set on origin/main (scrollvines). Per the daily routine, no second engine was built and the random-inspiration and popular-format steps were not run.",
+    "seedsVerified": "n/a",
+    "nearestNeighbour": null,
+    "nearestDistance": null
   }
 ]
