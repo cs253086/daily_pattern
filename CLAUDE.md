@@ -9351,6 +9351,65 @@ pass above 0.60.
 
 `ENGINE_SUBJECTS`: `harmonograph: 'Harmonograph Trails'` in `src/metadata.js`.
 
+## Crystal diffraction spots (`ewaldspots.html`) — 2026-11-26
+
+Daily creative-research routine. Category was "random natural structure /
+physical phenomenon" (not used in the last few firings). An open WebSearch
+for crystal structure surfaced X-ray and electron diffraction: a beam hits a
+crystal and only the reciprocal-lattice points lying on the Ewald sphere (in
+2D, the circle through the origin with radius equal to the beam wavenumber)
+scatter. The spot intensities follow the squared structure factor of the
+basis, so some reflections are extinct. Sources (search snippets, not
+opened): https://en.wikipedia.org/wiki/Ewald_sphere (blocked in this sandbox),
+https://en.wikipedia.org/wiki/Laue_conditions,
+https://lampz.tugraz.at/~hadley/ss1/crystaldiffraction/ewald/ewald.php.
+
+**What it is**: three independent crystal grains, each a hexagonal or square
+reciprocal lattice with a two-atom basis (intensity |f1 + f2 e^{2 pi i G.r}|^2,
+with weak reflections dropped as near-extinct). A shared beam fixes one Ewald
+ring per grain. Each grain rotates at its own guaranteed-minimum-magnitude
+rate, random sign. Per frame, each grain lights its N = 30 spots nearest the
+ring. Spot colour is set by the reciprocal shell (|G|, rotation-invariant),
+and spot size is set by the spot's own intensity, so the lit area does not
+depend on the rotation angle. The engine is stateless, computing each frame
+from the frame time, so nothing accumulates and no whiteout is possible.
+
+**Not separately verified offline**: the diffraction geometry (ring through the
+origin, lit spots lying on it) and the intensity formula were checked only by
+rendering and by the gates below, not by a standalone script.
+
+**Bugs and iterations, found by rendering and by the gates**: the first draft
+(grains at 0.47 of the cell, 22 spots each) read as sparse, with too much black
+between grains. Enlarging the grains to 0.50 of the cell and raising the lit
+count to 30 made the frames read as dense, crisp, saturated hexagon clusters.
+The ring is drawn as a thin bright arc clipped to each grain.
+
+**Verified**: `validateEngine()` 16/16 on seeds 1-15 plus the CLI default
+12345. avgSat 58.1-72.4 (vs 22), peakNearWhiteFrac 0-0.0013, projectedRise
+-2.9 to +7.3 (vs 50), compositionDrift 0.0158-0.0506 (vs 0.015; seed 5 is the
+thinnest at 0.0158), unitMotionNonRigidFrac 0.978-1.0 (vs 0.40), fastMotion
+15.9-23.4 against floors of 5.4-7.1, avgMsPerFrame about 14-18 ms. Frames were
+rendered and looked at at 25/50/75/95 percent of the 43.5 s cycle (seeds 1 and
+12345): vivid saturated hexagon spots on black, the Ewald rings legible, and
+the three grains reorganising independently between checkpoints.
+
+**Novelty gate**: all 108 engines in `engines/manual/` fingerprinted fresh
+alongside the candidate (seeds 1 and 7, frames 200/600/1000; the committed
+cache was not updated). Nearest neighbour is
+`auto-2026-08-30-scenic-view-of-gardens` at distance **0.637** (next
+`pendulumwave` 0.736, `hilbertweave` 0.744). A pass above the 0.60 threshold,
+but a thin margin, so the write-up records it as such.
+
+**Popular-format research (same day, CLAUDE.md 2026-11-09 requirement)**:
+WebSearch surfaced loop channels and listings (Loop Vision,
+https://www.youtube.com/channel/UC_8Prn-66YJSeJuY662m-kQ; Void Geometry,
+https://www.youtube.com/watch?v=C5DpXNZZFBg; Zen Visual Loops,
+https://www.youtube.com/playlist?list=PLONUbsAnqwtoRYdHacaofV7ckHiIHRd8D).
+The formats are the existing families (mandala and kaleidoscope loops,
+concentric-ring and tunnel loops), all covered by the pool. No view counts
+were available, so no uncovered popular format was verified, and no
+popular-format engine was built.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

@@ -106,6 +106,7 @@ const ENGINE_SUBJECTS = {
   mobius: 'Mobius Stripe Band',
   timestables: 'Times Table Chord Circles',
   harmonograph: 'Harmonograph Trails',
+  ewaldspots: 'Crystal Diffraction Spots',
   spiralterrace: 'Crystal Spiral Terraces',
   seigaiha: 'Seigaiha Wave Scales',
   brickbond: 'Brick Bond Wall',

@@ -1785,5 +1785,16 @@
     "seedsVerified": "n/a",
     "nearestNeighbour": null,
     "nearestDistance": null
+  },
+  {
+    "date": "2026-11-26",
+    "inspirationSource": "Random web inspiration (WebSearch, 2026-11-26), category: random natural structure / physical phenomenon. X-ray and electron diffraction from crystals: a beam scatters only from reciprocal-lattice points lying on the Ewald sphere (a circle through the origin in 2D), and spot intensity follows the squared structure factor of the basis, so some reflections are extinct. Sources (search snippets): https://en.wikipedia.org/wiki/Ewald_sphere (blocked here), https://lampz.tugraz.at/~hadley/ss1/crystaldiffraction/ewald/ewald.php. Popular-format research (WebSearch, same day): Loop Vision https://www.youtube.com/channel/UC_8Prn-66YJSeJuY662m-kQ, Void Geometry https://www.youtube.com/watch?v=C5DpXNZZFBg, Zen Visual Loops https://www.youtube.com/playlist?list=PLONUbsAnqwtoRYdHacaofV7ckHiIHRd8D. Formats were mandala/kaleidoscope and tunnel loops, all already covered.",
+    "idea": "Three independent crystal grains, each a hexagonal or square reciprocal lattice with a two-atom basis (intensity from the structure factor, near-extinct reflections dropped). A shared beam gives each grain an Ewald ring through its origin. Each grain rotates at its own guaranteed-minimum rate and lights its 30 spots nearest the ring, coloured by reciprocal shell and sized by intensity, so lit area does not swing with rotation. Stateless per frame.",
+    "engineName": "ewaldspots",
+    "outcome": "shipped",
+    "reason": "Passed validateEngine on seeds 1-15 plus 12345 (all PASS; thinnest compositionDrift 0.0158 at seed 5, thinnest projectedRise margin well inside 50) and the novelty gate at 0.637 vs auto-2026-08-30-scenic-view-of-gardens (above 0.60, a thin margin, not iterated further). Frames looked at at 25/50/75/95 percent of the cycle.",
+    "seedsVerified": "1-15 and 12345 (16 seeds, all pass)",
+    "nearestNeighbour": "auto-2026-08-30-scenic-view-of-gardens",
+    "nearestDistance": 0.637
   }
 ]
