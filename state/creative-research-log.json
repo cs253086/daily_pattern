@@ -1796,5 +1796,16 @@
     "seedsVerified": "1-15 and 12345 (16 seeds, all pass)",
     "nearestNeighbour": "auto-2026-08-30-scenic-view-of-gardens",
     "nearestDistance": 0.637
+  },
+  {
+    "date": "2026-11-27",
+    "inspirationSource": "Random web inspiration (WebSearch, 2026-11-27): Saffman-Taylor viscous fingering in Hele-Shaw cells (search snippets: https://arxiv.org/pdf/2006.13359, https://arxiv.org/pdf/cond-mat/9708037, https://www.semanticscholar.org/paper/Viscous-fingering-in-Hele-Shaw-cells-Saffman/c28181f34c8671f00f7896d0581b10765ddb345a). Category: physical phenomenon, picked as the least recently used category per the log tally. Popular-format research (WebSearch, same day): https://www.youtube.com/@Patterns-That-Relax, https://fluxnote.io/blog/satisfying-videos-youtube-channel-guide-2026-start-and-monetize, https://www.youtube.com/channel/UCQAEmU4bInQrCN88ua03h_g.",
+    "idea": "Saffman-Taylor fingers: a less viscous fluid pushing a more viscous one between two plates forms branching tip-splitting fingers. Candidate engine: a stateless finger-train rendering of the interface.",
+    "engineName": null,
+    "outcome": "skipped",
+    "reason": "Pre-build screen: viscous fingering is a branching interface on black, the same composition family as frostgrowth.html (DLA) and dendrite.html, which the colour-blind novelty descriptor would almost certainly place as nearest neighbours below the 0.60 gate. The alternative construction (a steady finger train) reads as stripes/bands, which collides with stripweave/taniko/mudcrack. No structurally distinct geometric principle was found in this search. Popular-format research found only loop families (symmetry loops, calming patterns) that the pool already covers (tunnel, hypnospiral, kaleidoscope, mandala), with no verifiable new format, so no popular-format engine was built. Skipped rather than shipping a near-duplicate.",
+    "seedsVerified": null,
+    "nearestNeighbour": null,
+    "nearestDistance": null
   }
 ]
