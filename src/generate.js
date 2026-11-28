@@ -262,10 +262,35 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // waits of 2s, 6s, 18s, 54s, 120s (~3.5 min total) ride out a typical outage.
 const backoffMs = (attempt) => Math.min(2000 * 3 ** (attempt - 1), 120000);
 
-async function callGemini({ apiKey, model, prompt, maxAttempts = 6 }) {
+// Today's photograph, sent to Gemini as an inline image part so the model
+// derives the engine's shapes from the picture itself (not only from its
+// title/description text). Non-fatal: any failure returns null and the
+// request goes out text-only, exactly as before this change.
+const IMAGE_MAX_BYTES = 4 * 1024 * 1024;
+export async function fetchImagePart(imageUrl) {
+  if (!imageUrl) return null;
+  try {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 20000);
+    let res;
+    try { res = await fetch(imageUrl, { signal: ctl.signal }); } finally { clearTimeout(timer); }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const mimeType = (res.headers.get('content-type') || '').split(';')[0].trim();
+    if (!/^image\/(jpeg|png|webp)$/.test(mimeType)) throw new Error(`unsupported type "${mimeType}"`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > IMAGE_MAX_BYTES) throw new Error(`image is ${buf.length} bytes (limit ${IMAGE_MAX_BYTES})`);
+    console.log(`[generate] attaching today's photo to the prompt (${mimeType}, ${buf.length} bytes)`);
+    return { inlineData: { mimeType, data: buf.toString('base64') } };
+  } catch (e) {
+    console.warn(`[generate] photo not attached (${e.message}); prompt is text-only`);
+    return null;
+  }
+}
+
+async function callGemini({ apiKey, model, prompt, imagePart = null, maxAttempts = 6 }) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const body = {
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    contents: [{ role: 'user', parts: imagePart ? [imagePart, { text: prompt }] : [{ text: prompt }] }],
     generationConfig: {
       temperature: 1.0,
       topP: 0.95,
@@ -355,7 +380,14 @@ export async function generateEngine(opts = {}) {
   // chooseEngine() always does) naturally gets the identical creative
   // direction back, with no stateful cursor to accidentally advance twice
   // on a repair.
-  const theme = imageThemeHint(opts.imageInfo);
+  const imagePart = await fetchImagePart(opts.imageInfo && opts.imageInfo.imageUrl);
+  let theme = imageThemeHint(opts.imageInfo);
+  if (imagePart) {
+    theme = {
+      ...theme,
+      text: `${theme.text} The attached image is today's photograph. Derive this engine's basic shapes, layout and rhythm from what you actually see in it (its dominant forms, its light and dark regions, its symmetry and repetition), translated into abstract geometry drawn on canvas. The photograph itself must not be depicted literally.`,
+    };
+  }
   // Dimension is also normally a pure function of seed (wantWebGL3D), but
   // chooseEngine() (src/index.js) can override it to false on a repair
   // call specifically -- see the 2026-09-01 fix below for why.
@@ -368,7 +400,7 @@ export async function generateEngine(opts = {}) {
     : buildPrompt({ seed, date, themeHint: theme.text, wantWebGL });
   console.log(`[generate] model=${model} date=${date} theme="${theme.label}" dimension=${wantWebGL ? '3D' : '2D'}${opts.repair ? ' (repair)' : ''}`);
 
-  const raw = await callGemini({ apiKey, model, prompt });
+  const raw = await callGemini({ apiKey, model, prompt, imagePart });
   const html = extractHtml(raw);
   console.log(`[generate] response: ${raw.length} chars -> HTML ${html.length} chars`);
 
