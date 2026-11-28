@@ -111,6 +111,7 @@ const ENGINE_SUBJECTS = {
   seigaiha: 'Seigaiha Wave Scales',
   brickbond: 'Brick Bond Wall',
   mudcrack: 'Mud Crack Network',
+  hitomezashi: 'Hitomezashi Stitch Field',
   hypnospiral: 'Hypnotic Spiral Zoom',
   scrollvines: 'Scroll Vine Ornaments',
   voderberg: 'Voderberg Spiral',

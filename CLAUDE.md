@@ -9410,6 +9410,65 @@ concentric-ring and tunnel loops), all covered by the pool. No view counts
 were available, so no uncovered popular format was verified, and no
 popular-format engine was built.
 
+## Hitomezashi stitch field (`hitomezashi.html`) — 2026-11-28
+
+Daily creative-research routine. Category was "traditional textile/tiling/
+ornament tradition from a randomly chosen culture" (least recent use). An open
+WebSearch surfaced **hitomezashi**, the sashiko stitch rule: each row and each
+column gets one binary choice, and the stitches on every line alternate, so the
+whole design is fixed by two bit strings. Defant & Kravitz (arXiv 2201.03461)
+prove the parity structure and that the regions it cuts can be two-coloured so
+neighbours differ; Reimann (Bridges 2023) connects the designs to Truchet
+tiling. Sources (search snippets): https://arxiv.org/pdf/2201.03461,
+https://archive.bridgesmathart.org/2023/bridges2023-457.pdf,
+https://dev.to/stepinto/sashiko-a-stone-screen-and-tartan-each-made-from-one-simple-rule-d72.
+Popular-format research the same day found only ambient-loop roundups
+(gridfiti, channelsurfer, Ambient Screen Savers), whose formats the pool
+already covers, so no popular-format engine was built.
+
+**What it is**: a 16x9 lattice of vertices, with stitch edges set by the two
+bit strings (horizontal edge (i,j) present when (i + row bit) is even, vertical
+edge (i,j) when (j + column bit) is even). A breadth-first walk flips the colour
+across every stitch and keeps it across every open edge. The result is a
+two-tone region map, computed once per video. The topology never changes.
+Motion is geometric: the vertices move under two plane waves with integer
+period counts across the lattice, so the displacement summed over all vertices
+is exactly zero at every instant. The stitch edges stay straight between their
+moving endpoints.
+
+**Two composition rounds, both measured.**
+1. Filled two-tone regions with black stitch outlines: **0.460** against
+   `mudcrack.html`. This is a filled partition with black gutters, the same
+   archetype as mudcrack (the colour-blind descriptor cannot see the
+   rectilinear versus polygonal difference), so the design was changed.
+2. Coloured stitch threads on black (0.18 cell wide, each thread coloured by its
+   bordering region's tone). Measured **0.636** against `tessellation.html`
+   (next `mudcrack` 0.722), a pass, though not a wide margin.
+
+**Bugs and iterations, found only by running and looking:**
+- A first render of round 2 at 0.13-cell threads looked sparse, with much of the
+  frame black. Widening the threads to 0.18 cell kept the look clean. A glow
+  underlay (a wide faint stroke under each thread) was tried and rejected: at
+  this scale it read as dark offset shadows, not light.
+- The round-2 build failed with a silent `READY` timeout because the stitch
+  list was built before its `const` declaration (a temporal-dead-zone error
+  that only shows up in the page console). Fixed by moving the declaration up.
+
+**Verified**: `validateEngine()` **16/16** across seeds 1-15 plus 12345, all PASS.
+Margins: `avgSat` 79.9-85.8 (vs 22), `peakNearWhiteFrac` 0, `projectedRise` -3.3
+to +6.7 (vs 50), `compositionDrift` 0.028-0.040 (vs 0.015), `unitMotionNonRigidFrac`
+0.984-1.0 (vs 0.40), `fastMotion` 40-52 against floors of 5.4-6.6, `avgMsPerFrame`
+1.3-4.3. Frames were rendered and looked at at seeds 1, 3 and 7 across the cycle
+(25/50/75/95/105%), in both rounds.
+
+**Novelty gate** (final file): measured against all 110 engines in
+`engines/manual/` (whole pool fingerprinted fresh; refreshed cache not committed).
+Nearest neighbour is `tessellation` at distance **0.636** (next `mudcrack` 0.722,
+`vegasphere` 0.954). A pass above the 0.60 threshold, but the thinnest margin in
+recent entries, so a future redesign should keep it in view.
+
+`ENGINE_SUBJECTS`: `hitomezashi: 'Hitomezashi Stitch Field'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

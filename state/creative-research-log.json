@@ -1807,5 +1807,16 @@
     "seedsVerified": null,
     "nearestNeighbour": null,
     "nearestDistance": null
+  },
+  {
+    "date": "2026-11-28",
+    "inspirationSource": "Random web inspiration (WebSearch, 2026-11-28), category: traditional textile/tiling/ornament tradition (least recently used). Hitomezashi, the Japanese sashiko stitch rule: each row and column gets one binary choice, and stitches alternate along every line. Sources (search snippets): arXiv 2201.03461 (Defant & Kravitz, Loops and Regions in Hitomezashi Patterns), Bridges 2023 (Reimann, Connections between Hitomezashi Patterns and Truchet Tiling), https://dev.to/stepinto/sashiko-a-stone-screen-and-tartan-each-made-from-one-simple-rule-d72. Popular-format research (WebSearch, same day): gridfiti and channelsurfer screensaver roundups, Ambient Screen Savers channel (https://www.youtube.com/@Ambient.ScreenSavers); no ranked geometric or pattern channels found, and the formats named (long ambient loops, zen landscapes, tunnels) are already covered by the pool, so no popular-format engine was built.",
+    "idea": "Hitomezashi stitch field: a parity-defined two-colour region map on a lattice, drawn as coloured stitch threads on black. Plane-wave vertex displacement (integer periods, zero-sum) makes the threads move while the topology stays fixed.",
+    "engineName": "hitomezashi",
+    "outcome": "shipped",
+    "reason": "Shipped after two composition rounds. Round 1 (filled two-tone regions with black stitch outlines) measured 0.460 against mudcrack, below the 0.60 gate, since it is a filled partition with black gutters. Round 2 (coloured threads on black, 0.18-cell width) measured 0.636 against tessellation after the final edits. Passes the gate, thinner than typical margins.",
+    "seedsVerified": "validateEngine 16/16 on seeds 1-15 and 12345; frames inspected at seeds 1, 3, 7 across the cycle",
+    "nearestNeighbour": "tessellation",
+    "nearestDistance": 0.636
   }
 ]
