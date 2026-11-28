@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="pattern-name" content="Vortex Spire Grid">
+    <style>
+        body { margin: 0; overflow: hidden; background-color: black; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        // --- Utility Functions and Constants ---
+        const urlParams = new URLSearchParams(window.location.search);
+        const getParam = (name, defaultValue, type = String) => {
+            const value = urlParams.get(name);
+            if (value === null) return defaultValue;
+            if (type === Number) return parseFloat(value);
+            return value;
+        };
+
+        const width = getParam('width', 1920, Number);
+        const height = getParam('height', 1080, Number);
+        const seed = getParam('seed', 20261127, Number);
+        const fps = getParam('fps', 24, Number);
+        const duration = getParam('duration', 3600, Number);
+        const speed = getParam('speed', 1, Number);
+        const density = getParam('density', 1, Number);
+        const cycleSec = getParam('cycleSec', 90, Number);
+
+        window.TOTAL_FRAMES = Math.round(duration * fps);
+        window.currentFrame = 0;
+        window.READY = false;
+
+        let randSeed = seed;
+        function mulberry32() {
+            let t = randSeed += 0x6D2B79F5;
+            t = Math.imul(t ^ t >>> 15, t | 1);
+            t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+            return ((t ^ t >>> 14) >>> 0) / 4294967296;
+        }
+
+        function rand(min, max) {
+            return min + (max - min) * mulberry32();
+        }
+
+        function randInt(min, max) {
+            return Math.floor(rand(min, max + 1));
+        }
+
+        function randSign() {
+            return mulberry32() < 0.5 ? -1 : 1;
+        }
+
+        const canvas = document.getElementById('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true });
+
+        if (!gl) {
+            throw new Error('WebGL not supported');
+        }
+
+        const mat4 = {
+            create: () => new Float32Array(16).fill(0).map((_, i) => i % 5 === 0 ? 1 : 0),
+            identity: (out) => {
+                for (let i = 0; i < 16; i++) out[i] = i % 5 === 0 ? 1 : 0;
+                return out;
+            },
+            multiply: (out, a, b) => {
+                const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+                const a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+                const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+                const a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+                let b0 = b[0], b1 = b[1], b2 = b[2], b3 = b[3];
+                out[0] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+                out[1] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+                out[2] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+                out[3] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+                b0 = b[4]; b1 = b[5]; b2 = b[6]; b3 = b[7];
+                out[4] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+                out[5] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+                out[6] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+                out[7] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+                b0 = b[8]; b1 = b[9]; b2 = b[10]; b3 = b[11];
+                out[8] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+                out[9] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+                out[10] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+                out[11] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+                b0 = b[12]; b1 = b[13]; b2 = b[14]; b3 = b[15];
+                out[12] = b0 * a00 + b1 * a10 + b2 * a20 + b3 * a30;
+                out[13] = b0 * a01 + b1 * a11 + b2 * a21 + b3 * a31;
+                out[14] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+                out[15] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+                return out;
+            },
+            perspective: (out, fovy, aspect, near, far) => {
+                const f = 1.0 / Math.tan(fovy / 2);
+                out[0] = f / aspect;
+                out[1] = 0;
+                out[2] = 0;
+                out[3] = 0;
+                out[4] = 0;
+                out[5] = f;
+                out[6] = 0;
+                out[7] = 0;
+                out[8] = 0;
+                out[9] = 0;
+                out[10] = (near + far) / (near - far);
+                out[11] = -1;
+                out[12] = 0;
+                out[13] = 0;
+                out[14] = (2 * far * near) / (near - far);
+                out[15] = 0;
+                return out;
+            },
+            translate: (out, a, v) => {
+                const x = v[0], y = v[1], z = v[2];
+                let a00, a01, a02, a03;
+                let a10, a11, a12, a13;
+                let a20, a21, a22, a23;
+                if (a === out) {
+                    out[12] = a[0] * x + a[4] * y + a[8] * z + a[12];
+                    out[13] = a[1] * x + a[5] * y + a[9] * z + a[13];
+                    out[14] = a[2] * x + a[6] * y + a[10] * z + a[14];
+                    out[15] = a[3] * x + a[7] * y + a[11] * z + a[15];
+                } else {
+                    a00 = a[0]; a01 = a[1]; a02 = a[2]; a03 = a[3];
+                    a10 = a[4]; a11 = a[5]; a12 = a[6]; a13 = a[7];
+                    a20 = a[8]; a21 = a[9]; a22 = a[10]; a23 = a[11];
+                    out[0] = a00; out[1] = a01; out[2] = a02; out[3] = a03;
+                    out[4] = a10; out[5] = a11; out[6] = a12; out[7] = a13;
+                    out[8] = a20; out[9] = a21; out[10] = a22; out[11] = a23;
+                    out[12] = a00 * x + a10 * y + a20 * z + a[12];
+                    out[13] = a01 * x + a11 * y + a21 * z + a[13];
+                    out[14] = a02 * x + a12 * y + a22 * z + a[14];
+                    out[15] = a03 * x + a13 * y + a23 * z + a[15];
+                }
+                return out;
+            },
+            rotateX: (out, a, rad) => {
+                let s = Math.sin(rad);
+                let c = Math.cos(rad);
+                let a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+                let a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+                if (a !== out) { // If the source and destination differ, copy the unchanged rows
+                    out[0] = a[0]; out[1] = a[1]; out[2] = a[2]; out[3] = a[3];
+                    out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+                }
+                // Perform axis-specific matrix multiplication
+                out[4] = a10 * c + a20 * s;
+                out[5] = a11 * c + a21 * s;
+                out[6] = a12 * c + a22 * s;
+                out[7] = a13 * c + a23 * s;
+                out[8] = a20 * c - a10 * s;
+                out[9] = a21 * c - a11 * s;
+                out[10] = a22 * c - a12 * s;
+                out[11] = a23 * c - a13 * s;
+                return out;
+            },
+            rotateY: (out, a, rad) => {
+                let s = Math.sin(rad);
+                let c = Math.cos(rad);
+                let a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+                let a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+                if (a !== out) { // If the source and destination differ, copy the unchanged rows
+                    out[4] = a[4]; out[5] = a[5]; out[6] = a[6]; out[7] = a[7];
+                    out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+                }
+                // Perform axis-specific matrix multiplication
+                out[0] = a00 * c - a20 * s;
+                out[1] = a01 * c - a21 * s;
+                out[2] = a02 * c - a22 * s;
+                out[3] = a03 * c - a23 * s;
+                out[8] = a00 * s + a20 * c;
+                out[9] = a01 * s + a21 * c;
+                out[10] = a02 * s + a22 * c;
+                out[11] = a03 * s + a23 * c;
+                return out;
+            },
+            rotateZ: (out, a, rad) => {
+                let s = Math.sin(rad);
+                let c = Math.cos(rad);
+                let a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+                let a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+                if (a !== out) { // If the source and destination differ, copy the unchanged rows
+                    out[8] = a[8]; out[9] = a[9]; out[10] = a[10]; out[11] = a[11];
+                    out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+                }
+                // Perform axis-specific matrix multiplication
+                out[0] = a00 * c + a10 * s;
+                out[1] = a01 * c + a11 * s;
+                out[2] = a02 * c + a12 * s;
+                out[3] = a03 * c + a13 * s;
+                out[4] = a10 * c - a00 * s;
+                out[5] = a11 * c - a01 * s;
+                out[6] = a12 * c - a02 * s;
+                out[7] = a13 * c - a03 * s;
+                return out;
+            },
+            lookAt: (out, eye, center, up) => {
+                let x0, x1, x2, y0, y1, y2, z0, z1, z2, len;
+                let eyex = eye[0], eyey = eye[1], eyez = eye[2];
+                let upx = up[0], upy = up[1], upz = up[2];
+                let centerx = center[0], centery = center[1], centerz = center[2];
+
+                if (Math.abs(eyex - centerx) < 0.000001 && Math.abs(eyey - centery) < 0.000001 && Math.abs(eyez - centerz) < 0.000001) {
+                    return mat4.identity(out);
+                }
+
+                z0 = eyex - centerx;
+                z1 = eyey - centery;
+                z2 = eyez - centerz;
+
+                len = 1 / Math.sqrt(z0 * z0 + z1 * z1 + z2 * z2);
+                z0 *= len;
+                z1 *= len;
+                z2 *= len;
+
+                x0 = upy * z2 - upz * z1;
+                x1 = upz * z0 - upx * z2;
+                x2 = upx * z1 - upy * z0;
+
+                len = Math.sqrt(x0 * x0 + x1 * x1 + x2 * x2);
+                if (len === 0) {
+                    x0 = 0; x1 = 0; x2 = 0;
+                } else {
+                    len = 1 / len;
+                    x0 *= len;
+                    x1 *= len;
+                    x2 *= len;
+                }
+
+                y0 = z1 * x2 - z2 * x1;
+                y1 = z2 * x0 - z0 * x2;
+                y2 = z0 * x1 - z1 * x0;
+
+                len = Math.sqrt(y0 * y0 + y1 * y1 + y2 * y2);
+                if (len === 0) {
+                    y0 = 0; y1 = 0; y2 = 0;
+                } else {
+                    len = 1 / len;
+                    y0 *= len;
+                    y1 *= len;
+                    y2 *= len;
+                }
+
+                out[0] = x0;
+                out[1] = y0;
+                out[2] = z0;
+                out[3] = 0;
+                out[4] = x1;
+                out[5] = y1;
+                out[6] = z1;
+                out[7] = 0;
+                out[8] = x2;
+                out[9] = y2;
+                out[10] = z2;
+                out[11] = 0;
+                out[12] = -(x0 * eyex + x1 * eyey + x2 * eyez);
+                out[13] = -(y0 * eyex + y1 * eyey + y2 * eyez);
+                out[14] = -(z0 * eyex + z1 * eyey + z2 * eyez);
+                out[15] = 1;
+
+                return out;
+            }
+        };
+
+        function hsvToRgb(h, s, v) {
+            h = h % 360;
+            if (h < 0) h += 360;
+
+            const c = v * s;
+            const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+            const m = v - c;
+            let r = 0, g = 0, b = 0;
+
+            if (0 <= h && h < 60) {
+                r = c; g = x; b = 0;
+            } else if (60 <= h && h < 120) {
+                r = x; g = c; b = 0;
+            } else if (120 <= h && h < 180) {
+                r = 0; g = c; b = x;
+            } else if (180 <= h && h < 240) {
+                r = 0; g = x; b = c;
+            } else if (240 <= h && h < 300) {
+                r = x; g = 0; b = c;
+            } else if (300 <= h && h < 360) {
+                r = c; g = 0; b = x;
+            }
+
+            r = Math.round((r + m) * 255);
+            g = Math.round((g + m) * 255);
+            b = Math.round((b + m) * 255);
+
+            return [r, g, b];
+        }
+
+        function hslToRgb(h, s, l) {
+            h = h % 360;
+            if (h < 0) h += 360;
+
+            let c = (1 - Math.abs(2 * l - 1)) * s;
+            let x = c * (1 - Math.abs((h / 60) % 2 - 1));
+            let m = l - c / 2;
+            let r = 0, g = 0, b = 0;
+
+            if (0 <= h && h < 60) {
+                r = c; g = x; b = 0;
+            } else if (60 <= h && h < 120) {
+                r = x; g = c; b = 0;
+            } else if (120 <= h && h < 180) {
+                r = 0; g = c; b = x;
+            } else if (180 <= h && h < 240) {
+                r = 0; g = x; b = c;
+            } else if (240 <= h && h < 300) {
+                r = x; g = 0; b = c;
+            } else if (300 <= h && h < 360) {
+                r = c; g = 0; b = x;
+            }
+
+            r = Math.round((r + m) * 255);
+            g = Math.round((g + m) * 255);
+            b = Math.round((b + m) * 255);
+
+            return [r, g, b];
+        }
+
+        // --- WebGL Shaders ---
+        const vsSource = `
+            attribute vec4 aVertexPosition;
+            attribute vec4 aVertexColor;
+            attribute vec3 aVertexNormal;
+
+            uniform mat4 uModelViewMatrix;
+            uniform mat4 uProjectionMatrix;
+            uniform mat4 uNormalMatrix;
+            uniform vec3 uLightDirection;
+            uniform vec3 uAmbientColor;
+            uniform vec3 uDiffuseColor;
+            uniform float uTime;
+            uniform float uOffsetFactor; // For vertex displacement based on time
+
+            varying lowp vec4 vColor;
+            varying highp vec3 vNormal;
+            varying highp vec3 vLightDirection;
+
+            void main(void) {
+                vec3 displacedPosition = aVertexPosition.xyz;
+                // Simple vertex displacement effect along normal
+                // Use a different frequency for displacement to avoid static patterns
+                float displacement = sin(uTime * 1.5 + dot(displacedPosition, vec3(0.5, 0.7, 0.3)) * 2.0) * 0.1 * uOffsetFactor;
+                displacedPosition += aVertexNormal * displacement;
+
+
+                gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(displacedPosition, 1.0);
+                vNormal = (uNormalMatrix * vec4(aVertexNormal, 0.0)).xyz;
+                vLightDirection = normalize(uLightDirection); // Light direction in eye space
+                vColor = aVertexColor;
+            }
+        `;
+
+        const fsSource = `
+            precision mediump float;
+            varying lowp vec4 vColor;
+            varying highp vec3 vNormal;
+            varying highp vec3 vLightDirection;
+
+            uniform vec3 uAmbientColor;
+            uniform vec3 uDiffuseColor;
+            uniform float uAlpha;
+            uniform bool uIsGlow;
+
+            void main(void) {
+                vec3 ambientLight = uAmbientColor;
+                vec3 lightDirection = normalize(vLightDirection);
+                vec3 normal = normalize(vNormal);
+                
+                // Diffuse component
+                float diffuseFactor = max(dot(normal, lightDirection), 0.0);
+                vec3 diffuseLight = uDiffuseColor * diffuseFactor;
+
+                vec3 finalColor = vColor.rgb * (ambientLight + diffuseLight);
+
+                if (uIsGlow) {
+                    gl_FragColor = vec4(finalColor, uAlpha * vColor.a); // Use vColor.a for base alpha
+                } else {
+                    gl_FragColor = vec4(finalColor, uAlpha * vColor.a);
+                }
+            }
+        `;
+
+        // --- Global WebGL State ---
+        let shaderProgram = null;
+        let programInfo = null;
+        let projectionMatrix = mat4.create();
+        let viewMatrix = mat4.create();
+        let modelMatrix = mat4.create();
+        let normalMatrix = mat4.create();
+
+        let currentPalette = [];
+        let lightDirection = [0.0, 0.0, 1.0];
+
+        // Grid parameters
+        const gridX = Math.floor(rand(3, 5) * density);
+        const gridY = Math.floor(rand(3, 5) * density);
+        const gridZ = Math.floor(rand(2, 4) * density);
+        const cellSize = rand(1.0, 1.5);
+        const padding = rand(0.2, 0.5);
+
+        // Animation parameters
+        const globalRotationSpeedX = randSign() * rand(0.1, 0.3) * speed;
+        const globalRotationSpeedY = randSign() * rand(0.1, 0.3) * speed;
+        const globalRotationSpeedZ = randSign() * rand(0.1, 0.3) * speed;
+        
+        let moduleParams = [];
+        const numModules = gridX * gridY * gridZ;
+
+        // --- WebGL Initialization ---
+        function initGL(gl) {
+            const vs = gl.createShader(gl.VERTEX_SHADER);
+            if (!vs) throw new Error("Failed to create vertex shader");
+            gl.shaderSource(vs, vsSource);
+            gl.compileShader(vs);
+            if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+                throw new Error('Vertex Shader Error: ' + gl.getShaderInfoLog(vs));
+            }
+
+            const fs = gl.createShader(gl.FRAGMENT_SHADER);
+            if (!fs) throw new Error("Failed to create fragment shader");
+            gl.shaderSource(fs, fsSource);
+            gl.compileShader(fs);
+            if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+                throw new Error('Fragment Shader Error: ' + gl.getShaderInfoLog(fs));
+            }
+
+            shaderProgram = gl.createProgram();
+            if (!shaderProgram) throw new Error("Failed to create shader program");
+            gl.attachShader(shaderProgram, vs);
+            gl.attachShader(shaderProgram, fs);
+            gl.linkProgram(shaderProgram);
+
+            if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+                throw new Error('Shader Program Error: ' + gl.getProgramInfoLog(shaderProgram));
+            }
+
+            programInfo = {
+                program: shaderProgram,
+                attribLocations: {
+                    vertexPosition: gl.getAttribLocation(shaderProgram, 'aVertexPosition'),
+                    vertexColor: gl.getAttribLocation(shaderProgram, 'aVertexColor'),
+                    vertexNormal: gl.getAttribLocation(shaderProgram, 'aVertexNormal'),
+                },
+                uniformLocations: {
+                    projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
+                    modelViewMatrix: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
+                    normalMatrix: gl.getUniformLocation(shaderProgram, 'uNormalMatrix'),
+                    lightDirection: gl.getUniformLocation(shaderProgram, 'uLightDirection'),
+                    ambientColor: gl.getUniformLocation(shaderProgram, 'uAmbientColor'),
+                    diffuseColor: gl.getUniformLocation(shaderProgram, 'uDiffuseColor'),
+                    uTime: gl.getUniformLocation(shaderProgram, 'uTime'),
+                    uAlpha: gl.getUniformLocation(shaderProgram, 'uAlpha'),
+                    uIsGlow: gl.getUniformLocation(shaderProgram, 'uIsGlow'),
+                    uOffsetFactor: gl.getUniformLocation(shaderProgram, 'uOffsetFactor'),
+                },
+            };
+
+            gl.useProgram(shaderProgram);
+
+            // Configure GL for 3D
+            gl.clearColor(0.0, 0.0, 0.0, 1.0);
+            gl.enable(gl.DEPTH_TEST);
+            gl.depthFunc(gl.LEQUAL);
+            gl.enable(gl.CULL_FACE);
+            gl.cullFace(gl.BACK);
+
+            // Blending for glow
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // Additive blending
+        }
+
+        // --- Geometry Creation ---
+        function createCube() {
+            const positions = [
+                // Front face
+                -0.5, -0.5,  0.5,
+                 0.5, -0.5,  0.5,
+                 0.5,  0.5,  0.5,
+                -0.5,  0.5,  0.5,
+
+                // Back face
+                -0.5, -0.5, -0.5,
+                -0.5,  0.5, -0.5,
+                 0.5,  0.5, -0.5,
+                 0.5, -0.5, -0.5,
+
+                // Top face
+                -0.5,  0.5, -0.5,
+                -0.5,  0.5,  0.5,
+                 0.5,  0.5,  0.5,
+                 0.5,  0.5, -0.5,
+
+                // Bottom face
+                -0.5, -0.5, -0.5,
+                 0.5, -0.5, -0.5,
+                 0.5, -0.5,  0.5,
+                -0.5, -0.5,  0.5,
+
+                // Right face
+                 0.5, -0.5, -0.5,
+                 0.5,  0.5, -0.5,
+                 0.5,  0.5,  0.5,
+                 0.5, -0.5,  0.5,
+
+                // Left face
+                -0.5, -0.5, -0.5,
+                -0.5, -0.5,  0.5,
+                -0.5,  0.5,  0.5,
+                -0.5,  0.5, -0.5,
+            ];
+
+            const faceColors = [
+                [0.0, 0.0, 1.0, 1.0],    // Front face: blue
+                [1.0, 0.0, 0.0, 1.0],    // Back face: red
+                [0.0, 1.0, 0.0, 1.0],    // Top face: green
+                [1.0, 1.0, 0.0, 1.0],    // Bottom face: yellow
+                [1.0, 0.0, 1.0, 1.0],    // Right face: magenta
+                [0.0, 1.0, 1.0, 1.0],    // Left face: cyan
+            ];
+
+            let colors = [];
+            for (let j = 0; j < 6; j++) {
+                const c = faceColors[j];
+                colors = colors.concat(c, c, c, c);
+            }
+
+            const indices = [
+                0, 1, 2,    0, 2, 3,    // Front face
+                4, 5, 6,    4, 6, 7,    // Back face
+                8, 9, 10,   8, 10, 11,   // Top face
+                12, 13, 14, 12, 14, 15,  // Bottom face
+                16, 17, 18, 16, 18, 19,  // Right face
+                20, 21, 22, 20, 22, 23,  // Left face
+            ];
+
+            const normals = [
+                // Front
+                 0.0,  0.0,  1.0,  0.0,  0.0,  1.0,  0.0,  0.0,  1.0,  0.0,  0.0,  1.0,
+                // Back
+                 0.0,  0.0, -1.0,  0.0,  0.0, -1.0,  0.0,  0.0, -1.0,  0.0,  0.0, -1.0,
+                // Top
+                 0.0,  1.0,  0.0,  0.0,  1.0,  0.0,  0.0,  1.0,  0.0,  0.0,  1.0,  0.0,
+                // Bottom
+                 0.0, -1.0,  0.0,  0.0, -1.0,  0.0,  0.0, -1.0,  0.0,  0.0, -1.0,  0.0,
+                // Right
+                 1.0,  0.0,  0.0,  1.0,  0.0,  0.0,  1.0,  0.0,  0.0,  1.0,  0.0,  0.0,
+                // Left
+                -1.0,  0.0,  0.0, -1.0,  0.0,  0.0, -1.0,  0.0,  0.0, -1.0,  0.0,  0.0,
+            ];
+
+            const positionBuffer = gl.createBuffer();
+            if (!positionBuffer) throw new Error("Failed to create position buffer");
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+            const normalBuffer = gl.createBuffer();
+            if (!normalBuffer) throw new Error("Failed to create normal buffer");
+            gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normals), gl.STATIC_DRAW);
+
+            const indexBuffer = gl.createBuffer();
+            if (!indexBuffer) throw new Error("Failed to create index buffer");
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+
+            return {
+                position: positionBuffer,
+                normal: normalBuffer,
+                indices: indexBuffer,
+                vertexCount: indices.length,
+            };
+        }
+
+        function createPyramid() {
+             const positions = [
+                // Base (quad)
+                -0.5, -0.5, -0.5, // 0
+                 0.5, -0.5, -0.5, // 1
+                 0.5, -0.5,  0.5, // 2
+                -0.5, -0.5,  0.5, // 3
+                // Apex
+                 0.0,  0.5,  0.0  // 4
+            ];
+
+            const indices = [
+                // Base
+                0, 1, 2,
+                0, 2, 3,
+
+                // Sides
+                0, 1, 4,
+                1, 2, 4,
+                2, 3, 4,
+                3, 0, 4
+            ];
+
+            const normals = [
+                // Base normal (pointing down)
+                0.0, -1.0, 0.0, // 0
+                0.0, -1.0, 0.0, // 1
+                0.0, -1.0, 0.0, // 2
+                0.0, -1.0, 0.0, // 3
+                // Apex normal (not used directly, calculated per face)
+                0.0,  1.0, 0.0  // 4
+            ];
+
+            // Re-organize to get per-face normals for sides
+            const fullPositions = [];
+            const fullNormals = [];
+            const fullIndices = [];
+
+            // Base
+            fullPositions.push(-0.5, -0.5, -0.5,  0.5, -0.5, -0.5,  0.5, -0.5,  0.5); // Triangle 1
+            fullNormals.push(0.0, -1.0, 0.0,  0.0, -1.0, 0.0,  0.0, -1.0, 0.0);
+            fullPositions.push(-0.5, -0.5, -0.5,  0.5, -0.5,  0.5, -0.5, -0.5,  0.5); // Triangle 2
+            fullNormals.push(0.0, -1.0, 0.0,  0.0, -1.0, 0.0,  0.0, -1.0, 0.0);
+
+            // Front face (0,1,4)
+            fullPositions.push(positions[0], positions[1], positions[2], positions[3], positions[4], positions[5], positions[12], positions[13], positions[14]);
+            let n = calculateNormal([-0.5, -0.5, -0.5], [0.5, -0.5, -0.5], [0.0, 0.5, 0.0]);
+            fullNormals.push(...n, ...n, ...n);
+
+            // Right face (1,2,4)
+            fullPositions.push(positions[3], positions[4], positions[5], positions[6], positions[7], positions[8], positions[12], positions[13], positions[14]);
+            n = calculateNormal([0.5, -0.5, -0.5], [0.5, -0.5, 0.5], [0.0, 0.5, 0.0]);
+            fullNormals.push(...n, ...n, ...n);
+
+            // Back face (2,3,4)
+            fullPositions.push(positions[6], positions[7], positions[8], positions[9], positions[10], positions[11], positions[12], positions[13], positions[14]);
+            n = calculateNormal([0.5, -0.5, 0.5], [-0.5, -0.5, 0.5], [0.0, 0.5, 0.0]);
+            fullNormals.push(...n, ...n, ...n);
+
+            // Left face (3,0,4)
+            fullPositions.push(positions[9], positions[10], positions[11], positions[0], positions[1], positions[2], positions[12], positions[13], positions[14]);
+            n = calculateNormal([-0.5, -0.5, 0.5], [-0.5, -0.5, -0.5], [0.0, 0.5, 0.0]);
+            fullNormals.push(...n, ...n, ...n);
+
+            let currentIdx = 0;
+            const finalIndices = [];
+
+            // Base 1
+            fullPositions.push(-0.5, -0.5, -0.5); fullNormals.push(0.0, -1.0, 0.0); finalIndices.push(currentIdx++);
+            fullPositions.push(0.5, -0.5, -0.5); fullNormals.push(0.0, -1.0, 0.0); finalIndices.push(currentIdx++);
+            fullPositions.push(0.5, -0.5, 0.5); fullNormals.push(0.0, -1.0, 0.0); finalIndices.push(currentIdx++);
+
+            // Base 2
+            fullPositions.push(-0.5, -0.5, -0.5); fullNormals.push(0.0, -1.0, 0.0); finalIndices.push(currentIdx++);
+            fullPositions.push(0.5, -0.5, 0.5); fullNormals.push(0.0, -1.0, 0.0); finalIndices.push(currentIdx++);
+            fullPositions.push(-0.5, -0.5, 0.5); fullNormals.push(0.0, -1.0, 0.0); finalIndices.push(currentIdx++);
+
+            // Face 1 (front-right)
+            n = calculateNormal([0.5, -0.5, -0.5], [-0.5, -0.5, -0.5], [0.0, 0.5, 0.0]);
+            fullPositions.push(-0.5, -0.5, -0.5); fullNormals.push(...n); finalIndices.push(currentIdx++);
+            fullPositions.push(0.5, -0.5, -0.5); fullNormals.push(...n); finalIndices.push(currentIdx++);
+            fullPositions.push(0.0, 0.5, 0.0); fullNormals.push(...n); finalIndices.push(currentIdx++);
+
+            // Face 2 (back-right)
+            n = calculateNormal([0.5, -0.5, 0.5], [0.5, -0.5, -0.5], [0.0, 0.5, 0.0]);
+            fullPositions.push(0.5, -0.5, -0.5); fullNormals.push(...n); finalIndices.push(currentIdx++);
+            fullPositions.push(0.5, -0.5, 0.5); fullNormals.push(...n); finalIndices.push(currentIdx++);
+            fullPositions.push(0.0, 0.5, 0.0); fullNormals.push(...n); finalIndices.push(currentIdx++);
+
+            // Face 3 (back-left)
+            n = calculateNormal([-0.5, -0.5, 0.5], [0.5, -0.5, 0.5], [0.0, 0.5, 0.0]);
+            fullPositions.push(0.5, -0.5, 0.5); fullNormals.push(...n); finalIndices.push(currentIdx++);
+            fullPositions.push(-0.5, -0.5, 0.5); fullNormals.push(...n); finalIndices.push(currentIdx++);
+            fullPositions.push(0.0, 0.5, 0.0); fullNormals.push(...n); finalIndices.push(currentIdx++);
+
+            // Face 4 (front-left)
+            n = calculateNormal([-0.5, -0.5, -0.5], [-0.5, -0.5, 0.5], [0.0, 0.5, 0.0]);
+            fullPositions.push(-0.5, -0.5, 0.5); fullNormals.push(...n); finalIndices.push(currentIdx++);
+            fullPositions.push(-0.5, -0.5, -0.5); fullNormals.push(...n); finalIndices.push(currentIdx++);
+            fullPositions.push(0.0, 0.5, 0.0); fullNormals.push(...n); finalIndices.push(currentIdx++);
+
+
+            function calculateNormal(p1, p2, p3) {
+                const v1 = [p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]];
+                const v2 = [p3[0] - p1[0], p3[1] - p1[1], p3[2] - p1[2]];
+                const normal = [
+                    v1[1] * v2[2] - v1[2] * v2[1],
+                    v1[2] * v2[0] - v1[0] * v2[2],
+                    v1[0] * v2[1] - v1[1] * v2[0]
+                ];
+                const len = Math.sqrt(normal[0]*normal[0] + normal[1]*normal[1] + normal[2]*normal[2]);
+                return len === 0 ? [0,0,0] : [normal[0]/len, normal[1]/len, normal[2]/len];
+            }
+
+
+            const positionBuffer = gl.createBuffer();
+            if (!positionBuffer) throw new Error("Failed to create position buffer");
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(fullPositions), gl.STATIC_DRAW);
+
+            const normalBuffer = gl.createBuffer();
+            if (!normalBuffer) throw new Error("Failed to create normal buffer");
+            gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(fullNormals), gl.STATIC_DRAW);
+
+            const indexBuffer = gl.createBuffer();
+            if (!indexBuffer) throw new Error("Failed to create index buffer");
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(finalIndices), gl.STATIC_DRAW);
+
+
+            return {
+                position: positionBuffer,
+                normal: normalBuffer,
+                indices: indexBuffer,
+                vertexCount: finalIndices.length,
+            };
+        }
+
+        let cubeGeometry = null;
+        let pyramidGeometry = null;
+
+        // --- Per-frame Rendering Logic ---
+        function drawScene(deltaTime, time) {
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            mat4.perspective(projectionMatrix, 45 * Math.PI / 180, gl.canvas.clientWidth / gl.canvas.clientHeight, 0.1, 100.0);
+
+            // Camera animation
+            const cameraRadius = 15 + Math.sin(time * 0.1 * speed) * 3;
+            const cameraX = cameraRadius * Math.sin(time * 0.05 * speed);
+            const cameraZ = cameraRadius * Math.cos(time * 0.05 * speed);
+            const cameraY = 5 + Math.sin(time * 0.08 * speed) * 2;
+            mat4.lookAt(viewMatrix, [cameraX, cameraY, cameraZ], [0, 0, 0], [0, 1, 0]);
+
+            gl.useProgram(programInfo.program);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix);
+            gl.uniform3fv(programInfo.uniformLocations.lightDirection, lightDirection);
+            gl.uniform1f(programInfo.uniformLocations.uTime, time);
+
+
+            // Set light colors (these can also be animated)
+            const ambientHue = (currentPalette[0].h + Math.sin(time * 0.05 * speed) * 10) % 360;
+            const ambientSat = currentPalette[0].s;
+            const ambientLightness = Math.max(0.05, Math.min(0.2, (currentPalette[0].l * 0.5) + Math.sin(time * 0.1 * speed) * 0.1));
+            const [ar, ag, ab] = hslToRgb(ambientHue, ambientSat, ambientLightness);
+            gl.uniform3fv(programInfo.uniformLocations.ambientColor, [ar / 255.0, ag / 255.0, ab / 255.0]);
+
+            const diffuseHue = (currentPalette[1].h + Math.cos(time * 0.07 * speed) * 15) % 360;
+            const diffuseSat = currentPalette[1].s;
+            const diffuseLightness = Math.max(0.3, Math.min(0.7, (currentPalette[1].l * 0.8) + Math.cos(time * 0.12 * speed) * 0.1));
+            const [dr, dg, db] = hslToRgb(diffuseHue, diffuseSat, diffuseLightness);
+            gl.uniform3fv(programInfo.uniformLocations.diffuseColor, [dr / 255.0, dg / 255.0, db / 255.0]);
+
+
+            // Global rotation
+            mat4.identity(modelMatrix);
+            mat4.rotateX(modelMatrix, modelMatrix, time * globalRotationSpeedX);
+            mat4.rotateY(modelMatrix, modelMatrix, time * globalRotationSpeedY);
+            mat4.rotateZ(modelMatrix, modelMatrix, time * globalRotationSpeedZ);
+            
+            const totalGridSizeX = (gridX * cellSize + (gridX - 1) * padding);
+            const totalGridSizeY = (gridY * cellSize + (gridY - 1) * padding);
+            const totalGridSizeZ = (gridZ * cellSize + (gridZ - 1) * padding);
+
+            mat4.translate(modelMatrix, modelMatrix, [-totalGridSizeX / 2 + cellSize / 2, -totalGridSizeY / 2 + cellSize / 2, -totalGridSizeZ / 2 + cellSize / 2]);
+
+
+            let tempModelViewMatrix = mat4.create();
+            let tempNormalMatrix = mat4.create();
+
+            for (let i = 0; i < gridX; i++) {
+                for (let j = 0; j < gridY; j++) {
+                    for (let k = 0; k < gridZ; k++) {
+                        const moduleIdx = i * gridY * gridZ + j * gridZ + k;
+                        const p = moduleParams[moduleIdx];
+
+                        let localModelMatrix = mat4.create();
+                        mat4.identity(localModelMatrix);
+
+                        // Position in grid
+                        const posX = i * (cellSize + padding);
+                        const posY = j * (cellSize + padding);
+                        const posZ = k * (cellSize + padding);
+                        mat4.translate(localModelMatrix, localModelMatrix, [posX, posY, posZ]);
+                        
+                        // Per-module animation
+                        const phaseX = (i / gridX) * Math.PI * 2;
+                        const phaseY = (j / gridY) * Math.PI * 2;
+                        const phaseZ = (k / gridZ) * Math.PI * 2;
+
+                        const morphFactor = Math.sin(time * p.morphSpeed + phaseX * p.morphWaveX + phaseY * p.morphWaveY + phaseZ * p.morphWaveZ) * 0.5 + 0.5;
+                        const currentScale = p.baseScale + (p.targetScale - p.baseScale) * morphFactor;
+                        
+                        const oscillateX = Math.sin(time * p.oscillationSpeedX + phaseX) * p.oscillationMagnitudeX;
+                        const oscillateY = Math.sin(time * p.oscillationSpeedY + phaseY) * p.oscillationMagnitudeY;
+                        const oscillateZ = Math.sin(time * p.oscillationSpeedZ + phaseZ) * p.oscillationMagnitudeZ;
+
+                        mat4.translate(localModelMatrix, localModelMatrix, [oscillateX, oscillateY, oscillateZ]);
+
+                        mat4.rotateX(localModelMatrix, localModelMatrix, time * p.rotationSpeedX + phaseX * p.rotationWaveX);
+                        mat4.rotateY(localModelMatrix, localModelMatrix, time * p.rotationSpeedY + phaseY * p.rotationWaveY);
+                        mat4.rotateZ(localModelMatrix, localModelMatrix, time * p.rotationSpeedZ + phaseZ * p.rotationWaveZ);
+
+                        const scaleM = mat4.create();
+                        scaleM[0] = currentScale;
+                        scaleM[5] = currentScale;
+                        scaleM[10] = currentScale;
+                        mat4.multiply(localModelMatrix, localModelMatrix, scaleM);
+
+                        mat4.multiply(tempModelViewMatrix, viewMatrix, modelMatrix);
+                        mat4.multiply(tempModelViewMatrix, tempModelViewMatrix, localModelMatrix);
+
+                        gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, tempModelViewMatrix);
+
+                        // Calculate normal matrix from modelViewMatrix
+                        // Simplified: assuming uniform scaling and no non-uniform transformations.
+                        // In a real engine, this would be `inverse(transpose(modelViewMatrix))`.
+                        tempNormalMatrix = mat4.identity(tempNormalMatrix);
+                        // No complex normal matrix calculation for now, just pass identity
+                        gl.uniformMatrix4fv(programInfo.uniformLocations.normalMatrix, false, tempNormalMatrix);
+
+                        const hue = (p.baseHue + morphFactor * p.hueShift + time * p.hueSpeed) % 360;
+                        const saturation = Math.max(0.75, Math.min(1.0, p.baseSat + morphFactor * 0.1));
+                        const lightness = Math.max(0.35, Math.min(0.7, p.baseLight + morphFactor * 0.15));
+                        const [r, g, b] = hslToRgb(hue, saturation, lightness);
+                        const color = [r / 255.0, g / 255.0, b / 255.0, 1.0];
+
+                        // Draw main shape (core)
+                        gl.uniform1f(programInfo.uniformLocations.uAlpha, 0.9);
+                        gl.uniform1i(programInfo.uniformLocations.uIsGlow, 0);
+                        gl.uniform1f(programInfo.uniformLocations.uOffsetFactor, p.offsetFactor * morphFactor); // Modulate offset factor
+                        drawObject(p.geometryType === 0 ? cubeGeometry : pyramidGeometry, color);
+
+                        // Draw glow (wide, low alpha)
+                        gl.uniform1f(programInfo.uniformLocations.uAlpha, 0.08); // Lower alpha for glow
+                        gl.uniform1i(programInfo.uniformLocations.uIsGlow, 1);
+                        gl.uniform1f(programInfo.uniformLocations.uOffsetFactor, p.offsetFactor * 1.5 * morphFactor); // Slightly more displacement for glow
+                        drawObject(p.geometryType === 0 ? cubeGeometry : pyramidGeometry, color);
+                    }
+                }
+            }
+        }
+
+        function drawObject(geometry, color) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, geometry.position);
+            gl.vertexAttribPointer(
+                programInfo.attribLocations.vertexPosition,
+                3, // numComponents
+                gl.FLOAT, // type
+                false, // normalize
+                0, // stride
+                0 // offset
+            );
+            gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, geometry.normal);
+            gl.vertexAttribPointer(
+                programInfo.attribLocations.vertexNormal,
+                3,
+                gl.FLOAT,
+                false,
+                0,
+                0
+            );
+            gl.enableVertexAttribArray(programInfo.attribLocations.vertexNormal);
+
+            // Pass color as a uniform for simplicity with variable palette
+            gl.disableVertexAttribArray(programInfo.attribLocations.vertexColor);
+            gl.vertexAttrib4fv(programInfo.attribLocations.vertexColor, color);
+
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, geometry.indices);
+            gl.drawElements(gl.TRIANGLES, geometry.vertexCount, gl.UNSIGNED_SHORT, 0);
+        }
+
+        function generatePalette() {
+            const baseHue = rand(0, 360);
+            currentPalette = [];
+            for (let i = 0; i < randInt(3, 6); i++) {
+                const hue = (baseHue + rand(i * 40, i * 60 + 20)) % 360;
+                const saturation = rand(0.8, 1.0);
+                const lightness = rand(0.4, 0.6);
+                currentPalette.push({ h: hue, s: saturation, l: lightness });
+            }
+        }
+
+        function generateModuleParams() {
+            moduleParams = [];
+            const totalHues = currentPalette.length;
+
+            for (let i = 0; i < numModules; i++) {
+                const baseHue = currentPalette[randInt(0, totalHues - 1)].h;
+                const baseSat = rand(0.75, 0.95);
+                const baseLight = rand(0.35, 0.65);
+
+                moduleParams.push({
+                    baseHue: baseHue,
+                    hueShift: rand(10, 30) * randSign(),
+                    hueSpeed: rand(0.01, 0.05) * randSign() * speed,
+                    baseSat: baseSat,
+                    baseLight: baseLight,
+
+                    rotationSpeedX: randSign() * rand(0.4, 1.5) * speed * 0.1,
+                    rotationSpeedY: randSign() * rand(0.4, 1.5) * speed * 0.1,
+                    rotationSpeedZ: randSign() * rand(0.4, 1.5) * speed * 0.1,
+                    
+                    rotationWaveX: randSign() * rand(0.5, 2.0),
+                    rotationWaveY: randSign() * rand(0.5, 2.0),
+                    rotationWaveZ: randSign() * rand(0.5, 2.0),
+
+                    baseScale: rand(0.8, 1.2),
+                    targetScale: rand(0.8, 1.2),
+                    morphSpeed: rand(0.5, 1.5) * speed * 0.1, // Slower morph
+                    morphWaveX: randSign() * rand(0.5, 1.5),
+                    morphWaveY: randSign() * rand(0.5, 1.5),
+                    morphWaveZ: randSign() * rand(0.5, 1.5),
+
+                    oscillationSpeedX: randSign() * rand(0.5, 1.5) * speed * 0.1,
+                    oscillationMagnitudeX: rand(0.1, 0.3) * cellSize * 0.5,
+                    oscillationSpeedY: randSign() * rand(0.5, 1.5) * speed * 0.1,
+                    oscillationMagnitudeY: rand(0.1, 0.3) * cellSize * 0.5,
+                    oscillationSpeedZ: randSign() * rand(0.5, 1.5) * speed * 0.1,
+                    oscillationMagnitudeZ: rand(0.1, 0.3) * cellSize * 0.5,
+
+                    geometryType: randInt(0, 1), // 0 for cube, 1 for pyramid
+                    offsetFactor: rand(0.5, 1.5), // For vertex displacement
+                });
+            }
+        }
+
+        // --- Context Loss/Restore Handling ---
+        let glResources = null;
+        function createGLResources() {
+            initGL(gl);
+            cubeGeometry = createCube();
+            pyramidGeometry = createPyramid();
+            generatePalette();
+            generateModuleParams();
+            glResources = { shaderProgram, cubeGeometry, pyramidGeometry, currentPalette, moduleParams };
+        }
+
+        function restoreGLResources() {
+            if (glResources) {
+                // Release old resources if any
+                gl.deleteProgram(glResources.shaderProgram);
+                gl.deleteBuffer(glResources.cubeGeometry.position);
+                gl.deleteBuffer(glResources.cubeGeometry.normal);
+                gl.deleteBuffer(glResources.cubeGeometry.indices);
+                gl.deleteBuffer(glResources.pyramidGeometry.position);
+                gl.deleteBuffer(glResources.pyramidGeometry.normal);
+                gl.deleteBuffer(glResources.pyramidGeometry.indices);
+            }
+            createGLResources();
+        }
+
+        gl.canvas.addEventListener('webglcontextlost', (event) => {
+            event.preventDefault();
+            console.log('WebGL context lost. Waiting for restore...');
+        }, false);
+
+        gl.canvas.addEventListener('webglcontextrestored', () => {
+            console.log('WebGL context restored. Recreating resources...');
+            restoreGLResources();
+            // Re-render immediately to avoid a blank frame
+            drawScene(1/fps, window.currentFrame / fps);
+        }, false);
+
+        // --- Animation Loop ---
+        let lastUpdateTime = 0;
+        let animationTime = 0;
+
+        window.advanceFrame = function() {
+            const dt = 1 / fps;
+            animationTime += dt;
+            
+            // Randomly re-seed the PRNG for palette/motion every cycleSec
+            if (animationTime % cycleSec < dt) { // Check if we crossed the boundary
+                randSeed = seed + Math.floor(animationTime / cycleSec); // Use time to derive new seed for cycles
+                generatePalette();
+                generateModuleParams();
+            }
+
+            drawScene(dt, animationTime);
+            window.currentFrame++;
+        };
+
+        window.advanceFrames = function(n) {
+            for (let i = 0; i < n; i++) {
+                window.advanceFrame();
+            }
+        };
+
+        // Initial setup
+        function initializeEngine() {
+            createGLResources();
+            // Wait a bit to ensure context loss event has time to fire if it's going to
+            setTimeout(() => {
+                window.READY = true;
+                console.log("Engine READY.");
+            }, 300); // 300ms delay
+        }
+
+        initializeEngine();
+
+    </script>
+</body>
+</html>

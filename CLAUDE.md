@@ -9240,6 +9240,235 @@ from staggered courses of periodic bricks.
 
 `ENGINE_SUBJECTS`: `brickbond: 'Brick Bond Wall'` in `src/metadata.js`.
 
+## Mud-crack network engine (`mudcrack.html`) — 2026-11-21
+
+Daily creative-research routine. Category was "random natural structure" (last
+used 2026-11-07 for `ammonite.html`). A WebSearch on desiccation mud cracks
+surfaced the physics of crack networks: a crack relieves stress perpendicular
+to its faces, so a later crack that reaches an older one bends to meet it at a
+right angle (a T-junction), and repeated drying relaxes the network toward
+120-degree Y-junctions. Sources (search snippets): https://arxiv.org/pdf/1211.6762,
+https://physicstoday.aip.org/features/cracking-mud-freezing-dirt-and-breaking-rocks,
+https://www.physics.utoronto.ca/nonlinear/preprints/MM_phy479_2015.pdf,
+https://arxiv.org/pdf/2609.11048.
+
+**Popular-format research, same day (CLAUDE.md 2026-11-09 requirement).** The
+recurring formats were endless geometric tunnels, spiral optical-illusion
+loops, optical-art starbursts and mandala loops. All are covered by
+`tunnel.html`, `hypnospiral.html`, `vegasphere.html` and `kaleidoscope.html`,
+so no popular-format engine was built. No view counts were available.
+
+**What it is**: the frame is cut into convex cells by a drying history. Each
+new crack starts on a random point of an existing edge, runs perpendicular to
+that edge with a jitter of up to +-0.5 rad, and stops on the far boundary.
+Every new crack therefore meets an older crack at a right angle. Cells are
+greedily coloured from six luma-equal hue slots so no two touching cells share
+a slot. Black crack strokes are a fixed width. This is a fragmentation
+construction, not a seed-based partition: `voronoimosaic`/`columnarbasalt`/
+`foamcoarsen` place seeds and take proximity cells, `mondrian` cuts
+axis-aligned rectangles, and none of them bends each new cut to meet older ones
+at right angles.
+
+**Motion**: a zero-sum travelling lightness wave over the cells, phased by
+cumulative area fraction in a diagonal sort order, with an integer wave count
+K in 2-3 (the doylespiral/rosenspikes technique). Its rate has a guaranteed
+minimum magnitude with random sign and is reassigned, not reset, at each
+cycleSec boundary. The crack geometry is fixed for the whole video, so the
+motion is colour, not a moving network.
+
+**Iteration, found by rendering and looking**: the first draft (about 30 cracks,
++-0.28 rad jitter, minimum cell 1% of the frame) produced a few large,
+near-rectangular cells that read as a Mondrian-style partition. Raising the
+crack count to 46, widening the jitter to +-0.5 rad, and lowering the minimum
+cell area to 0.45% of the frame gave the irregular polygon network shipped.
+
+**Verified**: `node src/validate.js engines/manual/mudcrack.html` (seed 12345)
+ok: projectedRise -0.2, compositionDrift 0.0294, unitMotionNonRigidFrac 1.0,
+fastMotion 25.7 vs floor 5.75, avgMsPerFrame 7.3. The 16-seed battery (seeds
+1-15 plus 12345) passes 16/16: avgSat 81.6-88.9 (vs 22), peakNearWhiteFrac 0,
+projectedRise -14 to +5.5 (vs 50), compositionDrift 0.017-0.040 (vs 0.015;
+seed 6 is the thinnest), unitMotionNonRigidFrac 1.0 on every seed, fastMotion
+22-29 against floors of 5.5-6.0, avgMsPerFrame 5-8. Frames were rendered and
+looked at at 25/50/75/95/105% of a 43.5s cycle at seed 1 and at two fractions
+at seed 7: dense, saturated polygons with crisp black cracks and no black
+gaps, which meets the 2026-11-20 "full and flourishing" requirement.
+
+**Novelty gate**: all 103 engines in `engines/manual/` fingerprinted fresh
+alongside the candidate (seeds 1 and 7, frames 200/600/1000; the committed
+cache was not updated). Nearest neighbour is `liesegang` at distance **0.742**
+(next `prismbloom` 0.755, `voronoimosaic` 0.769, `tessellation` 0.791). A clean
+pass above 0.60, though not a wide margin, since a colour-blind composition
+descriptor places any full-bleed partition of coloured cells near the other
+partition engines.
+
+`ENGINE_SUBJECTS`: `mudcrack: 'Mud Crack Network'` in `src/metadata.js`.
+
+## Harmonograph trails (`harmonograph.html`) — 2026-11-23
+
+Daily creative-research routine. Category was "a random featured image"; the
+Wikimedia featured-picture search returned no usable specific picture, so the
+category was resolved through a harmonograph: the Victorian pendulum drawing
+machine. Each screen coordinate is a sum of two sinusoids (two pendulums per
+axis), so the pen path is a superposed Lissajous figure. Sources (search
+snippets): https://mathworld.wolfram.com/Harmonograph.html,
+https://paulbourke.net/geometry/harmonograph,
+https://www.johndcook.com/blog/2019/10/08/harmonographs/. The same day's
+popular-format search found no verifiable ranking of loop formats (only generic
+satisfying-loop commentary), and nothing uncovered, so no popular-format engine
+was built.
+
+**What it is**: four independent harmonographs in a 2x2 field. Each pen path is
+drawn as a 16-second trail, banded by palette colour along its length, so
+coloured stretches sweep along each figure. Phases drift at guaranteed-minimum
+rates with random sign, so the figures keep rebuilding. Clear-and-redraw each
+frame, nothing accumulates.
+
+**Iterations, found by the gates and by looking**:
+1. A breathing amplitude envelope drew sparse figures that covered about a third
+   of the frame, and seed 12345 failed the brightness-trend gate (+69.5 luma
+   projected). Amplitude was held constant and each figure's stroke alpha is now
+   scaled by its live trail length against a reference length. This holds total
+   ink constant, the same lesson `timestables.html` documents.
+2. Figures were too small (about 0.46 of a cell) and too thin for the house
+   style. Excursion went to 0.6 of the cell and the trail to 16 seconds, which
+   filled the frame with overlapping loops.
+3. Per-sample strokes made the validator battery far too slow. Each trail is now
+   batched into band polylines, one stroke call per band, with no change to the
+   geometry.
+
+**Verified**: `validateEngine()` 16/16 on seeds 1-15 plus 12345. avgSat 52-65.5
+(vs 22), projectedRise -11.4 to +9.7 (vs 50), compositionDrift 0.035-0.050 (vs
+0.015), unitMotionNonRigidFrac 1.0 on every seed, avgMsPerFrame 17-21. The
+thinnest margins are fastMotion: seed 2 at 5.01 against a 4.87 floor, seed 11 at
+5.44 against 5.30, seed 12 at 5.30 against 4.43. Frames at seeds 7 and 12345
+were rendered and looked at: dense, saturated, interlaced looping figures on
+black, with no whiteout.
+
+**Novelty gate**: measured against all 104 engines in `engines/manual/`
+(fingerprinted fresh; the committed cache was not updated). Nearest neighbour is
+`phyllotaxis.html` at distance **0.707**, with `composer.html` at 0.723. A clean
+pass above 0.60.
+
+`ENGINE_SUBJECTS`: `harmonograph: 'Harmonograph Trails'` in `src/metadata.js`.
+
+## Crystal diffraction spots (`ewaldspots.html`) — 2026-11-26
+
+Daily creative-research routine. Category was "random natural structure /
+physical phenomenon" (not used in the last few firings). An open WebSearch
+for crystal structure surfaced X-ray and electron diffraction: a beam hits a
+crystal and only the reciprocal-lattice points lying on the Ewald sphere (in
+2D, the circle through the origin with radius equal to the beam wavenumber)
+scatter. The spot intensities follow the squared structure factor of the
+basis, so some reflections are extinct. Sources (search snippets, not
+opened): https://en.wikipedia.org/wiki/Ewald_sphere (blocked in this sandbox),
+https://en.wikipedia.org/wiki/Laue_conditions,
+https://lampz.tugraz.at/~hadley/ss1/crystaldiffraction/ewald/ewald.php.
+
+**What it is**: three independent crystal grains, each a hexagonal or square
+reciprocal lattice with a two-atom basis (intensity |f1 + f2 e^{2 pi i G.r}|^2,
+with weak reflections dropped as near-extinct). A shared beam fixes one Ewald
+ring per grain. Each grain rotates at its own guaranteed-minimum-magnitude
+rate, random sign. Per frame, each grain lights its N = 30 spots nearest the
+ring. Spot colour is set by the reciprocal shell (|G|, rotation-invariant),
+and spot size is set by the spot's own intensity, so the lit area does not
+depend on the rotation angle. The engine is stateless, computing each frame
+from the frame time, so nothing accumulates and no whiteout is possible.
+
+**Not separately verified offline**: the diffraction geometry (ring through the
+origin, lit spots lying on it) and the intensity formula were checked only by
+rendering and by the gates below, not by a standalone script.
+
+**Bugs and iterations, found by rendering and by the gates**: the first draft
+(grains at 0.47 of the cell, 22 spots each) read as sparse, with too much black
+between grains. Enlarging the grains to 0.50 of the cell and raising the lit
+count to 30 made the frames read as dense, crisp, saturated hexagon clusters.
+The ring is drawn as a thin bright arc clipped to each grain.
+
+**Verified**: `validateEngine()` 16/16 on seeds 1-15 plus the CLI default
+12345. avgSat 58.1-72.4 (vs 22), peakNearWhiteFrac 0-0.0013, projectedRise
+-2.9 to +7.3 (vs 50), compositionDrift 0.0158-0.0506 (vs 0.015; seed 5 is the
+thinnest at 0.0158), unitMotionNonRigidFrac 0.978-1.0 (vs 0.40), fastMotion
+15.9-23.4 against floors of 5.4-7.1, avgMsPerFrame about 14-18 ms. Frames were
+rendered and looked at at 25/50/75/95 percent of the 43.5 s cycle (seeds 1 and
+12345): vivid saturated hexagon spots on black, the Ewald rings legible, and
+the three grains reorganising independently between checkpoints.
+
+**Novelty gate**: all 108 engines in `engines/manual/` fingerprinted fresh
+alongside the candidate (seeds 1 and 7, frames 200/600/1000; the committed
+cache was not updated). Nearest neighbour is
+`auto-2026-08-30-scenic-view-of-gardens` at distance **0.637** (next
+`pendulumwave` 0.736, `hilbertweave` 0.744). A pass above the 0.60 threshold,
+but a thin margin, so the write-up records it as such.
+
+**Popular-format research (same day, CLAUDE.md 2026-11-09 requirement)**:
+WebSearch surfaced loop channels and listings (Loop Vision,
+https://www.youtube.com/channel/UC_8Prn-66YJSeJuY662m-kQ; Void Geometry,
+https://www.youtube.com/watch?v=C5DpXNZZFBg; Zen Visual Loops,
+https://www.youtube.com/playlist?list=PLONUbsAnqwtoRYdHacaofV7ckHiIHRd8D).
+The formats are the existing families (mandala and kaleidoscope loops,
+concentric-ring and tunnel loops), all covered by the pool. No view counts
+were available, so no uncovered popular format was verified, and no
+popular-format engine was built.
+
+## Hitomezashi stitch field (`hitomezashi.html`) — 2026-11-28
+
+Daily creative-research routine. Category was "traditional textile/tiling/
+ornament tradition from a randomly chosen culture" (least recent use). An open
+WebSearch surfaced **hitomezashi**, the sashiko stitch rule: each row and each
+column gets one binary choice, and the stitches on every line alternate, so the
+whole design is fixed by two bit strings. Defant & Kravitz (arXiv 2201.03461)
+prove the parity structure and that the regions it cuts can be two-coloured so
+neighbours differ; Reimann (Bridges 2023) connects the designs to Truchet
+tiling. Sources (search snippets): https://arxiv.org/pdf/2201.03461,
+https://archive.bridgesmathart.org/2023/bridges2023-457.pdf,
+https://dev.to/stepinto/sashiko-a-stone-screen-and-tartan-each-made-from-one-simple-rule-d72.
+Popular-format research the same day found only ambient-loop roundups
+(gridfiti, channelsurfer, Ambient Screen Savers), whose formats the pool
+already covers, so no popular-format engine was built.
+
+**What it is**: a 16x9 lattice of vertices, with stitch edges set by the two
+bit strings (horizontal edge (i,j) present when (i + row bit) is even, vertical
+edge (i,j) when (j + column bit) is even). A breadth-first walk flips the colour
+across every stitch and keeps it across every open edge. The result is a
+two-tone region map, computed once per video. The topology never changes.
+Motion is geometric: the vertices move under two plane waves with integer
+period counts across the lattice, so the displacement summed over all vertices
+is exactly zero at every instant. The stitch edges stay straight between their
+moving endpoints.
+
+**Two composition rounds, both measured.**
+1. Filled two-tone regions with black stitch outlines: **0.460** against
+   `mudcrack.html`. This is a filled partition with black gutters, the same
+   archetype as mudcrack (the colour-blind descriptor cannot see the
+   rectilinear versus polygonal difference), so the design was changed.
+2. Coloured stitch threads on black (0.18 cell wide, each thread coloured by its
+   bordering region's tone). Measured **0.636** against `tessellation.html`
+   (next `mudcrack` 0.722), a pass, though not a wide margin.
+
+**Bugs and iterations, found only by running and looking:**
+- A first render of round 2 at 0.13-cell threads looked sparse, with much of the
+  frame black. Widening the threads to 0.18 cell kept the look clean. A glow
+  underlay (a wide faint stroke under each thread) was tried and rejected: at
+  this scale it read as dark offset shadows, not light.
+- The round-2 build failed with a silent `READY` timeout because the stitch
+  list was built before its `const` declaration (a temporal-dead-zone error
+  that only shows up in the page console). Fixed by moving the declaration up.
+
+**Verified**: `validateEngine()` **16/16** across seeds 1-15 plus 12345, all PASS.
+Margins: `avgSat` 79.9-85.8 (vs 22), `peakNearWhiteFrac` 0, `projectedRise` -3.3
+to +6.7 (vs 50), `compositionDrift` 0.028-0.040 (vs 0.015), `unitMotionNonRigidFrac`
+0.984-1.0 (vs 0.40), `fastMotion` 40-52 against floors of 5.4-6.6, `avgMsPerFrame`
+1.3-4.3. Frames were rendered and looked at at seeds 1, 3 and 7 across the cycle
+(25/50/75/95/105%), in both rounds.
+
+**Novelty gate** (final file): measured against all 110 engines in
+`engines/manual/` (whole pool fingerprinted fresh; refreshed cache not committed).
+Nearest neighbour is `tessellation` at distance **0.636** (next `mudcrack` 0.722,
+`vegasphere` 0.954). A pass above the 0.60 threshold, but the thinnest margin in
+recent entries, so a future redesign should keep it in view.
+
+`ENGINE_SUBJECTS`: `hitomezashi: 'Hitomezashi Stitch Field'` in `src/metadata.js`.
+
 ## Known constraints / gotchas
 
 - **YouTube channel verification is required** for the 1-hour long video to

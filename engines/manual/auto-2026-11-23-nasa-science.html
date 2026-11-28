@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Nebula Crystal Bloom</title>
+    <meta name="pattern-name" content="Nebula Crystal Bloom">
+    <style>
+        body { margin: 0; overflow: hidden; background-color: black; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        // --- Global Variables and Setup ---
+        let canvas;
+        let ctx;
+        let totalTime = 0;
+        let dt;
+
+        let seed = 20261123;
+        let width = 1920;
+        let height = 1080;
+        let fps = 24;
+        let duration = 3600; // seconds
+        let speed = 1;
+        let density = 1;
+        let cycleSec = 90; // Default cycle duration for changes
+
+        let rand;
+        let palette;
+
+        // The exact line window.TOTAL_FRAMES = ... must be executed early.
+        window.TOTAL_FRAMES = Math.round(duration * fps);
+        window.currentFrame = 0;
+        window.READY = false;
+
+        // --- PRNG (Mulberry32) ---
+        function mulberry32(a) {
+            return function() {
+                let t = a += 0x6D2B79F5;
+                t = Math.imul(t ^ t >>> 15, t | 1);
+                t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+                return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            };
+        }
+
+        // --- Utilities ---
+        function parseQueryParams() {
+            const params = new URLSearchParams(window.location.search);
+            seed = parseInt(params.get('seed') || seed);
+            width = parseInt(params.get('width') || width);
+            height = parseInt(params.get('height') || height);
+            fps = parseInt(params.get('fps') || fps);
+            duration = parseFloat(params.get('duration') || duration);
+            speed = parseFloat(params.get('speed') || speed);
+            density = parseFloat(params.get('density') || density);
+            cycleSec = parseFloat(params.get('cycleSec') || cycleSec);
+            dt = 1 / fps;
+        }
+
+        function hslToRgb(h, s, l) {
+            h /= 360;
+            s /= 100;
+            l /= 100;
+            let r, g, b;
+
+            if (s === 0) {
+                r = g = b = l; // achromatic
+            } else {
+                const hue2rgb = (p, q, t) => {
+                    if (t < 0) t += 1;
+                    if (t > 1) t -= 1;
+                    if (t < 1 / 6) return p + (q - p) * 6 * t;
+                    if (t < 1 / 2) return q;
+                    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+                    return p;
+                };
+                const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                const p = 2 * l - q;
+                r = hue2rgb(p, q, h + 1 / 3);
+                g = hue2rgb(p, q, h);
+                b = hue2rgb(p, q, h - 1 / 3);
+            }
+            return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+        }
+
+        function generatePalette() {
+            palette = [];
+            const baseHue = rand() * 360; // Start with a random base hue
+            const numColors = 3 + Math.floor(rand() * 4); // 3 to 6 colors
+
+            for (let i = 0; i < numColors; i++) {
+                let hue = (baseHue + i * (360 / numColors) * (0.8 + rand() * 0.4)) % 360; // Spread hues
+                hue = (hue + 360) % 360; // Ensure positive hue
+                const sat = 75 + rand() * 25; // Saturation between 75-100%
+                const lig = 40 + rand() * 25; // Lightness between 40-65%
+                palette.push(`hsl(${hue}, ${sat}%, ${lig}%)`);
+            }
+        }
+
+        // --- Core Scene Elements ---
+        const shapes = [];
+        const numShapes = Math.floor(25 * density); // Number of major crystal clusters
+
+        class CrystalCluster {
+            constructor(id) {
+                this.id = id;
+                this.reset(totalTime);
+            }
+
+            reset(time) {
+                this.currentHue = rand() * 360;
+                this.targetHue = (rand() * 360);
+                this.hueShiftRate = (0.01 + rand() * 0.05) * speed; // Hue shift per second
+
+                this.baseSize = 50 + rand() * 100;
+                this.x = rand() * width;
+                this.y = rand() * height;
+                this.z = rand() * 100; // For depth parallax
+                this.rotation = rand() * Math.PI * 2;
+                this.rotationSpeed = (0.2 + rand() * 0.8) * (rand() > 0.5 ? 1 : -1) * speed; // Radians per second
+                this.scalePulseSpeed = (0.5 + rand() * 1.0) * speed; // Cycles per second for pulsing
+                this.offsetSpeed = (0.2 + rand() * 0.8) * speed; // For internal element offset
+
+                this.numSegments = 3 + Math.floor(rand() * 4); // 3 to 6 segments per cluster
+                this.segments = [];
+                for (let i = 0; i < this.numSegments; i++) {
+                    this.segments.push({
+                        angleOffset: rand() * Math.PI * 2,
+                        lengthFactor: 0.5 + rand() * 0.5,
+                        widthFactor: 0.5 + rand() * 0.5,
+                        pulsePhase: rand() * Math.PI * 2,
+                        rotateSpeed: (0.1 + rand() * 0.3) * (rand() > 0.5 ? 1 : -1) * speed,
+                        startOffset: rand() * 0.2
+                    });
+                }
+            }
+
+            update(time, dt) {
+                this.rotation += this.rotationSpeed * dt;
+                this.rotation %= (Math.PI * 2);
+
+                // Morph hue over time
+                let hueDiff = this.targetHue - this.currentHue;
+                if (hueDiff > 180) hueDiff -= 360;
+                if (hueDiff < -180) hueDiff += 360;
+                this.currentHue += hueDiff * this.hueShiftRate * dt;
+                this.currentHue = (this.currentHue + 360) % 360;
+
+                // Pick new target hue if close enough
+                if (Math.abs(hueDiff) < 1) {
+                    this.targetHue = rand() * 360;
+                }
+            }
+
+            draw(context, time) {
+                const globalScale = Math.min(width, height) / 800 * density;
+                const dynamicSize = this.baseSize * (1 + Math.sin(time * this.scalePulseSpeed) * 0.1) * globalScale;
+
+                context.save();
+                context.translate(this.x, this.y);
+                context.rotate(this.rotation);
+
+                const baseLightness = 40 + (Math.sin(time * 0.1 * speed + this.id) * 0.5 + 0.5) * 20; // 40-60%
+                const baseSaturation = 80 + (Math.sin(time * 0.08 * speed + this.id) * 0.5 + 0.5) * 20; // 80-100%
+
+                for (let i = 0; i < this.numSegments; i++) {
+                    const seg = this.segments[i];
+                    const segmentRotation = seg.angleOffset + time * seg.rotateSpeed;
+                    const segmentOffset = Math.sin(time * this.offsetSpeed + seg.pulsePhase) * dynamicSize * seg.startOffset;
+                    const segmentLength = dynamicSize * seg.lengthFactor * (1 + Math.sin(time * (seg.pulsePhase + 0.5) * this.scalePulseSpeed) * 0.1);
+                    const segmentWidth = dynamicSize * 0.1 * seg.widthFactor;
+
+                    context.save();
+                    context.rotate(segmentRotation);
+                    context.translate(segmentOffset, 0);
+
+                    const hue = (this.currentHue + i * 20) % 360;
+                    const saturation = Math.min(100, Math.max(75, baseSaturation + Math.sin(time * 0.15 + i) * 10));
+                    const lightness = Math.min(70, Math.max(35, baseLightness + Math.cos(time * 0.18 + i) * 10));
+
+                    const color = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+                    const coreColor = `hsla(${hue}, ${saturation}%, ${lightness}%, 0.9)`;
+                    const glowColor = `hsla(${hue}, ${saturation}%, ${lightness}%, 0.15)`;
+
+                    // Draw glow layer
+                    context.beginPath();
+                    context.moveTo(0, -segmentWidth / 2);
+                    context.lineTo(segmentLength, -segmentWidth / 4);
+                    context.lineTo(segmentLength, segmentWidth / 4);
+                    context.lineTo(0, segmentWidth / 2);
+                    context.closePath();
+                    context.strokeStyle = glowColor;
+                    context.lineWidth = segmentWidth * 0.8;
+                    context.shadowBlur = segmentWidth * 0.8;
+                    context.shadowColor = glowColor;
+                    context.stroke();
+
+                    // Draw core shape
+                    context.shadowBlur = 0; // Disable shadow for core stroke
+                    context.fillStyle = color;
+                    context.strokeStyle = coreColor;
+                    context.lineWidth = 2 * globalScale;
+                    context.fill();
+                    context.stroke();
+
+                    context.restore();
+                }
+                context.restore();
+            }
+        }
+
+        // --- Render Loop ---
+        function drawScene() {
+            // Clear canvas to black (full opacity to prevent accumulation)
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, width, height);
+
+            shapes.forEach(shape => shape.draw(ctx, totalTime));
+        }
+
+        let lastResetTime = 0;
+        function updateScene() {
+            totalTime += dt * speed;
+            shapes.forEach(shape => shape.update(totalTime, dt));
+
+            // Hard reset check
+            if (totalTime - lastResetTime >= cycleSec) {
+                shapes.forEach(shape => shape.reset(totalTime));
+                generatePalette(); // Re-roll palette for evolution
+                lastResetTime = totalTime;
+            }
+        }
+
+        // --- External API ---
+        window.advanceFrame = function() {
+            updateScene();
+            drawScene();
+            window.currentFrame++;
+        };
+
+        window.advanceFrames = function(n) {
+            for (let i = 0; i < n; i++) {
+                window.advanceFrame();
+            }
+        };
+
+        // --- Initialization ---
+        function initialize() {
+            parseQueryParams();
+            rand = mulberry32(seed);
+
+            canvas = document.getElementById('canvas');
+            ctx = canvas.getContext('2d');
+            canvas.width = width;
+            canvas.height = height;
+
+            generatePalette();
+
+            for (let i = 0; i < numShapes; i++) {
+                shapes.push(new CrystalCluster(i));
+            }
+
+            // Set READY after full initialization
+            window.READY = true;
+        }
+
+        // Execute initialization as the very last statement
+        initialize();
+
+    </script>
+</body>
+</html>

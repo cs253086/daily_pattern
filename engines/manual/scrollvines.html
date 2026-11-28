@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Scroll Vines — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated engine: SCROLL VINES. Ornamental curling stems in the style of a
+// turquoise scroll ornament: long stems that coil into scrolls, fern sprigs
+// branching off them, and rings of bubbles scattered in the gaps, all glowing
+// on black.
+//
+// Construction (stateless per frame, a pure function of time):
+//   Each stem is a planar curve traced by integrating its heading against an
+//   arc-length curvature profile kappa(s) = A*sin(w*s + phase(t)) + B. Where
+//   |kappa| is large the stem coils into a scroll; the phase travels along the
+//   stem, so each coil appears to roll along it. Stems start at fixed anchors
+//   and seeds, so the layout is fixed for the video while the curls move.
+//   Fern sprigs and bubble rings sit at fixed arc-length positions along each
+//   stem, so they ride the stem as it moves.
+//
+// Brightness: ink per stem is nearly constant (length is fixed by the path
+// budget), and stroke width is fixed, so mean luma holds steady. Each stem is
+// drawn twice (a wide low-alpha halo, then a thin bright core).
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32 (4-draw burn-in), no requestAnimationFrame.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = Math.max(0.5, fltP('density', 1));
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Mulberry32's first draws for consecutive small seeds are correlated, so burn
+  // 4 draws first (same convention as the other curated engines).
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  const COLS = parseColors();
+  const BASE_H = COLS ? COLS[0][0] : rand(168, 186);   // turquoise family
+  const HSPAN = COLS ? 22 : rand(14, 22);
+
+  const TWO_PI = 2 * Math.PI;
+  const UNIT = Math.min(W, H);                          // all lengths in px via UNIT
+
+  // ---- stems: fixed per video --------------------------------------------------
+  // Each stem: anchor, starting heading, a curvature profile, and a fixed length.
+  const NSTEMS = Math.max(10, Math.round(30 * DENSITY));
+  const stems = [];
+  for (let i = 0; i < NSTEMS; i++) {
+    stems.push({
+      ax: rand(0.02, 0.98) * W,
+      ay: rand(0.02, 0.98) * H,
+      h0: rand(0, TWO_PI),
+      len: UNIT * rand(0.7, 1.4),                       // stem length in px
+      A: rand(0.9, 1.5) / UNIT,                         // curvature amplitude (1/px)
+      B: sgn() * rand(0.2, 0.5) / UNIT,                 // steady bias: gives a sweep
+      w: TWO_PI * rand(1.2, 2.6) / UNIT,                // curl spacing along the stem
+      ph: rand(0, TWO_PI),
+      rollRate: sgn() * rand(0.5, 0.9) * SPEED,         // coil roll along the stem, rad/s
+      hue: BASE_H + rand(-HSPAN / 2, HSPAN / 2),
+      lw: UNIT * rand(0.006, 0.009),
+      nSprigs: 4 + Math.floor(rng() * 4),
+      sprigPos: [],
+    });
+    const s = stems[i];
+    for (let k = 0; k < s.nSprigs; k++) s.sprigPos.push(rand(0.25, 0.9));
+  }
+
+  // Precompute the stem polylines once per frame is cheap; the curvature phase is
+  // what changes, so the path is re-integrated each frame from the anchor.
+  const STEPS = 240;
+
+  function tracePath(s, clk) {
+    const pts = new Array(STEPS + 1);
+    let x = s.ax, y = s.ay, h = s.h0;
+    const ds = s.len / STEPS;
+    const phase = s.ph + s.rollRate * clk;
+    pts[0] = [x, y, h];
+    for (let k = 1; k <= STEPS; k++) {
+      const sArc = k * ds;
+      const kappa = s.A * Math.sin(s.w * sArc + phase) + s.B;
+      h += kappa * ds;
+      x += Math.cos(h) * ds;
+      y += Math.sin(h) * ds;
+      pts[k] = [x, y, h];
+    }
+    return pts;
+  }
+
+  function strokePath(pts, lw, colour) {
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k][0], pts[k][1]);
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = colour;
+    ctx.stroke();
+  }
+
+  // Fern sprig: a short branched frond off the stem at a given point and heading.
+  function drawSprig(x, y, heading, size, colour, lw) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(heading);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(size, 0);
+    for (let i = 1; i <= 5; i++) {
+      const t = i / 6;
+      const bx = size * t;
+      const len = size * 0.42 * (1 - t * 0.55);
+      ctx.moveTo(bx, 0);
+      ctx.lineTo(bx + len * 0.55, -len);
+      ctx.moveTo(bx, 0);
+      ctx.lineTo(bx + len * 0.55, len);
+    }
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = colour;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Bubble rings: fixed offsets from each stem, so they ride the curls.
+  const bubbles = [];
+  for (let i = 0; i < NSTEMS; i++) {
+    const nb = Math.round(rand(26, 40) * DENSITY);
+    for (let k = 0; k < nb; k++) {
+      bubbles.push({
+        stem: i,
+        at: rand(0.05, 0.98),                           // arc-length fraction along the stem
+        off: sgn() * rand(20, 90) * (UNIT / 1080),      // offset from the stem, px
+        r: UNIT * rand(0.006, 0.014),
+      });
+    }
+  }
+
+  let clk = 0;
+  function renderFrame() {
+    clk += 1 / FPS;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    const paths = stems.map((s) => tracePath(s, clk));
+
+    // Stems: wide halo, then bright core.
+    for (let i = 0; i < stems.length; i++) {
+      const s = stems[i];
+      strokePath(paths[i], s.lw * 3.2, `hsla(${s.hue}, 92%, 55%, 0.22)`);
+      strokePath(paths[i], s.lw, `hsl(${s.hue}, 96%, 62%)`);
+    }
+
+    // Sprigs at fixed arc-length fractions along each stem.
+    for (let i = 0; i < stems.length; i++) {
+      const s = stems[i];
+      const pts = paths[i];
+      for (const f of s.sprigPos) {
+        const k = Math.min(STEPS, Math.max(1, Math.round(f * STEPS)));
+        const [x, y, h] = pts[k];
+        const side = (i % 2 === 0) ? 1 : -1;
+        drawSprig(x, y, h + side * Math.PI / 2.6, UNIT * 0.05, `hsl(${s.hue}, 96%, 62%)`, s.lw * 0.9);
+      }
+    }
+
+    // Bubble rings: thin circles offset from the stem path.
+    ctx.lineWidth = Math.max(1.5, UNIT * 0.0028);
+    for (const b of bubbles) {
+      const pts = paths[b.stem];
+      const k = Math.min(STEPS, Math.max(1, Math.round(b.at * STEPS)));
+      const [x, y, h] = pts[k];
+      const bx = x - Math.sin(h) * b.off;
+      const by = y + Math.cos(h) * b.off;
+      ctx.beginPath();
+      ctx.arc(bx, by, b.r, 0, TWO_PI);
+      ctx.strokeStyle = `hsl(${stems[b.stem].hue}, 90%, 60%)`;
+      ctx.stroke();
+    }
+  }
+
+  window.READY = false;
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+  window.advanceFrame = function () { renderFrame(); window.currentFrame++; };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>

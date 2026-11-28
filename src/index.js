@@ -521,6 +521,24 @@ async function chooseEngine(cli, imageInfo) {
     return curatedOr(`requested engine not found (${requested})`, seed);
   }
 
+  // One-day override (state/engine-override.json): {"date":"YYYYMMDD","engine":"engines/manual/x.html"}.
+  // Applies only when the run's seed date matches, so it expires by itself.
+  try {
+    const ovPath = path.join(repoRoot, 'state', 'engine-override.json');
+    if (existsSync(ovPath)) {
+      const ov = JSON.parse(readFileSync(ovPath, 'utf8'));
+      if (ov && String(ov.date) === String(seed) && ov.engine) {
+        const forced = path.resolve(repoRoot, ov.engine);
+        if (existsSync(forced)) {
+          console.log(`[index] one-day engine override for ${seed}: ${ov.engine}`);
+          return { engine: forced, source: 'override' };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(`[index] engine override ignored: ${e.message}`);
+  }
+
   const generateEnabled = !!process.env.GEMINI_API_KEY
     && cli['no-generate'] !== true
     && process.env.GENERATE !== '0';

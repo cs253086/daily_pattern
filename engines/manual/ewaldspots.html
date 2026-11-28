@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ewald Diffraction Spots — headless engine</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Curated GEOMETRIC engine, inspired by a genuinely random web find (today's
+// creative-research routine, category "random natural structure / physical
+// phenomenon"). An open WebSearch surfaced X-ray and electron DIFFRACTION from
+// crystals: a beam hits a crystal and only the reciprocal-lattice points that
+// lie on the EWALD SPHERE (the circle, in 2D, whose radius is the beam
+// wavenumber and which passes through the origin) scatter. The diffracted
+// spots are the reciprocal lattice of the crystal, weighted by the squared
+// structure factor |F(hk)|^2 of its basis. A rotating crystal therefore lights
+// a changing subset of its spots as they sweep across the Ewald circle.
+// Sources (search snippets, not opened): https://en.wikipedia.org/wiki/Ewald_sphere
+// (blocked in this sandbox), https://en.wikipedia.org/wiki/Laue_conditions,
+// https://lampz.tugraz.at/~hadley/ss1/crystaldiffraction/ewald/ewald.php
+// (Ewald construction, rotation method).
+//
+// A genuinely different construction PRINCIPLE from every other engine in the
+// pool: the picture is a DIFFRACTION condition, not a sampled wave field
+// (chladni, moire, phasespikes), not a growth or partition process, not a
+// trajectory. Spots are discrete reciprocal-lattice points with intensities
+// from a two-atom basis (some reflections are extinct), and a spot is lit by a
+// geometric condition on its distance from the Ewald ring. Three crystal
+// grains rotate at different rates, so no single rigid transform explains the
+// frame, and each grain lights a fixed count of its N spots nearest the ring.
+//
+// Headless contract (see src/render.js):
+//   URL params : seed, palette, colors, width, height, fps, duration, speed, density, cycleSec
+//   window     : READY, TOTAL_FRAMES, currentFrame, advanceFrame(), advanceFrames(n)
+// Deterministic Mulberry32, no rAF. Stateless per frame (each frame is computed
+// from scratch from the frame time), so nothing accumulates and no whiteout is
+// possible. Lit-spot count per grain is fixed, and each spot's size depends
+// only on its hkl intensity, so the lit area does not swing with the rotation.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const intP = (k, d) => { const v = parseInt(params.get(k), 10); return Number.isFinite(v) ? v : d; };
+  const fltP = (k, d) => { const v = parseFloat(params.get(k)); return Number.isFinite(v) ? v : d; };
+
+  const W = intP('width', 1920);
+  const H = intP('height', 1080);
+  const FPS = Math.max(1, intP('fps', 24));
+  const DURATION = Math.max(1, fltP('duration', 3600));
+  const SEED = intP('seed', 1);
+  const SPEED = fltP('speed', 1);
+  const DENSITY = fltP('density', 1);
+  const CYCLE = Math.max(5, fltP('cycleSec', 43.5));
+
+  const canvas = document.getElementById('c');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  let rsx = (SEED >>> 0) || 1;
+  function rng() {
+    rsx |= 0; rsx = (rsx + 0x6D2B79F5) | 0;
+    let t = Math.imul(rsx ^ (rsx >>> 15), 1 | rsx);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // Mulberry32's first outputs for consecutive small seeds are correlated;
+  // discard a few draws (same convention as the other engines).
+  for (let i = 0; i < 4; i++) rng();
+  const rand = (a, b) => a + rng() * (b - a);
+  const sgn = () => (rng() < 0.5 ? -1 : 1);
+
+  const paletteNames = ['aurora', 'ember', 'ocean', 'neon', 'sunset', 'ice', 'gold'];
+  const palettes = {
+    aurora: [[140, 90, 58], [190, 88, 60], [230, 82, 62], [280, 78, 64], [320, 70, 58]],
+    ember:  [[10, 95, 58], [345, 90, 58], [320, 82, 55], [30, 95, 60], [50, 90, 62]],
+    ocean:  [[185, 92, 60], [205, 90, 62], [225, 85, 64], [250, 75, 64], [270, 68, 62]],
+    neon:   [[0, 95, 62], [72, 90, 60], [144, 88, 60], [216, 92, 64], [288, 94, 64]],
+    sunset: [[10, 95, 60], [330, 88, 62], [280, 75, 60], [40, 95, 64], [190, 70, 60]],
+    ice:    [[185, 88, 58], [205, 84, 60], [225, 80, 60], [250, 76, 58], [270, 72, 56]],
+    gold:   [[35, 95, 62], [15, 92, 58], [55, 90, 66], [350, 85, 58], [70, 85, 62]],
+  };
+  function parseColors() {
+    const raw = params.get('colors');
+    if (!raw) return null;
+    const out = raw.split(';').map((t) => t.split(',').map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite));
+    return out.length >= 2 ? out : null;
+  }
+  function resolvePalette() {
+    const raw = params.get('palette');
+    if (raw && palettes[raw]) return raw;
+    if (raw !== null && raw !== '') { const i = parseInt(raw, 10); if (Number.isFinite(i)) return paletteNames[((i % 7) + 7) % 7]; }
+    return paletteNames[SEED % paletteNames.length];
+  }
+  const PAL = parseColors() || palettes[resolvePalette()];
+
+  // ---- Three crystal grains, each with its own Ewald ring -------------------
+  const NG = 3;
+  const cellW = W / NG;
+  const Rg = 0.5 * Math.min(cellW, H);       // grain (crystal) disk radius
+  const BEAM = rand(0, Math.PI * 2);           // beam direction, shared by all grains
+  const UX = Math.cos(BEAM), UY = Math.sin(BEAM);
+  const NLIT = Math.round(30 * DENSITY);       // spots lit per grain, fixed
+  const DOT = 0.5;                              // dot radius as a fraction of the lattice constant
+
+  const GRAINS = [];
+  for (let g = 0; g < NG; g++) {
+    const hex = rng() < 0.6;
+    const s = Rg * rand(0.23, 0.28);            // reciprocal lattice constant
+    // reciprocal basis vectors
+    const b1 = [s, 0];
+    const b2 = hex ? [s * 0.5, s * Math.sqrt(3) / 2] : [0, s];
+    // two-atom basis, fractional coordinates
+    const x2 = rand(0.2, 0.8), y2 = rand(0.2, 0.8);
+    const f1 = 1.0, f2 = rand(0.45, 1.0);
+    // enumerate reflections inside the grain disk
+    const cand = [];
+    let Imax = 0;
+    const M = 12;
+    for (let h = -M; h <= M; h++) for (let k = -M; k <= M; k++) {
+      if (h === 0 && k === 0) continue;
+      const Gx = h * b1[0] + k * b2[0], Gy = h * b1[1] + k * b2[1];
+      const len = Math.hypot(Gx, Gy);
+      if (len > Rg * 0.95) continue;
+      const ph = 2 * Math.PI * (h * x2 + k * y2);
+      const I = f1 * f1 + f2 * f2 + 2 * f1 * f2 * Math.cos(ph);
+      cand.push({ h, k, x: Gx, y: Gy, len, I });
+      if (I > Imax) Imax = I;
+    }
+    // origin (direct beam) always present
+    cand.push({ h: 0, k: 0, x: 0, y: 0, len: 0, I: (f1 + f2) * (f1 + f2) });
+    if ((f1 + f2) * (f1 + f2) > Imax) Imax = (f1 + f2) * (f1 + f2);
+    // drop extinct / near-extinct reflections
+    const live = cand.filter((c) => c.I > 0.12 * Imax);
+    for (const c of live) {
+      c.rel = c.I / Imax;
+      c.pal = Math.floor((c.len / s) * (c.len / s) + 0.5) % PAL.length; // shell index, rotation-invariant
+    }
+    GRAINS.push({
+      cx: (g + 0.5) * cellW + rand(-0.03, 0.03) * cellW,
+      cy: H / 2 + rand(-0.05, 0.05) * H,
+      s, spots: live,
+      K: Rg * rand(0.72, 0.95),                  // Ewald ring radius
+      w0: rand(0, Math.PI * 2),                  // initial crystal orientation
+      // guaranteed-minimum rotation rate, random sign, distinct per grain
+      omega: sgn() * rand(0.45, 0.85),
+      palOff: (g + Math.floor(rand(0, PAL.length))) % PAL.length,
+    });
+  }
+
+  // Spot lit when its reciprocal point sits close to the Ewald circle. The circle
+  // has radius K and centre (-K*u) relative to the grain centre, so it passes
+  // through the origin. Returns the NLIT candidates nearest the ring.
+  function litSpots(gr, t) {
+    const th = gr.w0 + gr.omega * SPEED * t;
+    const c = Math.cos(th), sn = Math.sin(th);
+    const scored = gr.spots.map((sp) => {
+      const x = sp.x * c - sp.y * sn, y = sp.x * sn + sp.y * c;
+      const d = Math.abs(Math.hypot(x + gr.K * UX, y + gr.K * UY) - gr.K);
+      return { sp, x, y, d };
+    });
+    scored.sort((a, b) => a.d - b.d);
+    return scored.slice(0, Math.min(NLIT, scored.length));
+  }
+
+  function hsl(c, a) {
+    return `hsla(${c[0]}, ${c[1]}%, ${c[2]}%, ${a})`;
+  }
+  function hexPath(x, y, r) {
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = (Math.PI / 3) * i + Math.PI / 6;
+      const px = x + r * Math.cos(a), py = y + r * Math.sin(a);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+  }
+
+  function renderAt(t) {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    for (let gi = 0; gi < GRAINS.length; gi++) {
+      const gr = GRAINS[gi];
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(gr.cx, gr.cy, Rg, 0, Math.PI * 2);
+      ctx.clip();
+      // Ewald ring: centre at grain origin minus K*u, radius K.
+      const rc = PAL[(gr.palOff + 2) % PAL.length];
+      const ringX = gr.cx - gr.K * UX, ringY = gr.cy - gr.K * UY;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = hsl(rc, 0.22);
+      ctx.lineWidth = 10;
+      ctx.beginPath(); ctx.arc(ringX, ringY, gr.K, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = hsl(rc, 0.95);
+      ctx.lineWidth = 2.2;
+      ctx.beginPath(); ctx.arc(ringX, ringY, gr.K, 0, Math.PI * 2); ctx.stroke();
+      // Lit diffraction spots (hexagonal, glow underlay then core).
+      const lit = litSpots(gr, t);
+      for (const L of lit) {
+        const sp = L.sp;
+        const col = PAL[(gr.palOff + sp.pal) % PAL.length];
+        const r = gr.s * DOT * (0.55 + 0.45 * sp.rel);
+        const px = gr.cx + L.x, py = gr.cy + L.y;
+        ctx.fillStyle = hsl(col, 0.22);
+        hexPath(px, py, r * 1.55);
+        ctx.fill();
+        ctx.fillStyle = hsl(col, 0.98);
+        hexPath(px, py, r);
+        ctx.fill();
+      }
+      ctx.restore();
+      // grain boundary
+      ctx.strokeStyle = hsl(PAL[gr.palOff], 0.3);
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(gr.cx, gr.cy, Rg, 0, Math.PI * 2); ctx.stroke();
+      // direct-beam spot at the grain origin
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(gr.cx, gr.cy, 3.2, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  window.TOTAL_FRAMES = Math.max(1, Math.round(DURATION * FPS));
+  window.currentFrame = 0;
+
+  window.advanceFrame = function () {
+    renderAt(window.currentFrame / FPS);
+    window.currentFrame++;
+  };
+  window.advanceFrames = function (n) { for (let i = 0; i < n; i++) window.advanceFrame(); };
+  window.READY = true;
+})();
+</script>
+</body>
+</html>
